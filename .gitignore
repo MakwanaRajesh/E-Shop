@@ -1,0 +1,30 @@
+## .NET
+bin/
+obj/
+*.user
+.vs/
+*.suo
+*.sln.docstates
+
+## EF Migrations temp
+*.db
+
+## Secrets - NEVER commit these
+appsettings.Production.json
+**/secrets.json
+
+## Logs
+logs/
+*.log
+Serilog*.txt
+
+## Frontend
+frontend/node_modules/
+frontend/.next/
+frontend/.env.local
+frontend/.env.production
+
+## OS
+.DS_Store
+Thumbs.db
+desktop.ini
