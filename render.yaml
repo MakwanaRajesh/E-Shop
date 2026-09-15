@@ -1,0 +1,19 @@
+﻿services:
+  - type: web
+    name: nexus-eshop-api
+    runtime: docker
+    plan: free
+    region: singapore
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: ASPNETCORE_ENVIRONMENT
+        value: Production
+      - key: ConnectionStrings__DefaultConnection
+        value: Host=ep-hidden-resonance-b32jacvt-pooler.c-4.ap-southeast-1.aws.neon.tech;Database=neondb;Username=neondb_owner;Password=npg_WoAmZSXk7Tx9;SSL Mode=Require;Trust Server Certificate=true;Channel Binding=require
+      - key: Jwt__Key
+        generateValue: true
+      - key: Jwt__Issuer
+        value: EShopAPI
+      - key: Jwt__Audience
+        value: EShopClient

@@ -150,7 +150,7 @@ public static class DbInitializer
                     Tags = "watch,tourbillon,gold,horology,collector",
                     Images =
                     [
-                        new ProductImage { Url = "https://images.unsplash.com/photo-1547996160-71dfabb1a7b1?w=800&q=80", IsPrimary = true, SortOrder = 1, AltText = "Nexus Grand Tourbillon" },
+                        new ProductImage { Url = "https://images.unsplash.com/photo-1523293182086-7651a899d37f?w=800&q=80", IsPrimary = true, SortOrder = 1, AltText = "Nexus Grand Tourbillon" },
                         new ProductImage { Url = "https://images.unsplash.com/photo-1539185441755-769473a23570?w=800&q=80", IsPrimary = false, SortOrder = 2, AltText = "Nexus Grand Tourbillon angle" },
                     ]
                 },
@@ -241,7 +241,7 @@ public static class DbInitializer
                     Tags = "perfume,oud,noir,niche,fragrance",
                     Images =
                     [
-                        new ProductImage { Url = "https://images.unsplash.com/photo-1541643600914-78b084683702?w=800&q=80", IsPrimary = true, SortOrder = 1, AltText = "Nexus Noir Extrait" },
+                        new ProductImage { Url = "https://images.unsplash.com/photo-1587837073080-448bc6a2329b?w=800&q=80", IsPrimary = true, SortOrder = 1, AltText = "Nexus Noir Extrait" },
                         new ProductImage { Url = "https://images.unsplash.com/photo-1592945403244-b3fbafd7f539?w=800&q=80", IsPrimary = false, SortOrder = 2, AltText = "Nexus Noir Bottle closeup" },
                     ]
                 },
