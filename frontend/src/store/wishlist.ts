@@ -21,8 +21,9 @@ export const useWishlistStore = create<WishlistState>()(
       fetchWishlist: async () => {
         set({ isLoading: true })
         try {
-          const { data } = await api.get<{ items: WishlistItem[] }>('/api/wishlist')
-          set({ items: data.items })
+          const { data } = await api.get<any>('/api/wishlist')
+          const list = Array.isArray(data) ? data : (data?.items ?? [])
+          set({ items: list })
         } catch {
           set({ items: [] })
         } finally {
@@ -32,12 +33,10 @@ export const useWishlistStore = create<WishlistState>()(
 
       addItem: async (productId: string) => {
         try {
-          const { data } = await api.post<{ items: WishlistItem[] }>('/api/wishlist', {
-            productId,
-          })
-          set({ items: data.items })
+          await api.post(`/api/wishlist/${productId}`, { productId })
+          await get().fetchWishlist()
         } catch {
-          // Optimistic update will be reverted if needed
+          // Keep current state on error
         }
       },
 

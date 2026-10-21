@@ -80,7 +80,7 @@ export default function CheckoutPage() {
       // 2. Place order
       const orderRes = await api.post('/api/orders', {
         addressId: addrRes.data.id,
-        paymentMethod: paymentMethod === 'cod' ? 0 : 1, // Order Enums: COD=0, Razorpay=1
+        paymentMethod: paymentMethod === 'cod' ? 1 : 0, // Order Enums: Razorpay=0, CashOnDelivery=1
         couponCode: cart.couponCode ?? null,
       })
 

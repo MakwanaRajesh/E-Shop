@@ -27,14 +27,29 @@ public class RateLimitingMiddleware(RequestDelegate next, IMemoryCache cache)
 
     public async Task InvokeAsync(HttpContext context)
     {
-        var ip = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+        // Bypass rate limiting for CORS preflight and health checks
+        if (context.Request.Method.Equals("OPTIONS", StringComparison.OrdinalIgnoreCase) ||
+            context.Request.Path.StartsWithSegments("/health"))
+        {
+            await _next(context);
+            return;
+        }
+
+        // Extract real client IP (Cloudflare / Reverse Proxy support)
+        var ip = context.Request.Headers["CF-Connecting-IP"].FirstOrDefault()
+                 ?? context.Request.Headers["X-Forwarded-For"].FirstOrDefault()?.Split(',')[0].Trim()
+                 ?? context.Connection.RemoteIpAddress?.ToString()
+                 ?? "unknown";
 
         // Check if IP is currently hard-blocked
         if (_cache.TryGetValue($"block:{ip}", out _))
         {
-            context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
-            context.Response.Headers["Retry-After"] = ((int)BlockDuration.TotalSeconds).ToString();
-            await context.Response.WriteAsJsonAsync(new { message = "Too many requests. Your IP has been temporarily blocked." });
+            if (!context.Response.HasStarted)
+            {
+                context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+                context.Response.Headers["Retry-After"] = ((int)BlockDuration.TotalSeconds).ToString();
+                await context.Response.WriteAsJsonAsync(new { message = "Too many requests. Your IP has been temporarily blocked." });
+            }
             return;
         }
 
@@ -55,9 +70,12 @@ public class RateLimitingMiddleware(RequestDelegate next, IMemoryCache cache)
 
         if (count > limit)
         {
-            context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
-            context.Response.Headers["Retry-After"] = ((int)Window.TotalSeconds).ToString();
-            await context.Response.WriteAsJsonAsync(new { message = $"Rate limit exceeded. Max {limit} requests per minute." });
+            if (!context.Response.HasStarted)
+            {
+                context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+                context.Response.Headers["Retry-After"] = ((int)Window.TotalSeconds).ToString();
+                await context.Response.WriteAsJsonAsync(new { message = $"Rate limit exceeded. Max {limit} requests per minute." });
+            }
             return;
         }
 
@@ -73,9 +91,12 @@ public class RateLimitingMiddleware(RequestDelegate next, IMemoryCache cache)
         if (blockCount > BlockThreshold)
         {
             _cache.Set($"block:{ip}", true, BlockDuration);
-            context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
-            context.Response.Headers["Retry-After"] = ((int)BlockDuration.TotalSeconds).ToString();
-            await context.Response.WriteAsJsonAsync(new { message = "Too many requests. Your IP has been temporarily blocked." });
+            if (!context.Response.HasStarted)
+            {
+                context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+                context.Response.Headers["Retry-After"] = ((int)BlockDuration.TotalSeconds).ToString();
+                await context.Response.WriteAsJsonAsync(new { message = "Too many requests. Your IP has been temporarily blocked." });
+            }
             return;
         }
 

@@ -51,7 +51,7 @@ public class ReviewsController(AppDbContext db, IUnitOfWork uow) : ControllerBas
             .AsNoTracking()
             .Include(o => o.Items)
             .AnyAsync(o => o.UserId == userId &&
-                           o.PaymentStatus == EShop.Core.Enums.PaymentStatus.Completed &&
+                           (o.PaymentStatus == EShop.Core.Enums.PaymentStatus.Completed || o.Status == EShop.Core.Enums.OrderStatus.Delivered) &&
                            o.Items.Any(i => i.ProductId == req.ProductId));
 
         var review = new Review

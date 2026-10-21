@@ -55,7 +55,11 @@ export function AuthModal() {
   const onRegister = async (
     data: RegisterRequest & { confirmPassword: string; agreeToTerms: boolean },
   ) => {
-    const { confirmPassword: _c, agreeToTerms: _a, ...payload } = data
+    const { confirmPassword: _c, agreeToTerms: _a, ...rest } = data
+    const payload = {
+      ...rest,
+      phoneNumber: rest.phone,
+    }
     try {
       const response = await api.post<AuthResponse>('/api/auth/register', payload)
       login(response.data)
@@ -84,7 +88,7 @@ export function AuthModal() {
                 <div>
                   <h2 className="font-serif text-2xl font-bold text-beige">
                     Welcome to{' '}
-                    <span className="gold-text-gradient">Luxe Store</span>
+                    <span className="gold-text-gradient">NEXUS</span>
                   </h2>
                   <p className="text-sm text-beige-muted mt-1">
                     Sign in to unlock your full experience

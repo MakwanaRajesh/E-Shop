@@ -2,6 +2,7 @@
 
 import React from 'react'
 import Image from 'next/image'
+import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import {
   Star,
@@ -138,9 +139,9 @@ export default function ProductDetailPage({ params }: Props) {
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
       {/* Breadcrumb */}
       <nav className="flex items-center gap-2 text-sm text-beige-muted mb-8">
-        <a href="/" className="hover:text-gold transition-colors">Home</a>
+        <Link href="/" className="hover:text-gold transition-colors">Home</Link>
         <ChevronRight className="w-3.5 h-3.5" />
-        <a href="/products" className="hover:text-gold transition-colors">Products</a>
+        <Link href="/products" className="hover:text-gold transition-colors">Products</Link>
         <ChevronRight className="w-3.5 h-3.5" />
         <span className="text-gold font-medium">{categoryName}</span>
         <ChevronRight className="w-3.5 h-3.5" />

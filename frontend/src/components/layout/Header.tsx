@@ -62,7 +62,7 @@ export function Header() {
     }
   }
 
-  const cartCount = cart?.itemCount ?? 0
+  const cartCount = cart?.itemCount ?? (cart as any)?.totalItems ?? cart?.items?.reduce((sum, i) => sum + i.quantity, 0) ?? 0
   const wishlistCount = wishlistItems.length
 
   return (

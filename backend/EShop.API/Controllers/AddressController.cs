@@ -53,6 +53,7 @@ public class AddressController(AppDbContext db, IUnitOfWork uow) : ControllerBas
             PinCode      = req.PinCode.Trim(),
             Landmark     = req.Landmark?.Trim(),
             AddressType  = req.AddressType.Trim(),
+            Country      = req.Country?.Trim() ?? "India",
             IsDefault    = req.IsDefault
         };
 
@@ -84,6 +85,7 @@ public class AddressController(AppDbContext db, IUnitOfWork uow) : ControllerBas
         address.PinCode      = req.PinCode.Trim();
         address.Landmark     = req.Landmark?.Trim();
         address.AddressType  = req.AddressType.Trim();
+        address.Country      = req.Country?.Trim() ?? address.Country;
         address.IsDefault    = req.IsDefault;
 
         _db.Addresses.Update(address);

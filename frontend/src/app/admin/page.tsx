@@ -106,7 +106,10 @@ export default function AdminDashboardPage() {
 
   const handleToggleProduct = async (prodId: string) => {
     try {
-      await api.patch(`/api/admin/products/${prodId}/toggle`)
+      const res = await api.patch<{ isActive: boolean }>(`/api/admin/products/${prodId}/toggle`)
+      setProducts((prev) =>
+        prev.map((p) => (p.id === prodId ? { ...p, isActive: res.data.isActive } : p))
+      )
       toast.success('Product status toggled')
     } catch {
       toast.error('Failed to toggle product status')
@@ -291,7 +294,9 @@ export default function AdminDashboardPage() {
                         </span>
                       </td>
                       <td className="py-3.5 px-4">
-                        <Badge variant="gold">Active</Badge>
+                        <Badge variant={p.isActive !== false ? 'gold' : 'error'}>
+                          {p.isActive !== false ? 'Active' : 'Inactive'}
+                        </Badge>
                       </td>
                       <td className="py-3.5 px-4 text-right">
                         <Button variant="ghost" size="sm" onClick={() => handleToggleProduct(p.id)}>

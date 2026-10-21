@@ -5,8 +5,12 @@ public record RegisterRequest(
     string LastName,
     string Email,
     string Password,
-    string? PhoneNumber
-);
+    string? PhoneNumber,
+    string? Phone = null
+)
+{
+    public string? EffectivePhone => PhoneNumber ?? Phone;
+}
 
 public record LoginRequest(
     string Email,

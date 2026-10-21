@@ -63,10 +63,25 @@ var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("EShopPolicy", policy =>
-        policy.WithOrigins(allowedOrigins)
-              .AllowAnyHeader()
-              .AllowAnyMethod()
-              .AllowCredentials()
+        policy.SetIsOriginAllowed(origin =>
+        {
+            if (string.IsNullOrWhiteSpace(origin)) return false;
+            if (allowedOrigins.Contains(origin)) return true;
+            try
+            {
+                var uri = new Uri(origin);
+                return uri.Host == "localhost"
+                    || uri.Host.EndsWith(".vercel.app")
+                    || uri.Host == "vercel.app";
+            }
+            catch
+            {
+                return false;
+            }
+        })
+        .AllowAnyHeader()
+        .AllowAnyMethod()
+        .AllowCredentials()
     );
 });
 
@@ -76,6 +91,8 @@ builder.Services.AddControllers()
     {
         opt.JsonSerializerOptions.DefaultIgnoreCondition =
             System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull;
+        opt.JsonSerializerOptions.Converters.Add(
+            new System.Text.Json.Serialization.JsonStringEnumConverter());
     });
 
 // ── Swagger ───────────────────────────────────────────────────────────────────
@@ -134,22 +151,24 @@ using (var scope = app.Services.CreateScope())
 }
 
 // ── Middleware pipeline ───────────────────────────────────────────────────────
-if (app.Environment.IsDevelopment())
+app.UseForwardedHeaders(new ForwardedHeadersOptions
 {
-    app.UseSwagger();
-    app.UseSwaggerUI(c =>
-    {
-        c.SwaggerEndpoint("/swagger/v1/swagger.json", "EShop API v1");
-        c.RoutePrefix = "swagger";
-    });
-}
+    ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor
+                     | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto
+});
+
+app.UseSwagger();
+app.UseSwaggerUI(c =>
+{
+    c.SwaggerEndpoint("/swagger/v1/swagger.json", "EShop API v1");
+    c.RoutePrefix = "swagger";
+});
 
 app.UseMiddleware<EShop.API.Middleware.GlobalExceptionMiddleware>();
+app.UseCors("EShopPolicy");
 app.UseMiddleware<EShop.API.Middleware.RateLimitingMiddleware>();
 
 app.UseSerilogRequestLogging();
-app.UseHttpsRedirection();
-app.UseCors("EShopPolicy");
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();

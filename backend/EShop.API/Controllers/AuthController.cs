@@ -34,7 +34,7 @@ public class AuthController(
             LastName     = req.LastName.Trim(),
             Email        = req.Email.Trim().ToLower(),
             PasswordHash = BCrypt.Net.BCrypt.HashPassword(req.Password),
-            PhoneNumber  = req.PhoneNumber?.Trim()
+            PhoneNumber  = req.EffectivePhone?.Trim()
         };
 
         var refreshToken = _tokenService.GenerateRefreshToken();
@@ -76,27 +76,18 @@ public class AuthController(
     [HttpPost("refresh")]
     public async Task<IActionResult> Refresh([FromBody] RefreshRequest req)
     {
-        ClaimsPrincipal principal;
-        try
-        {
-            principal = _tokenService.GetPrincipalFromExpiredToken(req.RefreshToken);
-        }
-        catch
-        {
-            return Unauthorized(new { message = "Invalid token." });
-        }
+        if (string.IsNullOrWhiteSpace(req.RefreshToken))
+            return Unauthorized(new { message = "Refresh token is required." });
 
-        // The refresh token is stored on the User; validate it directly
-        var userIdClaim = principal.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-        if (!Guid.TryParse(userIdClaim, out var userId))
-            return Unauthorized(new { message = "Invalid token." });
-
-        var user = await _db.Users.FindAsync(userId);
-        if (user is null ||
-            user.RefreshToken != req.RefreshToken ||
-            user.RefreshTokenExpiry < DateTime.UtcNow)
+        var user = await _db.Users.FirstOrDefaultAsync(u => u.RefreshToken == req.RefreshToken);
+        if (user is null || !user.RefreshTokenExpiry.HasValue || user.RefreshTokenExpiry.Value < DateTime.UtcNow)
         {
             return Unauthorized(new { message = "Refresh token is invalid or has expired." });
+        }
+
+        if (!user.IsActive)
+        {
+            return Unauthorized(new { message = "Account is disabled. Please contact support." });
         }
 
         var newAccessToken  = _tokenService.GenerateAccessToken(user);

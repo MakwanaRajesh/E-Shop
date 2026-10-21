@@ -30,7 +30,7 @@ const FEATURED_CATEGORIES = [
     slug: 'fragrances',
     description: 'Signature scents that tell your story',
     gradient: 'from-gold-dark/10 to-surface',
-    imageUrl: 'https://images.unsplash.com/photo-1541643600914-78b084683702?w=600&q=80',
+    imageUrl: 'https://images.unsplash.com/photo-1587837073080-448bc6a2329b?w=600&q=80',
   },
 ]
 

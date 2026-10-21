@@ -53,9 +53,10 @@ export default function CartPage() {
     if (!couponCode.trim()) return
     setCouponLoading(true)
     try {
+      const subtotalVal = (cart as any)?.subTotal ?? cart?.subtotal ?? 0
       const { data } = await api.post<CouponValidation>('/api/coupons/validate', {
         code: couponCode.trim(),
-        cartTotal: cart?.subtotal ?? 0,
+        cartTotal: subtotalVal,
       })
       setCouponResult(data)
       if (data.isValid) {
@@ -128,15 +129,17 @@ export default function CartPage() {
     )
   }
 
+  const subtotal = cart.subtotal ?? (cart as any).subTotal ?? 0
+  const itemCount = cart.itemCount ?? (cart as any).totalItems ?? cart.items?.reduce((s, i) => s + i.quantity, 0) ?? 0
   const discount = couponResult?.isValid ? couponResult.discountAmount : 0
-  const finalTotal = cart.subtotal - discount
+  const finalTotal = Math.max(0, subtotal - discount)
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
       <h1 className="font-serif text-4xl font-bold text-beige mb-8">
         Shopping Cart
         <span className="text-xl text-beige-muted font-normal ml-3">
-          ({cart.itemCount} {cart.itemCount === 1 ? 'item' : 'items'})
+          ({itemCount} {itemCount === 1 ? 'item' : 'items'})
         </span>
       </h1>
 
@@ -268,8 +271,8 @@ export default function CartPage() {
             {/* Breakdown */}
             <div className="space-y-3 text-sm">
               <div className="flex justify-between">
-                <span className="text-beige-muted">Subtotal ({cart.itemCount} items)</span>
-                <span className="text-beige">{formatCurrency(cart.subtotal)}</span>
+                <span className="text-beige-muted">Subtotal ({itemCount} items)</span>
+                <span className="text-beige">{formatCurrency(subtotal)}</span>
               </div>
               {discount > 0 && (
                 <div className="flex justify-between text-success">

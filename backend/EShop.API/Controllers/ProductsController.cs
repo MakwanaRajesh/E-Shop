@@ -29,8 +29,11 @@ public class ProductsController(AppDbContext db, IUnitOfWork uow) : ControllerBa
             .Where(p => p.IsActive);
 
         if (!string.IsNullOrWhiteSpace(q.Search))
-            query = query.Where(p => p.Name.Contains(q.Search) ||
-                                     (p.Tags != null && p.Tags.Contains(q.Search)));
+        {
+            var pattern = $"%{q.Search.Trim()}%";
+            query = query.Where(p => EF.Functions.ILike(p.Name, pattern) ||
+                                     (p.Tags != null && EF.Functions.ILike(p.Tags, pattern)));
+        }
 
         if (q.CategoryId.HasValue)
             query = query.Where(p => p.CategoryId == q.CategoryId.Value);
@@ -52,6 +55,8 @@ public class ProductsController(AppDbContext db, IUnitOfWork uow) : ControllerBa
             "price_asc"  => query.OrderBy(p => p.Price),
             "price_desc" => query.OrderByDescending(p => p.Price),
             "name"       => query.OrderBy(p => p.Name),
+            "popular"    => query.OrderByDescending(p => p.Reviews.Count),
+            "rating"     => query.OrderByDescending(p => p.Reviews.Any() ? p.Reviews.Average(r => r.Rating) : 0),
             _            => query.OrderByDescending(p => p.CreatedAt) // newest
         };
 

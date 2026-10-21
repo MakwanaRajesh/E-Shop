@@ -25,5 +25,6 @@ public record CreateAddressRequest(
     string PinCode,
     string? Landmark,
     string AddressType,
-    bool IsDefault
+    bool IsDefault,
+    string? Country = "India"
 );

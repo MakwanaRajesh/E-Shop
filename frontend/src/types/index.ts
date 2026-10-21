@@ -29,6 +29,7 @@ export interface RegisterRequest {
   email: string
   password: string
   phone?: string
+  phoneNumber?: string
 }
 
 export interface RefreshTokenRequest {
@@ -116,6 +117,7 @@ export interface ProductListItem {
   stockQuantity?: number
   stock?: number
   isFeatured: boolean
+  isActive?: boolean
 }
 
 // ─── Cart ─────────────────────────────────────────────────────────────────────

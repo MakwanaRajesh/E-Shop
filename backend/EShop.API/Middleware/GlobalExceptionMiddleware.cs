@@ -27,6 +27,8 @@ public class GlobalExceptionMiddleware(RequestDelegate next)
 
     private static async Task HandleExceptionAsync(HttpContext context, Exception exception)
     {
+        if (context.Response.HasStarted) return;
+
         var (statusCode, title) = exception switch
         {
             FluentValidation.ValidationException => (HttpStatusCode.BadRequest,       "Validation failed"),

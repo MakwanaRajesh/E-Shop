@@ -58,12 +58,20 @@ public class WishlistController(AppDbContext db, IUnitOfWork uow) : ControllerBa
             }
         });
 
-        return Ok(dtos);
+        var dtoList = dtos.ToList();
+        return Ok(new { items = dtoList, total = dtoList.Count });
     }
 
-    // ── POST /api/wishlist/{productId} ────────────────────────────────────────
+    // ── POST /api/wishlist (Body or Route) ────────────────────────────────────
+    [HttpPost]
+    public async Task<IActionResult> AddToWishlistFromBody([FromBody] AddWishlistRequest req) =>
+        await AddItemInternal(req.ProductId);
+
     [HttpPost("{productId:guid}")]
-    public async Task<IActionResult> AddToWishlist(Guid productId)
+    public async Task<IActionResult> AddToWishlist(Guid productId) =>
+        await AddItemInternal(productId);
+
+    private async Task<IActionResult> AddItemInternal(Guid productId)
     {
         var userId  = GetCurrentUserId();
         var product = await _db.Products.FindAsync(productId);
@@ -81,7 +89,7 @@ public class WishlistController(AppDbContext db, IUnitOfWork uow) : ControllerBa
         await _db.WishlistItems.AddAsync(item);
         await _uow.SaveChangesAsync();
 
-        return Ok(new { message = "Product added to wishlist.", id = item.Id });
+        return Ok(new { message = "Product added to wishlist.", id = item.Id, productId = productId });
     }
 
     // ── DELETE /api/wishlist/{productId} ──────────────────────────────────────
@@ -107,3 +115,5 @@ public class WishlistController(AppDbContext db, IUnitOfWork uow) : ControllerBa
         return Guid.TryParse(raw, out var id) ? id : Guid.Empty;
     }
 }
+
+public record AddWishlistRequest(Guid ProductId);

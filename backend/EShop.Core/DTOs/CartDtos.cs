@@ -5,7 +5,11 @@ public record CartDto(
     List<CartItemDto> Items,
     decimal SubTotal,
     int TotalItems
-);
+)
+{
+    public decimal Subtotal => SubTotal;
+    public int ItemCount => TotalItems;
+}
 
 public record CartItemDto(
     Guid Id,
