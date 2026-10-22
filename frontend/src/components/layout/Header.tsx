@@ -130,8 +130,8 @@ export function Header() {
             </Link>
 
             {/* Cart */}
-            <Link
-              href="/cart"
+            <button
+              onClick={() => setCartOpen(true)}
               className="relative w-9 h-9 flex items-center justify-center rounded text-beige-muted hover:text-beige hover:bg-surface-2 transition-colors"
               aria-label="Cart"
             >
@@ -141,7 +141,7 @@ export function Header() {
                   {cartCount > 99 ? '99+' : cartCount}
                 </span>
               )}
-            </Link>
+            </button>
 
             {/* Account */}
             {isAuthenticated && user ? (
@@ -283,9 +283,8 @@ export function Header() {
                   </span>
                 )}
               </Link>
-              <Link
-                href="/cart"
-                onClick={() => setMobileOpen(false)}
+              <button
+                onClick={() => { setMobileOpen(false); setCartOpen(true) }}
                 className="relative flex items-center gap-2 text-sm text-beige-muted hover:text-beige px-4 py-2"
               >
                 <ShoppingCart className="w-4 h-4" />
@@ -295,7 +294,7 @@ export function Header() {
                     {cartCount}
                   </span>
                 )}
-              </Link>
+              </button>
             </div>
             {isAuthenticated ? (
               <button

@@ -15,6 +15,7 @@ import {
   ChevronRight,
   Minus,
   Plus,
+  Sparkles,
 } from 'lucide-react'
 import * as Accordion from '@radix-ui/react-accordion'
 import { Button } from '@/components/ui/Button'
@@ -45,6 +46,17 @@ export default function ProductDetailPage({ params }: Props) {
   const [selectedVariantId, setSelectedVariantId] = React.useState<string | undefined>()
   const [quantity, setQuantity] = React.useState(1)
   const [isAddingToCart, setIsAddingToCart] = React.useState(false)
+  const [pincode, setPincode] = React.useState('')
+  const [pincodeStatus, setPincodeStatus] = React.useState<string | null>(null)
+
+  const handleCheckPincode = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (/^\d{6}$/.test(pincode.trim())) {
+      setPincodeStatus(`✓ Delivery available to ${pincode.trim()} in 2-3 business days. Cash on Delivery supported.`)
+    } else {
+      setPincodeStatus('Invalid PIN code. Please enter 6 digits.')
+    }
+  }
 
   const { isAuthenticated } = useAuthStore()
   const { addItem } = useCartStore()
@@ -309,12 +321,54 @@ export default function ProductDetailPage({ params }: Props) {
             )}
           </div>
 
+          {/* Promotional Offers Strip (SHEIN / AJIO Style) */}
+          <div className="bg-gradient-to-r from-gold/15 via-surface-2 to-gold/5 border border-gold/30 rounded-xl p-3.5 space-y-1.5 text-xs">
+            <div className="flex items-center gap-2 text-gold font-semibold">
+              <Sparkles className="w-4 h-4 text-gold flex-shrink-0" />
+              <span>Special Privileges & Offers</span>
+            </div>
+            <p className="text-beige-muted">
+              • Apply code <span className="font-mono text-gold font-bold">NEXUS10</span> for 10% instant discount at checkout.
+            </p>
+            <p className="text-beige-muted">
+              • Complimentary white-glove doorstep delivery on all orders over ₹5,000.
+            </p>
+          </div>
+
           {/* Short description */}
           {product.shortDescription && (
             <p className="text-beige-muted leading-relaxed text-sm">
               {product.shortDescription}
             </p>
           )}
+
+          {/* Delivery & Pincode Checker (AJIO Style) */}
+          <div className="bg-surface-2/40 border border-border rounded-xl p-3.5 space-y-2">
+            <span className="text-xs font-semibold uppercase tracking-wider text-beige block">
+              Estimated Delivery & Services
+            </span>
+            <form onSubmit={handleCheckPincode} className="flex gap-2">
+              <input
+                type="text"
+                placeholder="Enter 6-digit PIN code..."
+                maxLength={6}
+                value={pincode}
+                onChange={(e) => setPincode(e.target.value.replace(/\D/g, ''))}
+                className="bg-surface border border-border rounded-lg px-3 py-1.5 text-xs text-beige placeholder:text-beige-muted/50 focus:outline-none focus:border-gold w-44 font-mono"
+              />
+              <button
+                type="submit"
+                className="text-xs font-semibold px-3 py-1.5 bg-gold text-background rounded-lg hover:bg-gold-light transition-colors"
+              >
+                Check
+              </button>
+            </form>
+            {pincodeStatus && (
+              <p className={`text-xs ${pincodeStatus.startsWith('✓') ? 'text-success' : 'text-error'}`}>
+                {pincodeStatus}
+              </p>
+            )}
+          </div>
 
           {/* Variants */}
           {product.variants.length > 0 && (

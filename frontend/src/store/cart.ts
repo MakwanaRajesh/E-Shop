@@ -45,8 +45,8 @@ const isAuth = (): boolean => {
 }
 
 const recalculateCart = (items: CartItem[]): Cart => {
-  const subTotal = items.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0)
-  const totalItems = items.reduce((sum, item) => sum + item.quantity, 0)
+  const subTotal = items.reduce((sum, item) => sum + (item.unitPrice || 0) * (item.quantity || 1), 0)
+  const totalItems = items.reduce((sum, item) => sum + (item.quantity || 1), 0)
   return {
     id: 'guest-cart',
     items,
@@ -68,10 +68,7 @@ export const useCartStore = create<CartState>()(
       isLoading: false,
 
       fetchCart: async () => {
-        if (!isAuth()) {
-          // Keep current local guest cart
-          return
-        }
+        if (!isAuth()) return
         set({ isLoading: true })
         try {
           const { data } = await api.get<any>('/api/cart')
@@ -90,148 +87,139 @@ export const useCartStore = create<CartState>()(
             set({ cart: normalized })
           }
         } catch {
-          // If server fails or user has empty cart
+          // If server fails or is cold starting, retain existing local cart
         } finally {
           set({ isLoading: false })
         }
       },
 
       addItem: async (productId: string, quantity = 1, variantId?: string, meta?: ProductMeta) => {
-        set({ isLoading: true })
-        try {
-          if (isAuth()) {
+        // 1. Instant Optimistic Local Update (SHEIN / AJIO pattern)
+        const currentCart = get().cart
+        const existingItems = currentCart?.items ? [...currentCart.items] : []
+        const existingIdx = existingItems.findIndex(
+          (i) => i.productId === productId && (variantId ? i.variantId === variantId : true),
+        )
+
+        const unitPrice = meta?.price ?? 0
+        if (existingIdx >= 0) {
+          const current = existingItems[existingIdx]
+          const newQty = current.quantity + quantity
+          existingItems[existingIdx] = {
+            ...current,
+            quantity: newQty,
+            totalPrice: current.unitPrice * newQty,
+          }
+        } else {
+          const newItem: CartItem = {
+            id: `item-${productId}-${variantId ?? 'main'}-${Date.now()}`,
+            productId,
+            productName: meta?.name ?? 'Luxury Product',
+            productSlug: meta?.slug ?? '',
+            productImageUrl: meta?.imageUrl,
+            variantId,
+            variantName: meta?.variantName,
+            variantValue: meta?.variantValue,
+            quantity,
+            unitPrice,
+            totalPrice: unitPrice * quantity,
+            availableStock: meta?.stock ?? 10,
+          }
+          existingItems.push(newItem)
+        }
+
+        // Immediately update state and open Slide-Over Mini Cart Drawer!
+        const optimisticCart = recalculateCart(existingItems)
+        set({ cart: optimisticCart, isOpen: true })
+
+        // 2. Background Server Sync (if authenticated)
+        if (isAuth()) {
+          try {
             const { data } = await api.post<any>('/api/cart/items', {
               productId,
               quantity,
-              variantId,
+              variantId: variantId || null,
             })
-            const normalized: Cart = {
-              id: data.id,
-              items: data.items ?? [],
-              subtotal: data.subTotal ?? data.subtotal ?? 0,
-              subTotal: data.subTotal ?? data.subtotal ?? 0,
-              total: data.subTotal ?? data.subtotal ?? 0,
-              itemCount: data.totalItems ?? data.itemCount ?? (data.items?.length || 0),
-              totalItems: data.totalItems ?? data.itemCount ?? (data.items?.length || 0),
-              createdAt: data.createdAt ?? new Date().toISOString(),
-              updatedAt: data.updatedAt ?? new Date().toISOString(),
-            }
-            set({ cart: normalized, isOpen: true })
-          } else {
-            // Guest local cart handling
-            const currentCart = get().cart
-            const existingItems = currentCart?.items ? [...currentCart.items] : []
-            const existingIdx = existingItems.findIndex(
-              (i) => i.productId === productId && (variantId ? i.variantId === variantId : true),
-            )
-
-            if (existingIdx >= 0) {
-              const current = existingItems[existingIdx]
-              const newQty = current.quantity + quantity
-              existingItems[existingIdx] = {
-                ...current,
-                quantity: newQty,
-                totalPrice: current.unitPrice * newQty,
+            if (data) {
+              const serverNormalized: Cart = {
+                id: data.id,
+                items: data.items ?? [],
+                subtotal: data.subTotal ?? data.subtotal ?? 0,
+                subTotal: data.subTotal ?? data.subtotal ?? 0,
+                total: data.subTotal ?? data.subtotal ?? 0,
+                itemCount: data.totalItems ?? data.itemCount ?? (data.items?.length || 0),
+                totalItems: data.totalItems ?? data.itemCount ?? (data.items?.length || 0),
+                createdAt: data.createdAt ?? new Date().toISOString(),
+                updatedAt: data.updatedAt ?? new Date().toISOString(),
               }
-            } else {
-              const price = meta?.price ?? 0
-              const newItem: CartItem = {
-                id: `guest-${productId}-${variantId ?? 'main'}-${Date.now()}`,
-                productId,
-                productName: meta?.name ?? 'Luxury Product',
-                productSlug: meta?.slug ?? '',
-                productImageUrl: meta?.imageUrl,
-                variantId,
-                variantName: meta?.variantName,
-                variantValue: meta?.variantValue,
-                quantity,
-                unitPrice: price,
-                totalPrice: price * quantity,
-                availableStock: meta?.stock ?? 10,
-              }
-              existingItems.push(newItem)
+              set({ cart: serverNormalized })
             }
-
-            const updatedCart = recalculateCart(existingItems)
-            set({ cart: updatedCart, isOpen: true })
+          } catch {
+            // Keep optimistic cart intact on network failure
           }
-        } finally {
-          set({ isLoading: false })
         }
       },
 
       updateItem: async (cartItemId: string, quantity: number) => {
         if (quantity < 1) return
-        set({ isLoading: true })
-        try {
-          if (isAuth()) {
-            const { data } = await api.put<any>(`/api/cart/items/${cartItemId}`, { quantity })
-            const normalized: Cart = {
-              id: data.id,
-              items: data.items ?? [],
-              subtotal: data.subTotal ?? data.subtotal ?? 0,
-              subTotal: data.subTotal ?? data.subtotal ?? 0,
-              total: data.subTotal ?? data.subtotal ?? 0,
-              itemCount: data.totalItems ?? data.itemCount ?? (data.items?.length || 0),
-              totalItems: data.totalItems ?? data.itemCount ?? (data.items?.length || 0),
-              createdAt: data.createdAt ?? new Date().toISOString(),
-              updatedAt: data.updatedAt ?? new Date().toISOString(),
-            }
-            set({ cart: normalized })
-          } else {
-            const currentItems = get().cart?.items ? [...get().cart!.items] : []
-            const idx = currentItems.findIndex((i) => i.id === cartItemId)
-            if (idx >= 0) {
-              const item = currentItems[idx]
-              currentItems[idx] = {
-                ...item,
-                quantity,
-                totalPrice: item.unitPrice * quantity,
-              }
-              set({ cart: recalculateCart(currentItems) })
-            }
+        const currentItems = get().cart?.items ? [...get().cart!.items] : []
+        const idx = currentItems.findIndex((i) => i.id === cartItemId)
+        if (idx >= 0) {
+          const item = currentItems[idx]
+          currentItems[idx] = {
+            ...item,
+            quantity,
+            totalPrice: item.unitPrice * quantity,
           }
-        } finally {
-          set({ isLoading: false })
+          set({ cart: recalculateCart(currentItems) })
+        }
+
+        if (isAuth() && !cartItemId.startsWith('item-')) {
+          try {
+            const { data } = await api.put<any>(`/api/cart/items/${cartItemId}`, { quantity })
+            if (data) {
+              set({
+                cart: {
+                  id: data.id,
+                  items: data.items ?? [],
+                  subtotal: data.subTotal ?? data.subtotal ?? 0,
+                  subTotal: data.subTotal ?? data.subtotal ?? 0,
+                  total: data.subTotal ?? data.subtotal ?? 0,
+                  itemCount: data.totalItems ?? data.itemCount ?? (data.items?.length || 0),
+                  totalItems: data.totalItems ?? data.itemCount ?? (data.items?.length || 0),
+                  createdAt: data.createdAt ?? new Date().toISOString(),
+                  updatedAt: data.updatedAt ?? new Date().toISOString(),
+                },
+              })
+            }
+          } catch {
+            // Keep optimistic update
+          }
         }
       },
 
       removeItem: async (cartItemId: string) => {
-        set({ isLoading: true })
-        try {
-          if (isAuth()) {
-            const { data } = await api.delete<any>(`/api/cart/items/${cartItemId}`)
-            const normalized: Cart = {
-              id: data.id,
-              items: data.items ?? [],
-              subtotal: data.subTotal ?? data.subtotal ?? 0,
-              subTotal: data.subTotal ?? data.subtotal ?? 0,
-              total: data.subTotal ?? data.subtotal ?? 0,
-              itemCount: data.totalItems ?? data.itemCount ?? (data.items?.length || 0),
-              totalItems: data.totalItems ?? data.itemCount ?? (data.items?.length || 0),
-              createdAt: data.createdAt ?? new Date().toISOString(),
-              updatedAt: data.updatedAt ?? new Date().toISOString(),
-            }
-            set({ cart: normalized })
-          } else {
-            const currentItems = get().cart?.items ? [...get().cart!.items] : []
-            const filtered = currentItems.filter((i) => i.id !== cartItemId)
-            set({ cart: recalculateCart(filtered) })
+        const currentItems = get().cart?.items ? [...get().cart!.items] : []
+        const filtered = currentItems.filter((i) => i.id !== cartItemId)
+        set({ cart: recalculateCart(filtered) })
+
+        if (isAuth() && !cartItemId.startsWith('item-')) {
+          try {
+            await api.delete<any>(`/api/cart/items/${cartItemId}`)
+          } catch {
+            // Keep optimistic removal
           }
-        } finally {
-          set({ isLoading: false })
         }
       },
 
       clearCart: async () => {
-        set({ isLoading: true })
-        try {
-          if (isAuth()) {
+        set({ cart: null })
+        if (isAuth()) {
+          try {
             await api.delete('/api/cart').catch(() => null)
+          } catch {
+            // ignore
           }
-          set({ cart: null })
-        } finally {
-          set({ isLoading: false })
         }
       },
 
@@ -242,23 +230,19 @@ export const useCartStore = create<CartState>()(
           return
         }
 
-        // Only sync if these are guest items
-        const guestItems = currentCart.items.filter((i) => i.id.startsWith('guest-'))
-        if (guestItems.length > 0) {
-          for (const item of guestItems) {
-            try {
-              await api.post('/api/cart/items', {
-                productId: item.productId,
-                quantity: item.quantity,
-                variantId: item.variantId,
-              })
-            } catch {
-              // Ignore single item conflict
-            }
+        const localItems = currentCart.items
+        for (const item of localItems) {
+          try {
+            await api.post('/api/cart/items', {
+              productId: item.productId,
+              quantity: item.quantity,
+              variantId: item.variantId || null,
+            })
+          } catch {
+            // Ignore single item conflict
           }
         }
 
-        // Fetch refreshed server cart
         await get().fetchCart()
       },
 

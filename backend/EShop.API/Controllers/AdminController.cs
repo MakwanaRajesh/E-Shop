@@ -221,6 +221,71 @@ public class AdminController(AppDbContext db) : ControllerBase
 
         return Ok(new { message = $"Product is now {(product.IsActive ? "active" : "inactive")}.", isActive = product.IsActive });
     }
+
+    // ── GET /api/admin/customers ──────────────────────────────────────────────
+    [HttpGet("customers")]
+    public async Task<IActionResult> GetCustomers(
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 50,
+        [FromQuery] string? search = null)
+    {
+        pageSize = Math.Clamp(pageSize, 1, 100);
+        page     = Math.Max(page, 1);
+
+        var query = _db.Users
+            .AsNoTracking()
+            .Where(u => u.Role == UserRole.Customer)
+            .AsQueryable();
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            query = query.Where(u =>
+                u.FirstName.Contains(search) ||
+                u.LastName.Contains(search) ||
+                u.Email.Contains(search) ||
+                (u.PhoneNumber != null && u.PhoneNumber.Contains(search)));
+        }
+
+        query = query.OrderByDescending(u => u.CreatedAt);
+
+        var total = await query.CountAsync();
+        var users = await query
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync();
+
+        var userIds = users.Select(u => u.Id).ToList();
+
+        var ordersGrouped = await _db.Orders
+            .Where(o => userIds.Contains(o.UserId))
+            .GroupBy(o => o.UserId)
+            .Select(g => new
+            {
+                UserId      = g.Key,
+                TotalOrders = g.Count(),
+                TotalSpent  = g.Where(o => o.PaymentStatus == PaymentStatus.Completed).Sum(o => o.TotalAmount)
+            })
+            .ToListAsync();
+
+        var dtos = users.Select(u =>
+        {
+            var stats = ordersGrouped.FirstOrDefault(g => g.UserId == u.Id);
+            return new
+            {
+                u.Id,
+                u.FirstName,
+                u.LastName,
+                u.Email,
+                u.PhoneNumber,
+                u.CreatedAt,
+                u.IsActive,
+                TotalOrders = stats?.TotalOrders ?? 0,
+                TotalSpent  = stats?.TotalSpent ?? 0
+            };
+        });
+
+        return Ok(new { Items = dtos, TotalCount = total, Page = page, PageSize = pageSize });
+    }
 }
 
 public record UpdateOrderStatusRequest(string Status, string? TrackingNumber);

@@ -3,6 +3,7 @@
 import { Header } from '@/components/layout/Header'
 import { Footer } from '@/components/layout/Footer'
 import { AuthModal } from '@/components/auth/AuthModal'
+import { CartDrawer } from '@/components/cart/CartDrawer'
 import { Toaster } from 'react-hot-toast'
 
 export default function ShopLayout({
@@ -15,6 +16,7 @@ export default function ShopLayout({
       <Header />
       <main className="min-h-screen pt-16">{children}</main>
       <Footer />
+      <CartDrawer />
       <AuthModal />
       <Toaster
         position="top-right"
