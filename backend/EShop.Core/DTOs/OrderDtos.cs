@@ -2,19 +2,46 @@ using EShop.Core.Enums;
 
 namespace EShop.Core.DTOs;
 
-public record CreateOrderItemRequest(
-    Guid ProductId,
-    Guid? VariantId,
-    int Quantity
-);
+public class CreateOrderItemRequest
+{
+    public Guid ProductId { get; set; }
+    public Guid? VariantId { get; set; }
+    public int Quantity { get; set; } = 1;
 
-public record CreateOrderRequest(
-    Guid? AddressId,
-    PaymentMethod PaymentMethod,
-    string? CouponCode,
-    List<CreateOrderItemRequest>? Items = null,
-    CreateAddressRequest? ShippingAddress = null
-);
+    public CreateOrderItemRequest() { }
+
+    public CreateOrderItemRequest(Guid productId, Guid? variantId, int quantity)
+    {
+        ProductId = productId;
+        VariantId = variantId;
+        Quantity = quantity;
+    }
+}
+
+public class CreateOrderRequest
+{
+    public Guid? AddressId { get; set; }
+    public PaymentMethod PaymentMethod { get; set; } = PaymentMethod.CashOnDelivery;
+    public string? CouponCode { get; set; }
+    public List<CreateOrderItemRequest>? Items { get; set; }
+    public CreateAddressRequest? ShippingAddress { get; set; }
+
+    public CreateOrderRequest() { }
+
+    public CreateOrderRequest(
+        Guid? addressId,
+        PaymentMethod paymentMethod,
+        string? couponCode,
+        List<CreateOrderItemRequest>? items = null,
+        CreateAddressRequest? shippingAddress = null)
+    {
+        AddressId = addressId;
+        PaymentMethod = paymentMethod;
+        CouponCode = couponCode;
+        Items = items;
+        ShippingAddress = shippingAddress;
+    }
+}
 
 public record OrderDto(
     Guid Id,

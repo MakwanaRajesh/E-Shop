@@ -1,4 +1,5 @@
 using System.Text;
+using EShop.API.Converters;
 using EShop.Core.Interfaces;
 using EShop.Infrastructure.Data;
 using EShop.Infrastructure.Repositories;
@@ -32,6 +33,7 @@ builder.Services.AddScoped(typeof(IRepository<>), typeof(Repository<>));
 builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
 builder.Services.AddScoped<EShop.Infrastructure.Services.TokenService>();
 builder.Services.AddMemoryCache();
+builder.Services.AddHttpClient();
 
 // ── JWT Authentication ────────────────────────────────────────────────────────
 var jwtKey = builder.Configuration["Jwt:Key"]!;
@@ -91,6 +93,9 @@ builder.Services.AddControllers()
     {
         opt.JsonSerializerOptions.DefaultIgnoreCondition =
             System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull;
+        opt.JsonSerializerOptions.PropertyNameCaseInsensitive = true;
+        opt.JsonSerializerOptions.Converters.Add(new NullableGuidConverter());
+        opt.JsonSerializerOptions.Converters.Add(new PaymentMethodConverter());
         opt.JsonSerializerOptions.Converters.Add(
             new System.Text.Json.Serialization.JsonStringEnumConverter(allowIntegerValues: true));
     });

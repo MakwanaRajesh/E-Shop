@@ -95,7 +95,7 @@ export default function CheckoutPage() {
     setLoading(true)
 
     try {
-      let finalAddressId: string | null = selectedAddressId !== 'new' ? selectedAddressId : null
+      let finalAddressId: string | null = (selectedAddressId && selectedAddressId !== 'new') ? selectedAddressId : null
       let shippingAddressPayload: any = null
 
       if (useNewAddress || selectedAddressId === 'new' || !finalAddressId) {
@@ -135,9 +135,9 @@ export default function CheckoutPage() {
         quantity: i.quantity || 1,
       }))
 
-      // 2. Place order with both String & Int friendly PaymentMethod
+      // 2. Place order with COD or Online
       const orderRes = await api.post('/api/orders', {
-        addressId: finalAddressId,
+        addressId: finalAddressId || null,
         paymentMethod: paymentMethod === 'cod' ? 'CashOnDelivery' : 'Razorpay',
         couponCode: cart?.couponCode ?? null,
         items: itemsPayload,
@@ -150,7 +150,8 @@ export default function CheckoutPage() {
       })
       router.push(`/account?orderSuccess=${orderRes.data.orderNumber ?? orderRes.data.id}`)
     } catch (err: unknown) {
-      const msg = (err as { message?: string })?.message ?? 'Failed to place order'
+      const apiErr = err as { response?: { data?: { message?: string; detail?: string; title?: string } }; message?: string }
+      const msg = apiErr.response?.data?.message || apiErr.response?.data?.detail || apiErr.response?.data?.title || (err as Error)?.message || 'Failed to place order'
       toast.error(msg)
     } finally {
       setLoading(false)

@@ -145,8 +145,13 @@ api.interceptors.response.use(
 function transformError(error: unknown): ApiError {
   if (axios.isAxiosError(error)) {
     const data = error.response?.data
+    let msg = data?.message ?? data?.detail ?? data?.title ?? error.message ?? 'An unexpected error occurred'
+    if (data?.errors && typeof data.errors === 'object') {
+      const errList = Object.values(data.errors).flat().join(', ')
+      if (errList) msg = errList
+    }
     return {
-      message: data?.message ?? error.message ?? 'An unexpected error occurred',
+      message: msg,
       statusCode: error.response?.status ?? 0,
       errors: data?.errors,
     }
