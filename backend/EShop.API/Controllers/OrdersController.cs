@@ -35,14 +35,51 @@ public class OrdersController(
     {
         var userId = GetCurrentUserId();
 
-        // Load address
-        var address = await _db.Addresses
-            .AsNoTracking()
-            .FirstOrDefaultAsync(a => a.Id == req.AddressId && a.UserId == userId);
-        if (address is null)
-            return BadRequest(new { message = "Address not found." });
+        // 1. Resolve Address
+        Address? address = null;
+        if (req.AddressId.HasValue && req.AddressId.Value != Guid.Empty)
+        {
+            address = await _db.Addresses
+                .AsNoTracking()
+                .FirstOrDefaultAsync(a => a.Id == req.AddressId.Value && a.UserId == userId);
+        }
 
-        // Load cart with items
+        if (address is null && req.ShippingAddress is not null)
+        {
+            var hasExisting = await _db.Addresses.AnyAsync(a => a.UserId == userId);
+            var newAddr = new Address
+            {
+                UserId       = userId,
+                FullName     = req.ShippingAddress.FullName.Trim(),
+                PhoneNumber  = req.ShippingAddress.PhoneNumber.Trim(),
+                AddressLine1 = req.ShippingAddress.AddressLine1.Trim(),
+                AddressLine2 = req.ShippingAddress.AddressLine2?.Trim(),
+                City         = req.ShippingAddress.City.Trim(),
+                State        = req.ShippingAddress.State.Trim(),
+                PinCode      = req.ShippingAddress.PinCode.Trim(),
+                Country      = req.ShippingAddress.Country?.Trim() ?? "India",
+                AddressType  = req.ShippingAddress.AddressType?.Trim() ?? "Home",
+                IsDefault    = !hasExisting || req.ShippingAddress.IsDefault
+            };
+            await _db.Addresses.AddAsync(newAddr);
+            await _uow.SaveChangesAsync();
+            address = newAddr;
+        }
+
+        if (address is null)
+        {
+            address = await _db.Addresses
+                .AsNoTracking()
+                .Where(a => a.UserId == userId)
+                .OrderByDescending(a => a.IsDefault)
+                .ThenByDescending(a => a.CreatedAt)
+                .FirstOrDefaultAsync();
+        }
+
+        if (address is null)
+            return BadRequest(new { message = "Shipping address is required. Please provide a delivery address." });
+
+        // 2. Resolve Items (from DB Cart or directly from Request)
         var cart = await _db.Carts
             .Include(c => c.Items)
                 .ThenInclude(i => i.Product)
@@ -51,51 +88,99 @@ public class OrdersController(
                 .ThenInclude(i => i.Variant)
             .FirstOrDefaultAsync(c => c.UserId == userId);
 
-        if (cart is null || !cart.Items.Any())
+        var hasCartItems = cart is not null && cart.Items.Any();
+        var hasReqItems  = req.Items is not null && req.Items.Any();
+
+        if (!hasCartItems && !hasReqItems)
             return BadRequest(new { message = "Your cart is empty." });
 
-        // Validate stock and build order items
         var orderItems = new List<OrderItem>();
         decimal subTotal = 0;
 
-        foreach (var ci in cart.Items)
+        if (hasCartItems)
         {
-            if (!ci.Product.IsActive)
-                return BadRequest(new { message = $"Product '{ci.Product.Name}' is no longer available." });
-
-            var unitPrice = ci.Product.Price + (ci.Variant?.PriceModifier ?? 0);
-            var stock     = ci.Variant is not null ? ci.Variant.Stock : ci.Product.Stock;
-
-            if (ci.Quantity > stock)
-                return BadRequest(new
-                {
-                    message = $"Insufficient stock for '{ci.Product.Name}'. " +
-                              $"Requested: {ci.Quantity}, Available: {stock}"
-                });
-
-            var primaryImage = ci.Product.Images
-                .FirstOrDefault(i => i.IsPrimary)?.Url
-                ?? ci.Product.Images.OrderBy(i => i.SortOrder).FirstOrDefault()?.Url;
-
-            var oi = new OrderItem
+            foreach (var ci in cart!.Items)
             {
-                ProductId       = ci.ProductId,
-                VariantId       = ci.VariantId,
-                ProductName     = ci.Product.Name,
-                VariantName     = ci.Variant is not null
-                                    ? $"{ci.Variant.Name}: {ci.Variant.Value}"
-                                    : null,
-                ProductImageUrl = primaryImage,
-                Quantity        = ci.Quantity,
-                UnitPrice       = unitPrice,
-                TotalPrice      = unitPrice * ci.Quantity
-            };
+                if (!ci.Product.IsActive)
+                    return BadRequest(new { message = $"Product '{ci.Product.Name}' is no longer available." });
 
-            orderItems.Add(oi);
-            subTotal += oi.TotalPrice;
+                var unitPrice = ci.Product.Price + (ci.Variant?.PriceModifier ?? 0);
+                var stock     = ci.Variant is not null ? ci.Variant.Stock : ci.Product.Stock;
+
+                if (ci.Quantity > stock)
+                    return BadRequest(new
+                    {
+                        message = $"Insufficient stock for '{ci.Product.Name}'. Requested: {ci.Quantity}, Available: {stock}"
+                    });
+
+                var primaryImage = ci.Product.Images
+                    .FirstOrDefault(i => i.IsPrimary)?.Url
+                    ?? ci.Product.Images.OrderBy(i => i.SortOrder).FirstOrDefault()?.Url;
+
+                var oi = new OrderItem
+                {
+                    ProductId       = ci.ProductId,
+                    VariantId       = ci.VariantId,
+                    ProductName     = ci.Product.Name,
+                    VariantName     = ci.Variant is not null ? $"{ci.Variant.Name}: {ci.Variant.Value}" : null,
+                    ProductImageUrl = primaryImage,
+                    Quantity        = ci.Quantity,
+                    UnitPrice       = unitPrice,
+                    TotalPrice      = unitPrice * ci.Quantity
+                };
+
+                orderItems.Add(oi);
+                subTotal += oi.TotalPrice;
+            }
+        }
+        else
+        {
+            // Fallback: build order directly from request items
+            foreach (var ri in req.Items!)
+            {
+                var product = await _db.Products
+                    .Include(p => p.Images)
+                    .Include(p => p.Variants)
+                    .FirstOrDefaultAsync(p => p.Id == ri.ProductId);
+
+                if (product is null || !product.IsActive)
+                    return BadRequest(new { message = "One or more products in your cart are no longer available." });
+
+                ProductVariant? variant = null;
+                if (ri.VariantId.HasValue && ri.VariantId.Value != Guid.Empty)
+                    variant = product.Variants.FirstOrDefault(v => v.Id == ri.VariantId.Value);
+
+                var unitPrice = product.Price + (variant?.PriceModifier ?? 0);
+                var stock     = variant is not null ? variant.Stock : product.Stock;
+
+                if (ri.Quantity > stock)
+                    return BadRequest(new
+                    {
+                        message = $"Insufficient stock for '{product.Name}'. Requested: {ri.Quantity}, Available: {stock}"
+                    });
+
+                var primaryImage = product.Images
+                    .FirstOrDefault(i => i.IsPrimary)?.Url
+                    ?? product.Images.OrderBy(i => i.SortOrder).FirstOrDefault()?.Url;
+
+                var oi = new OrderItem
+                {
+                    ProductId       = product.Id,
+                    VariantId       = variant?.Id,
+                    ProductName     = product.Name,
+                    VariantName     = variant is not null ? $"{variant.Name}: {variant.Value}" : null,
+                    ProductImageUrl = primaryImage,
+                    Quantity        = ri.Quantity,
+                    UnitPrice       = unitPrice,
+                    TotalPrice      = unitPrice * ri.Quantity
+                };
+
+                orderItems.Add(oi);
+                subTotal += oi.TotalPrice;
+            }
         }
 
-        // Apply coupon
+        // 3. Apply coupon
         decimal discount = 0;
         string? couponCode = null;
         if (!string.IsNullOrWhiteSpace(req.CouponCode))
@@ -130,15 +215,15 @@ public class OrdersController(
             couponCode = coupon.Code;
         }
 
-        var shippingCost = subTotal > 500 ? 0 : 49; // free shipping above ₹500
+        var shippingCost = subTotal > 5000 ? 0 : 99; // complimentary white-glove above ₹5,000
         var totalAmount  = subTotal - discount + shippingCost;
 
         var order = new Order
         {
             OrderNumber         = OrderNumberService.Generate(),
             UserId              = userId,
-            Status              = OrderStatus.Pending,
-            PaymentStatus       = PaymentStatus.Pending,
+            Status              = OrderStatus.Confirmed,
+            PaymentStatus       = req.PaymentMethod == PaymentMethod.CashOnDelivery ? PaymentStatus.Pending : PaymentStatus.Completed,
             PaymentMethod       = req.PaymentMethod,
             SubTotal            = subTotal,
             Discount            = discount,
@@ -157,37 +242,59 @@ public class OrdersController(
             Items               = orderItems
         };
 
-        // Deduct stock
-        foreach (var ci in cart.Items)
+        // 4. Deduct stock
+        foreach (var oi in orderItems)
         {
-            if (ci.Variant is not null)
+            if (oi.VariantId.HasValue)
             {
-                var variant = await _db.ProductVariants.FindAsync(ci.Variant.Id);
+                var variant = await _db.ProductVariants.FindAsync(oi.VariantId.Value);
                 if (variant is not null)
                 {
-                    variant.Stock -= ci.Quantity;
+                    variant.Stock = Math.Max(0, variant.Stock - oi.Quantity);
                     _db.ProductVariants.Update(variant);
                 }
             }
             else
             {
-                var product = await _db.Products.FindAsync(ci.ProductId);
+                var product = await _db.Products.FindAsync(oi.ProductId);
                 if (product is not null)
                 {
-                    product.Stock -= ci.Quantity;
+                    product.Stock = Math.Max(0, product.Stock - oi.Quantity);
                     _db.Products.Update(product);
                 }
             }
         }
 
-        // Clear cart
-        _db.CartItems.RemoveRange(cart.Items);
+        // 5. Clear cart if exists
+        if (cart is not null && cart.Items.Any())
+        {
+            _db.CartItems.RemoveRange(cart.Items);
+        }
 
         await _db.Orders.AddAsync(order);
         await _uow.SaveChangesAsync();
 
         return CreatedAtAction(nameof(GetOrder), new { id = order.Id },
             MapOrderDto(order));
+    }
+
+    // ── POST /api/orders/{id}/cancel ──────────────────────────────────────────
+    [HttpPost("{id:guid}/cancel")]
+    public async Task<IActionResult> CancelOrder(Guid id)
+    {
+        var userId = GetCurrentUserId();
+        var order = await _db.Orders.FirstOrDefaultAsync(o => o.Id == id && o.UserId == userId);
+        if (order is null) return NotFound(new { message = "Order not found." });
+
+        if (order.Status != OrderStatus.Pending && order.Status != OrderStatus.Confirmed && order.Status != OrderStatus.PaymentPending)
+            return BadRequest(new { message = "Orders that have already been dispatched or delivered cannot be cancelled online. Please contact Customer Care." });
+
+        order.Status = OrderStatus.Cancelled;
+        order.UpdatedAt = DateTime.UtcNow;
+        _db.Orders.Update(order);
+        await _uow.SaveChangesAsync();
+
+        return Ok(new { message = "Order cancelled successfully.", status = "Cancelled" });
     }
 
     // ── GET /api/orders ───────────────────────────────────────────────────────

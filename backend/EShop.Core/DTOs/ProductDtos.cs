@@ -97,6 +97,8 @@ public record ProductQueryParams
 {
     public string? Search { get; init; }
     public Guid? CategoryId { get; init; }
+    public string? Category { get; init; }
+    public string? SubCategory { get; init; }
     public decimal? MinPrice { get; init; }
     public decimal? MaxPrice { get; init; }
     public bool? InStock { get; init; }

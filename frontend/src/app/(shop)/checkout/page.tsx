@@ -95,16 +95,17 @@ export default function CheckoutPage() {
     setLoading(true)
 
     try {
-      let finalAddressId = selectedAddressId
+      let finalAddressId: string | null = selectedAddressId !== 'new' ? selectedAddressId : null
+      let shippingAddressPayload: any = null
 
-      if (useNewAddress || selectedAddressId === 'new') {
+      if (useNewAddress || selectedAddressId === 'new' || !finalAddressId) {
         if (!newAddress.fullName || !newAddress.phone || !newAddress.line1 || !newAddress.city || !newAddress.pinCode) {
           toast.error('Please fill in all required shipping address fields.')
           setLoading(false)
           return
         }
 
-        const addrRes = await api.post('/api/addresses', {
+        shippingAddressPayload = {
           fullName: newAddress.fullName.trim(),
           phoneNumber: newAddress.phone.trim(),
           addressLine1: newAddress.line1.trim(),
@@ -115,15 +116,32 @@ export default function CheckoutPage() {
           country: 'India',
           addressType: 'Home',
           isDefault: savedAddresses.length === 0,
-        })
-        finalAddressId = addrRes.data.id
+        }
+
+        try {
+          const addrRes = await api.post('/api/addresses', shippingAddressPayload)
+          if (addrRes.data?.id) {
+            finalAddressId = addrRes.data.id
+          }
+        } catch {
+          // Will be auto-created by backend with shippingAddress payload
+        }
       }
 
-      // 2. Place order
+      // Prepare items payload so DB cart and guest cart are 100% synchronized
+      const itemsPayload = items.map((i) => ({
+        productId: i.productId,
+        variantId: i.variantId || null,
+        quantity: i.quantity || 1,
+      }))
+
+      // 2. Place order with both String & Int friendly PaymentMethod
       const orderRes = await api.post('/api/orders', {
         addressId: finalAddressId,
-        paymentMethod: paymentMethod === 'cod' ? 1 : 0, // Razorpay=0, COD=1
+        paymentMethod: paymentMethod === 'cod' ? 'CashOnDelivery' : 'Razorpay',
         couponCode: cart?.couponCode ?? null,
+        items: itemsPayload,
+        shippingAddress: shippingAddressPayload,
       })
 
       await clearCart()

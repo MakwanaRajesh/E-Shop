@@ -24,19 +24,55 @@ public class ProductsController(AppDbContext db, IUnitOfWork uow) : ControllerBa
         var query = _db.Products
             .AsNoTracking()
             .Include(p => p.Category)
+                .ThenInclude(c => c.Parent)
             .Include(p => p.Images)
             .Include(p => p.Reviews)
             .Where(p => p.IsActive);
 
+        // Intelligent Search (tokens across Title, Tags, Description, Category Name)
         if (!string.IsNullOrWhiteSpace(q.Search))
         {
-            var pattern = $"%{q.Search.Trim()}%";
-            query = query.Where(p => EF.Functions.ILike(p.Name, pattern) ||
-                                     (p.Tags != null && EF.Functions.ILike(p.Tags, pattern)));
+            var terms = q.Search.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            foreach (var term in terms)
+            {
+                var pattern = $"%{term}%";
+                query = query.Where(p =>
+                    EF.Functions.ILike(p.Name, pattern) ||
+                    (p.Tags != null && EF.Functions.ILike(p.Tags, pattern)) ||
+                    (p.ShortDescription != null && EF.Functions.ILike(p.ShortDescription, pattern)) ||
+                    (p.Description != null && EF.Functions.ILike(p.Description, pattern)) ||
+                    EF.Functions.ILike(p.Category.Name, pattern) ||
+                    (p.Category.Parent != null && EF.Functions.ILike(p.Category.Parent.Name, pattern))
+                );
+            }
         }
 
+        // Category Filter (by Guid or slug or name)
         if (q.CategoryId.HasValue)
-            query = query.Where(p => p.CategoryId == q.CategoryId.Value);
+        {
+            query = query.Where(p => p.CategoryId == q.CategoryId.Value ||
+                                     (p.Category.ParentId != null && p.Category.ParentId == q.CategoryId.Value));
+        }
+        else if (!string.IsNullOrWhiteSpace(q.Category))
+        {
+            var catSlug = q.Category.Trim().ToLowerInvariant();
+            query = query.Where(p =>
+                p.Category.Slug == catSlug ||
+                (p.Category.Parent != null && p.Category.Parent.Slug == catSlug) ||
+                EF.Functions.ILike(p.Category.Name, $"%{catSlug}%") ||
+                (p.Category.Parent != null && EF.Functions.ILike(p.Category.Parent.Name, $"%{catSlug}%"))
+            );
+        }
+
+        // Subcategory Filter (by slug or name)
+        if (!string.IsNullOrWhiteSpace(q.SubCategory))
+        {
+            var subSlug = q.SubCategory.Trim().ToLowerInvariant();
+            query = query.Where(p =>
+                p.Category.Slug == subSlug ||
+                EF.Functions.ILike(p.Category.Name, $"%{subSlug}%")
+            );
+        }
 
         if (q.MinPrice.HasValue)
             query = query.Where(p => p.Price >= q.MinPrice.Value);
@@ -74,6 +110,51 @@ public class ProductsController(AppDbContext db, IUnitOfWork uow) : ControllerBa
 
         return Ok(new PagedResult<ProductListResponse>(
             dtos, totalCount, page, pageSize, totalPages));
+    }
+
+    // ── GET /api/products/search-suggestions ──────────────────────────────────
+    [HttpGet("search-suggestions")]
+    public async Task<IActionResult> GetSearchSuggestions([FromQuery] string? q)
+    {
+        if (string.IsNullOrWhiteSpace(q) || q.Trim().Length < 2)
+            return Ok(new { products = Array.Empty<object>(), categories = Array.Empty<object>() });
+
+        var term = q.Trim();
+        var pattern = $"%{term}%";
+
+        var matchingCategories = await _db.Categories
+            .AsNoTracking()
+            .Where(c => c.IsActive && EF.Functions.ILike(c.Name, pattern))
+            .OrderBy(c => c.Name)
+            .Take(4)
+            .Select(c => new { c.Id, c.Name, c.Slug })
+            .ToListAsync();
+
+        var matchingProducts = await _db.Products
+            .AsNoTracking()
+            .Include(p => p.Images)
+            .Include(p => p.Category)
+            .Where(p => p.IsActive && (
+                EF.Functions.ILike(p.Name, pattern) ||
+                (p.Tags != null && EF.Functions.ILike(p.Tags, pattern)) ||
+                EF.Functions.ILike(p.Category.Name, pattern)
+            ))
+            .OrderByDescending(p => p.IsFeatured)
+            .ThenByDescending(p => p.CreatedAt)
+            .Take(6)
+            .Select(p => new
+            {
+                p.Id,
+                p.Name,
+                p.Slug,
+                p.Price,
+                CategoryName = p.Category.Name,
+                PrimaryImageUrl = p.Images.Where(i => i.IsPrimary).Select(i => i.Url).FirstOrDefault() ??
+                                  p.Images.OrderBy(i => i.SortOrder).Select(i => i.Url).FirstOrDefault()
+            })
+            .ToListAsync();
+
+        return Ok(new { products = matchingProducts, categories = matchingCategories });
     }
 
     // ── GET /api/products/featured ────────────────────────────────────────────

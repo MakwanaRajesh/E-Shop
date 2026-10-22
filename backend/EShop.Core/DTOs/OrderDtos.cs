@@ -2,10 +2,18 @@ using EShop.Core.Enums;
 
 namespace EShop.Core.DTOs;
 
+public record CreateOrderItemRequest(
+    Guid ProductId,
+    Guid? VariantId,
+    int Quantity
+);
+
 public record CreateOrderRequest(
-    Guid AddressId,
+    Guid? AddressId,
     PaymentMethod PaymentMethod,
-    string? CouponCode
+    string? CouponCode,
+    List<CreateOrderItemRequest>? Items = null,
+    CreateAddressRequest? ShippingAddress = null
 );
 
 public record OrderDto(

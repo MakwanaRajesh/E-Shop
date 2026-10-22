@@ -92,7 +92,7 @@ builder.Services.AddControllers()
         opt.JsonSerializerOptions.DefaultIgnoreCondition =
             System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull;
         opt.JsonSerializerOptions.Converters.Add(
-            new System.Text.Json.Serialization.JsonStringEnumConverter());
+            new System.Text.Json.Serialization.JsonStringEnumConverter(allowIntegerValues: true));
     });
 
 // ── Swagger ───────────────────────────────────────────────────────────────────

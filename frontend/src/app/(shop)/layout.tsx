@@ -14,7 +14,7 @@ export default function ShopLayout({
   return (
     <>
       <Header />
-      <main className="min-h-screen pt-16">{children}</main>
+      <main className="min-h-screen pt-28 lg:pt-36">{children}</main>
       <Footer />
       <CartDrawer />
       <AuthModal />
