@@ -68,4 +68,32 @@
     background-size: 200% 100%;
     animation: shimmer 2s infinite;
   }
+
+  .emerald-gradient {
+    background: linear-gradient(135deg, #059669 0%, #10B981 50%, #34D399 100%);
+  }
+
+  .ruby-gradient {
+    background: linear-gradient(135deg, #B91C1C 0%, #EF4444 50%, #F87171 100%);
+  }
+
+  .sapphire-gradient {
+    background: linear-gradient(135deg, #0369A1 0%, #0EA5E9 50%, #38BDF8 100%);
+  }
+
+  .glass-card {
+    background: rgba(20, 20, 20, 0.75);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(42, 40, 32, 0.8);
+  }
+
+  .glass-card-hover {
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .glass-card-hover:hover {
+    transform: translateY(-2px);
+    border-color: rgba(201, 168, 76, 0.4);
+    box-shadow: 0 12px 30px -10px rgba(201, 168, 76, 0.12);
+  }
 }

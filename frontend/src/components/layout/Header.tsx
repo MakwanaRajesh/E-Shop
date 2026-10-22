@@ -479,7 +479,7 @@ export function Header() {
               >
                 <Heart className="w-4 h-4 sm:w-5 sm:h-5" />
                 {wishlistCount > 0 && (
-                  <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] rounded-full bg-gold text-background text-[10px] font-bold flex items-center justify-center px-1">
+                  <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] rounded-full bg-gradient-to-r from-rose-600 to-rose-500 text-white text-[10px] font-bold flex items-center justify-center px-1 shadow-sm shadow-rose-950/60 border border-rose-400/40">
                     {wishlistCount}
                   </span>
                 )}

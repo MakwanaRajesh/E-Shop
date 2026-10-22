@@ -51,11 +51,12 @@ export function truncate(text: string, maxLength: number): string {
 
 export function getStockStatus(quantity: number): {
   label: string
-  variant: 'success' | 'error' | 'gold'
+  variant: 'success' | 'error' | 'gold' | 'emerald' | 'ruby' | 'amber'
+  badgeType: 'in_stock' | 'low_stock' | 'out_of_stock'
 } {
-  if (quantity === 0) return { label: 'Out of Stock', variant: 'error' }
-  if (quantity <= 5) return { label: 'Low Stock', variant: 'gold' }
-  return { label: 'In Stock', variant: 'success' }
+  if (quantity === 0) return { label: 'Out of Stock', variant: 'ruby', badgeType: 'out_of_stock' }
+  if (quantity <= 5) return { label: `Only ${quantity} Left`, variant: 'amber', badgeType: 'low_stock' }
+  return { label: 'In Stock', variant: 'emerald', badgeType: 'in_stock' }
 }
 
 export function calculateDiscount(price: number, compareAtPrice?: number): number {

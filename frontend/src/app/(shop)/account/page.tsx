@@ -33,6 +33,7 @@ import { useWishlistStore } from '@/store/wishlist'
 import { useAuthModalStore } from '@/store/authModal'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
+import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Input } from '@/components/ui/Input'
 import api from '@/lib/api'
 import toast from 'react-hot-toast'
@@ -447,30 +448,30 @@ function AccountContent() {
                   order.status.toString().toLowerCase() === 'pending' ||
                   order.status.toString().toLowerCase() === 'confirmed'
 
+                const isDelivered = order.status.toString().toLowerCase() === 'delivered'
+                const isShipped = order.status.toString().toLowerCase() === 'shipped' || order.status.toString().toLowerCase().includes('outfor')
+
                 return (
                   <div
                     key={order.id}
-                    className="bg-surface border border-border rounded-2xl overflow-hidden transition-all duration-200 hover:border-gold/30 shadow-md"
+                    className={`bg-surface border rounded-2xl overflow-hidden transition-all duration-300 shadow-md ${
+                      isCancelled
+                        ? 'border-rose-500/30 bg-rose-950/5'
+                        : isDelivered
+                        ? 'border-emerald-500/30 bg-emerald-950/5 hover:border-emerald-500/50'
+                        : isShipped
+                        ? 'border-sky-500/30 bg-sky-950/5 hover:border-sky-500/50'
+                        : 'border-border hover:border-gold/30'
+                    }`}
                   >
                     {/* Order Card Header */}
                     <div className="p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-surface-2/40 border-b border-border">
-                      <div className="space-y-1">
+                      <div className="space-y-1.5">
                         <div className="flex items-center gap-3">
                           <span className="font-mono text-sm font-bold text-gold">
                             {order.orderNumber}
                           </span>
-                          <Badge
-                            variant={
-                              isCancelled
-                                ? 'error'
-                                : order.status.toString().toLowerCase() === 'delivered'
-                                ? 'success'
-                                : 'gold'
-                            }
-                            className="text-xs font-semibold"
-                          >
-                            {order.status}
-                          </Badge>
+                          <StatusBadge status={order.status} size="md" />
                         </div>
                         <p className="text-[11px] text-beige-muted">
                           Placed on {formatDate(order.createdAt)} • Payment:{' '}
@@ -504,7 +505,11 @@ function AccountContent() {
                         <div className="relative flex items-center justify-between max-w-2xl mx-auto">
                           <div className="absolute top-4 left-6 right-6 h-0.5 bg-border -z-0">
                             <div
-                              className="h-full bg-gold transition-all duration-500"
+                              className={`h-full transition-all duration-500 ${
+                                step === 3
+                                  ? 'bg-gradient-to-r from-gold via-sky-400 to-emerald-400'
+                                  : 'bg-gold'
+                              }`}
                               style={{ width: `${(step / 3) * 100}%` }}
                             />
                           </div>
@@ -517,11 +522,18 @@ function AccountContent() {
                           ].map((s, idx) => {
                             const isDone = idx <= step
                             const isCurrent = idx === step
+                            const isCompletedDelivered = isDone && idx === 3
+                            const isTransitStep = isDone && idx === 2
+
                             return (
                               <div key={s.label} className="flex flex-col items-center gap-2 z-10">
                                 <div
-                                  className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors text-xs font-bold ${
-                                    isDone
+                                  className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 text-xs font-bold ${
+                                    isCompletedDelivered
+                                      ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/40'
+                                      : isTransitStep
+                                      ? 'bg-sky-500 text-white shadow-lg shadow-sky-500/40'
+                                      : isDone
                                       ? 'bg-gold text-background shadow-md shadow-gold/30'
                                       : 'bg-surface-2 border border-border text-beige-muted'
                                   }`}
@@ -530,7 +542,13 @@ function AccountContent() {
                                 </div>
                                 <span
                                   className={`text-[10px] tracking-wider uppercase font-semibold text-center ${
-                                    isCurrent ? 'text-gold' : isDone ? 'text-beige' : 'text-beige-muted/60'
+                                    isCurrent && step === 3
+                                      ? 'text-emerald-400 font-bold'
+                                      : isCurrent
+                                      ? 'text-gold'
+                                      : isDone
+                                      ? 'text-beige'
+                                      : 'text-beige-muted/60'
                                   }`}
                                 >
                                   {s.label}
@@ -541,8 +559,8 @@ function AccountContent() {
                         </div>
                       </div>
                     ) : (
-                      <div className="p-4 bg-error/10 border-b border-error/20 flex items-center gap-2 text-xs text-error">
-                        <AlertCircle className="w-4 h-4" />
+                      <div className="p-4 bg-rose-500/10 border-b border-rose-500/25 flex items-center gap-2.5 text-xs text-rose-300">
+                        <AlertCircle className="w-4 h-4 text-rose-400 flex-shrink-0" />
                         <span>This order was cancelled. Any pre-payments are automatically refunded within 24–48 hours.</span>
                       </div>
                     )}

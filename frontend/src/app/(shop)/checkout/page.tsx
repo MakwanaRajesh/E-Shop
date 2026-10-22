@@ -325,8 +325,9 @@ export default function CheckoutPage() {
                   <div>
                     <div className="flex items-center gap-2 flex-wrap">
                       <p className="text-sm font-semibold text-beige">Cash on Delivery (COD)</p>
-                      <span className="text-[10px] uppercase font-bold bg-success/20 text-success border border-success/30 px-2 py-0.5 rounded-full">
-                        ✓ Available across India
+                      <span className="text-[10px] uppercase font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-full flex items-center gap-1 shadow-sm shadow-emerald-500/10">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(16,185,129,0.8)]" />
+                        Available across India
                       </span>
                     </div>
                     <p className="text-xs text-beige-muted mt-0.5">

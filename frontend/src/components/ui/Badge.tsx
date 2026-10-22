@@ -7,9 +7,14 @@ const badgeVariants = cva(
   {
     variants: {
       variant: {
-        gold: 'bg-gold/20 text-gold border border-gold/30',
-        success: 'bg-success/20 text-success border border-success/30',
-        error: 'bg-error/20 text-error border border-error/30',
+        gold: 'bg-gold/15 text-gold border border-gold/30 shadow-sm shadow-gold/10',
+        success: 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 shadow-sm shadow-emerald-500/10',
+        error: 'bg-rose-500/15 text-rose-400 border border-rose-500/30 shadow-sm shadow-rose-500/10',
+        emerald: 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 shadow-sm shadow-emerald-500/10',
+        ruby: 'bg-rose-500/15 text-rose-400 border border-rose-500/30 shadow-sm shadow-rose-500/10',
+        sapphire: 'bg-sky-500/15 text-sky-400 border border-sky-500/30 shadow-sm shadow-sky-500/10',
+        amber: 'bg-amber-500/15 text-amber-400 border border-amber-500/30',
+        amethyst: 'bg-purple-500/15 text-purple-300 border border-purple-500/30',
         neutral: 'bg-surface-2 text-beige-muted border border-border',
         outline: 'border border-beige/30 text-beige bg-transparent',
       },

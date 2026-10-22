@@ -7,6 +7,7 @@ import { Heart, ShoppingCart, Star } from 'lucide-react'
 import { cn, formatCurrency, getStockStatus, calculateDiscount, optimizeImageUrl } from '@/lib/utils'
 import type { ProductListItem } from '@/types'
 import { Badge } from '@/components/ui/Badge'
+import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Button } from '@/components/ui/Button'
 import { useAuthStore } from '@/store/auth'
 import { useCartStore } from '@/store/cart'
@@ -128,24 +129,17 @@ export function ProductCard({ product, className }: ProductCardProps) {
           )}
 
           {/* Overlay badges */}
-          <div className="absolute top-3 left-3 flex flex-col gap-1.5">
+          <div className="absolute top-3 left-3 flex flex-col gap-1.5 z-20">
             {discount > 0 && (
-              <Badge variant="gold" className="text-xs font-bold">
-                -{discount}%
-              </Badge>
+              <span className="bg-gradient-to-r from-rose-600 via-rose-500 to-rose-600 text-white font-mono font-bold text-[10px] uppercase px-2 py-0.5 rounded-full shadow-md shadow-rose-950/60 border border-rose-400/40 tracking-wider">
+                -{discount}% OFF
+              </span>
             )}
-            <Badge
-              variant={
-                stockStatus.variant === 'success'
-                  ? 'success'
-                  : stockStatus.variant === 'error'
-                  ? 'error'
-                  : 'gold'
-              }
-              className="text-xs"
-            >
-              {stockStatus.label}
-            </Badge>
+            <StatusBadge
+              status={stockStatus.badgeType}
+              label={stockStatus.label}
+              size="sm"
+            />
           </div>
 
           {/* Wishlist button */}

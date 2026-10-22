@@ -20,6 +20,7 @@ import {
 import * as Accordion from '@radix-ui/react-accordion'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
+import { StatusBadge } from '@/components/ui/StatusBadge'
 import { ProductDetailSkeleton } from '@/components/ui/Skeleton'
 import { ProductCard } from '@/components/product/ProductCard'
 import api from '@/lib/api'
@@ -206,10 +207,10 @@ export default function ProductDetailPage({ params }: Props) {
               </div>
             )}
             {discount > 0 && (
-              <div className="absolute top-4 left-4">
-                <Badge variant="gold" className="text-sm font-bold px-3 py-1">
+              <div className="absolute top-4 left-4 z-10">
+                <span className="bg-gradient-to-r from-rose-600 via-rose-500 to-rose-600 text-white font-mono font-bold text-xs uppercase px-3 py-1 rounded-full shadow-lg shadow-rose-950/60 border border-rose-400/40 tracking-wider">
                   -{discount}% OFF
-                </Badge>
+                </span>
               </div>
             )}
             {/* Nav arrows */}
@@ -271,10 +272,16 @@ export default function ProductDetailPage({ params }: Props) {
           {/* Category + badges */}
           <div className="flex items-center gap-2 flex-wrap">
             <Badge variant="gold">{categoryName}</Badge>
-            <Badge variant={stockStatus.variant === 'success' ? 'success' : stockStatus.variant === 'error' ? 'error' : 'gold'}>
-              {stockStatus.label}
-            </Badge>
-            {product.isFeatured && <Badge variant="outline">Featured</Badge>}
+            <StatusBadge
+              status={stockStatus.badgeType}
+              label={stockStatus.label}
+              size="md"
+            />
+            {product.isFeatured && (
+              <span className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-gold/15 text-gold border border-gold/40 shadow-sm shadow-gold/10 font-medium">
+                ★ Exclusive Signature
+              </span>
+            )}
           </div>
 
           {/* Name */}

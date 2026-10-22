@@ -34,6 +34,7 @@ import {
 import { useAuthStore } from '@/store/auth'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
+import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Input } from '@/components/ui/Input'
 import api from '@/lib/api'
 import toast from 'react-hot-toast'
@@ -701,22 +702,21 @@ function AdminContent() {
                     </thead>
                     <tbody className="divide-y divide-border">
                       {orders.slice(0, 6).map((ord) => (
-                        <tr key={ord.id} className="hover:bg-surface-2/50 transition-colors">
+                        <tr
+                          key={ord.id}
+                          className={`transition-colors ${
+                            ord.status?.toString().toLowerCase() === 'cancelled'
+                              ? 'bg-rose-950/10 hover:bg-rose-950/20'
+                              : ord.status?.toString().toLowerCase() === 'delivered'
+                              ? 'bg-emerald-950/10 hover:bg-emerald-950/20'
+                              : 'hover:bg-surface-2/50'
+                          }`}
+                        >
                           <td className="py-3.5 px-4 font-mono text-gold font-bold">{ord.orderNumber}</td>
                           <td className="py-3.5 px-4 text-beige font-medium">{ord.shippingName ?? 'Client'}</td>
                           <td className="py-3.5 px-4 font-medium">{formatCurrency(ord.totalAmount ?? ord.total ?? 0)}</td>
                           <td className="py-3.5 px-4">
-                            <Badge
-                              variant={
-                                ord.status === 'delivered'
-                                  ? 'success'
-                                  : ord.status === 'cancelled'
-                                  ? 'error'
-                                  : 'gold'
-                              }
-                            >
-                              {ord.status}
-                            </Badge>
+                            <StatusBadge status={ord.status} size="sm" />
                           </td>
                           <td className="py-3.5 px-4 text-beige-muted text-xs">{formatDate(ord.createdAt)}</td>
                           <td className="py-3.5 px-4 text-right">
@@ -834,9 +834,7 @@ function AdminContent() {
                               </span>
                             </td>
                             <td className="py-3.5 px-4">
-                              <Badge variant={p.isActive !== false ? 'gold' : 'error'}>
-                                {p.isActive !== false ? 'Active' : 'Inactive'}
-                              </Badge>
+                              <StatusBadge status={p.isActive !== false ? 'active' : 'inactive'} size="sm" />
                             </td>
                             <td className="py-3.5 px-4 text-right space-x-2">
                               <Button
@@ -951,20 +949,31 @@ function AdminContent() {
                   />
                 </div>
 
-                <div className="flex items-center gap-1.5 overflow-x-auto w-full sm:w-auto">
-                  {['all', 'pending', 'confirmed', 'shipped', 'delivered', 'cancelled'].map((st) => (
-                    <button
-                      key={st}
-                      onClick={() => setOrderStatusFilter(st)}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold capitalize transition-all ${
-                        orderStatusFilter === st
-                          ? 'bg-gold text-background'
-                          : 'bg-surface border border-border text-beige-muted hover:text-beige'
-                      }`}
-                    >
-                      {st}
-                    </button>
-                  ))}
+                <div className="flex items-center gap-1.5 overflow-x-auto w-full sm:w-auto pb-1">
+                  {[
+                    { id: 'all', label: 'All Orders', dot: 'bg-gold' },
+                    { id: 'delivered', label: 'Delivered', dot: 'bg-emerald-400' },
+                    { id: 'shipped', label: 'Shipped', dot: 'bg-sky-400' },
+                    { id: 'confirmed', label: 'Confirmed', dot: 'bg-gold' },
+                    { id: 'pending', label: 'Pending', dot: 'bg-amber-400' },
+                    { id: 'cancelled', label: 'Cancelled', dot: 'bg-rose-500' },
+                  ].map((tab) => {
+                    const isSelected = orderStatusFilter === tab.id
+                    return (
+                      <button
+                        key={tab.id}
+                        onClick={() => setOrderStatusFilter(tab.id)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap transition-all ${
+                          isSelected
+                            ? 'bg-gold text-background shadow-md shadow-gold/20'
+                            : 'bg-surface border border-border text-beige-muted hover:text-beige hover:border-gold/30'
+                        }`}
+                      >
+                        <span className={`w-1.5 h-1.5 rounded-full ${isSelected ? 'bg-background' : tab.dot}`} />
+                        {tab.label}
+                      </button>
+                    )
+                  })}
                 </div>
               </div>
 
@@ -984,45 +993,49 @@ function AdminContent() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border">
-                      {filteredOrders.map((ord) => (
-                        <tr key={ord.id} className="hover:bg-surface-2/40 transition-colors">
-                          <td className="py-3.5 px-4 font-mono text-gold font-bold">{ord.orderNumber}</td>
-                          <td className="py-3.5 px-4">
-                            <div className="font-medium text-beige">{ord.shippingName}</div>
-                            <div className="text-xs text-beige-muted font-mono">{ord.shippingPhone}</div>
-                          </td>
-                          <td className="py-3.5 px-4 font-semibold text-beige">
-                            {formatCurrency(ord.totalAmount ?? ord.total ?? 0)}
-                          </td>
-                          <td className="py-3.5 px-4 text-xs uppercase text-beige-muted">
-                            {ord.paymentMethod} • <span className="text-gold font-semibold">{ord.paymentStatus}</span>
-                          </td>
-                          <td className="py-3.5 px-4">
-                            <Badge
-                              variant={
-                                ord.status === 'delivered'
-                                  ? 'success'
-                                  : ord.status === 'cancelled'
-                                  ? 'error'
-                                  : 'gold'
-                              }
-                            >
-                              {ord.status}
-                            </Badge>
-                          </td>
-                          <td className="py-3.5 px-4 text-xs text-beige-muted">{formatDate(ord.createdAt)}</td>
-                          <td className="py-3.5 px-4 text-right">
-                            <Button
-                              variant="primary"
-                              size="sm"
-                              onClick={() => handleOpenInspectOrder(ord)}
-                              className="text-xs font-semibold py-1 px-3"
-                            >
-                              Manage
-                            </Button>
-                          </td>
-                        </tr>
-                      ))}
+                      {filteredOrders.map((ord) => {
+                        const isCanc = ord.status?.toString().toLowerCase() === 'cancelled'
+                        const isDeliv = ord.status?.toString().toLowerCase() === 'delivered'
+
+                        return (
+                          <tr
+                            key={ord.id}
+                            className={`transition-colors ${
+                              isCanc
+                                ? 'bg-rose-950/15 hover:bg-rose-950/25 border-l-2 border-l-rose-500'
+                                : isDeliv
+                                ? 'bg-emerald-950/10 hover:bg-emerald-950/20 border-l-2 border-l-emerald-500'
+                                : 'hover:bg-surface-2/40'
+                            }`}
+                          >
+                            <td className="py-3.5 px-4 font-mono text-gold font-bold">{ord.orderNumber}</td>
+                            <td className="py-3.5 px-4">
+                              <div className="font-medium text-beige">{ord.shippingName}</div>
+                              <div className="text-xs text-beige-muted font-mono">{ord.shippingPhone}</div>
+                            </td>
+                            <td className="py-3.5 px-4 font-semibold text-beige">
+                              {formatCurrency(ord.totalAmount ?? ord.total ?? 0)}
+                            </td>
+                            <td className="py-3.5 px-4 text-xs uppercase text-beige-muted">
+                              {ord.paymentMethod} • <span className="text-gold font-semibold">{ord.paymentStatus}</span>
+                            </td>
+                            <td className="py-3.5 px-4">
+                              <StatusBadge status={ord.status} size="sm" />
+                            </td>
+                            <td className="py-3.5 px-4 text-xs text-beige-muted">{formatDate(ord.createdAt)}</td>
+                            <td className="py-3.5 px-4 text-right">
+                              <Button
+                                variant="primary"
+                                size="sm"
+                                onClick={() => handleOpenInspectOrder(ord)}
+                                className="text-xs font-semibold py-1 px-3"
+                              >
+                                Manage
+                              </Button>
+                            </td>
+                          </tr>
+                        )
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -1516,9 +1529,12 @@ function AdminContent() {
           <div className="bg-surface border border-gold/40 rounded-2xl max-w-2xl w-full p-6 sm:p-8 space-y-6 shadow-2xl animate-slide-up my-8">
             <div className="flex items-center justify-between border-b border-border pb-3">
               <div>
-                <h3 className="font-serif text-xl font-bold text-beige flex items-center gap-2">
-                  Order <span className="font-mono text-gold">{inspectOrder.orderNumber}</span>
-                </h3>
+                <div className="flex items-center gap-3">
+                  <h3 className="font-serif text-xl font-bold text-beige flex items-center gap-2">
+                    Order <span className="font-mono text-gold">{inspectOrder.orderNumber}</span>
+                  </h3>
+                  <StatusBadge status={inspectOrder.status} size="sm" />
+                </div>
                 <p className="text-xs text-beige-muted mt-0.5">Placed on {formatDate(inspectOrder.createdAt)}</p>
               </div>
               <button
@@ -1528,6 +1544,26 @@ function AdminContent() {
                 <X className="w-4 h-4" />
               </button>
             </div>
+
+            {/* Status Feedback Banner */}
+            {inspectOrder.status?.toString().toLowerCase() === 'cancelled' && (
+              <div className="p-4 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 flex items-center gap-3">
+                <XCircle className="w-5 h-5 text-rose-400 flex-shrink-0" />
+                <div className="text-xs">
+                  <p className="font-bold text-rose-200">Order Cancelled</p>
+                  <p className="text-rose-300/80 mt-0.5">This order has been cancelled. No shipment or fulfillment action is required.</p>
+                </div>
+              </div>
+            )}
+            {inspectOrder.status?.toString().toLowerCase() === 'delivered' && (
+              <div className="p-4 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 flex items-center gap-3">
+                <CheckCircle2 className="w-5 h-5 text-emerald-400 flex-shrink-0" />
+                <div className="text-xs">
+                  <p className="font-bold text-emerald-200">Order Completed & Delivered</p>
+                  <p className="text-emerald-300/80 mt-0.5">Customer has received package. Transaction is marked complete.</p>
+                </div>
+              </div>
+            )}
 
             {/* Status Updater Section */}
             <div className="bg-surface-2 p-4 rounded-xl border border-border space-y-3">

@@ -19,8 +19,39 @@ const config: Config = {
         'gold-light': '#E8C96A',
         'gold-dark': '#A07832',
         border: '#2A2820',
-        error: '#E85454',
-        success: '#4CAF50',
+        error: '#EF4444',
+        success: '#10B981',
+        emerald: {
+          DEFAULT: '#10B981',
+          light: '#34D399',
+          dark: '#059669',
+        },
+        ruby: {
+          DEFAULT: '#EF4444',
+          light: '#F87171',
+          dark: '#DC2626',
+        },
+        sapphire: {
+          DEFAULT: '#0EA5E9',
+          light: '#38BDF8',
+          dark: '#0284C7',
+        },
+        amber: {
+          DEFAULT: '#F59E0B',
+          light: '#FBBF24',
+          dark: '#D97706',
+        },
+        amethyst: {
+          DEFAULT: '#8B5CF6',
+          light: '#A78BFA',
+          dark: '#7C3AED',
+        },
+      },
+      boxShadow: {
+        'glow-gold': '0 0 25px rgba(201, 168, 76, 0.25)',
+        'glow-emerald': '0 0 25px rgba(16, 185, 129, 0.25)',
+        'glow-ruby': '0 0 25px rgba(239, 68, 68, 0.25)',
+        'glow-sapphire': '0 0 25px rgba(14, 165, 233, 0.25)',
       },
       fontFamily: {
         sans: ['Inter', 'sans-serif'],
