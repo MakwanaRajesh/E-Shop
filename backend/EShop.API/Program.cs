@@ -61,6 +61,7 @@ builder.Services.AddAuthorization();
 // ── CORS ──────────────────────────────────────────────────────────────────────
 var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
     ?? ["http://localhost:3000"];
+var frontendUrl = builder.Configuration["FRONTEND_URL"];
 
 builder.Services.AddCors(options =>
 {
@@ -69,12 +70,20 @@ builder.Services.AddCors(options =>
         {
             if (string.IsNullOrWhiteSpace(origin)) return false;
             if (allowedOrigins.Contains(origin)) return true;
+            if (!string.IsNullOrWhiteSpace(frontendUrl) &&
+                (origin.Equals(frontendUrl, StringComparison.OrdinalIgnoreCase) ||
+                 origin.Equals(frontendUrl.TrimEnd('/'), StringComparison.OrdinalIgnoreCase)))
+            {
+                return true;
+            }
             try
             {
                 var uri = new Uri(origin);
                 return uri.Host == "localhost"
                     || uri.Host.EndsWith(".vercel.app")
-                    || uri.Host == "vercel.app";
+                    || uri.Host == "vercel.app"
+                    || uri.Host.EndsWith(".netlify.app")
+                    || uri.Host.EndsWith(".onrender.com");
             }
             catch
             {
