@@ -460,6 +460,24 @@ public static class DbInitializer
             await context.SaveChangesAsync();
         }
 
+        // ── 5. Optimize Existing Image URLs for Ultra-Fast CDN Delivery ───────
+        var existingImages = await context.ProductImages.ToListAsync();
+        var modified = false;
+        foreach (var img in existingImages)
+        {
+            if (img.Url.Contains("images.unsplash.com") && !img.Url.Contains("auto=format"))
+            {
+                img.Url = img.Url + (img.Url.Contains('?') ? "&auto=format&fit=crop&w=800&q=70" : "?auto=format&fit=crop&w=800&q=70");
+                context.ProductImages.Update(img);
+                modified = true;
+            }
+        }
+        if (modified)
+        {
+            await context.SaveChangesAsync();
+            Console.WriteLine("[DbInitializer] Patched product images to auto-compressing WebP CDN URLs.");
+        }
+
         Console.WriteLine("[DbInitializer] Database initialized and verified successfully with comprehensive Men, Women, Kids & Luxury collections.");
     }
 

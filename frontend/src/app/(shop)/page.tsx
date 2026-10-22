@@ -16,45 +16,45 @@ const CATEGORY_CIRCLES = [
   {
     name: 'Men',
     href: '/products?category=men',
-    imageUrl: 'https://images.unsplash.com/photo-1617137984095-74e4e5e3613f?w=400&q=80',
+    imageUrl: 'https://images.unsplash.com/photo-1617137984095-74e4e5e3613f?auto=format&fit=crop&w=200&q=60',
     tag: 'Trending',
   },
   {
     name: 'Women',
     href: '/products?category=women',
-    imageUrl: 'https://images.unsplash.com/photo-1483985988355-763728e1935b?w=400&q=80',
+    imageUrl: 'https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=200&q=60',
     tag: 'New',
   },
   {
     name: 'Kids',
     href: '/products?category=kids',
-    imageUrl: 'https://images.unsplash.com/photo-1503919545889-aef636e10ad4?w=400&q=80',
+    imageUrl: 'https://images.unsplash.com/photo-1503919545889-aef636e10ad4?auto=format&fit=crop&w=200&q=60',
     tag: 'Cute',
   },
   {
     name: 'T-Shirts',
     href: '/products?category=men&subCategory=men-t-shirts',
-    imageUrl: 'https://images.unsplash.com/photo-1521572267360-ee0c2909d518?w=400&q=80',
+    imageUrl: 'https://images.unsplash.com/photo-1521572267360-ee0c2909d518?auto=format&fit=crop&w=200&q=60',
   },
   {
     name: 'Denim',
     href: '/products?category=men&subCategory=men-denim',
-    imageUrl: 'https://images.unsplash.com/photo-1542272604-780c96856592?w=400&q=80',
+    imageUrl: 'https://images.unsplash.com/photo-1542272604-780c96856592?auto=format&fit=crop&w=200&q=60',
   },
   {
     name: 'Footwear',
     href: '/products?category=footwear',
-    imageUrl: 'https://images.unsplash.com/photo-1549298916-b41d501d3772?w=400&q=80',
+    imageUrl: 'https://images.unsplash.com/photo-1549298916-b41d501d3772?auto=format&fit=crop&w=200&q=60',
   },
   {
     name: 'Watches',
     href: '/products?category=watches',
-    imageUrl: 'https://images.unsplash.com/photo-1523170335258-f5ed11844a49?w=400&q=80',
+    imageUrl: 'https://images.unsplash.com/photo-1523170335258-f5ed11844a49?auto=format&fit=crop&w=200&q=60',
   },
   {
     name: 'Fragrances',
     href: '/products?category=fragrances',
-    imageUrl: 'https://images.unsplash.com/photo-1541643600914-78b084683702?w=400&q=80',
+    imageUrl: 'https://images.unsplash.com/photo-1541643600914-78b084683702?auto=format&fit=crop&w=200&q=60',
   },
 ]
 
@@ -63,21 +63,21 @@ const FEATURED_COLLECTIONS = [
     name: "Men's Collection",
     slug: 'men',
     description: 'Supima T-Shirts, French Linen Shirts, Selvedge Denim & Italian Sneakers',
-    imageUrl: 'https://images.unsplash.com/photo-1617137984095-74e4e5e3613f?w=800&q=80',
+    imageUrl: 'https://images.unsplash.com/photo-1617137984095-74e4e5e3613f?auto=format&fit=crop&w=700&q=65',
     subChips: ['T-Shirts', 'Linen Shirts', 'Selvedge Jeans', 'Italian Sneakers', 'Activewear'],
   },
   {
     name: "Women's Couturier",
     slug: 'women',
     description: 'Mulberry Silk Slip Dresses, Chanderi Kurta Sets & Stiletto Heels',
-    imageUrl: 'https://images.unsplash.com/photo-1483985988355-763728e1935b?w=800&q=80',
+    imageUrl: 'https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=700&q=65',
     subChips: ['Silk Dresses', 'Chanderi Kurtas', 'Wide-Leg Denim', 'Designer Heels'],
   },
   {
     name: 'Horology & Leather',
     slug: 'watches',
     description: 'Precision Automatic Chronographs, Tuscan Briefcases & 18k Accents',
-    imageUrl: 'https://images.unsplash.com/photo-1523170335258-f5ed11844a49?w=800&q=80',
+    imageUrl: 'https://images.unsplash.com/photo-1523170335258-f5ed11844a49?auto=format&fit=crop&w=700&q=65',
     subChips: ['Chronographs', 'Tourbillons', 'Italian Briefcase', 'Rare Oud'],
   },
 ]

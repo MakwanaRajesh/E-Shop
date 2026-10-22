@@ -4,7 +4,7 @@ import React from 'react'
 import Image from 'next/image'
 import Link from 'next/link'
 import { Heart, ShoppingCart, Star } from 'lucide-react'
-import { cn, formatCurrency, getStockStatus, calculateDiscount } from '@/lib/utils'
+import { cn, formatCurrency, getStockStatus, calculateDiscount, optimizeImageUrl } from '@/lib/utils'
 import type { ProductListItem } from '@/types'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
@@ -22,6 +22,7 @@ interface ProductCardProps {
 export function ProductCard({ product, className }: ProductCardProps) {
   const [isHovered, setIsHovered] = React.useState(false)
   const [isAddingToCart, setIsAddingToCart] = React.useState(false)
+  const [imageLoaded, setImageLoaded] = React.useState(false)
   const { isAuthenticated } = useAuthStore()
   const { addItem } = useCartStore()
   const { isInWishlist, addItem: addToWishlist, removeItem: removeFromWishlist } = useWishlistStore()
@@ -97,14 +98,26 @@ export function ProductCard({ product, className }: ProductCardProps) {
       >
         {/* Image */}
         <div className="relative aspect-square overflow-hidden bg-surface-2">
+          {/* Shimmer skeleton until image loads */}
+          {!imageLoaded && (
+            <div className="absolute inset-0 bg-surface-2 animate-pulse flex items-center justify-center z-0">
+              <div className="w-8 h-8 rounded-full border border-gold/20 flex items-center justify-center">
+                <span className="w-2 h-2 rounded-full bg-gold/40 animate-ping" />
+              </div>
+            </div>
+          )}
+
           {imageUrl ? (
             <Image
-              src={imageUrl}
+              src={optimizeImageUrl(imageUrl, 450, 65)}
               alt={product.name}
               fill
+              loading="eager"
+              onLoad={() => setImageLoaded(true)}
               className={cn(
-                'object-cover transition-transform duration-500',
-                isHovered && 'scale-110',
+                'object-cover transition-all duration-500 z-10',
+                imageLoaded ? 'opacity-100 scale-100' : 'opacity-0 scale-95',
+                isHovered && 'scale-105',
               )}
               sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
             />

@@ -62,3 +62,34 @@ export function calculateDiscount(price: number, compareAtPrice?: number): numbe
   if (!compareAtPrice || compareAtPrice <= price) return 0
   return Math.round(((compareAtPrice - price) / compareAtPrice) * 100)
 }
+
+/**
+ * Optimizes remote images (Unsplash, Cloudinary, etc.) for instant loading and minimal payload.
+ * Rewrites URLs to request modern WebP/AVIF formats at the exact target dimensions.
+ */
+export function optimizeImageUrl(url: string | null | undefined, width = 450, quality = 65): string {
+  if (!url) {
+    return 'https://images.unsplash.com/photo-1521572267360-ee0c2909d518?auto=format&fit=crop&w=400&q=60'
+  }
+
+  try {
+    // Unsplash: append or override auto=format, fit=crop, w, q
+    if (url.includes('images.unsplash.com')) {
+      const parsed = new URL(url)
+      parsed.searchParams.set('auto', 'format')
+      parsed.searchParams.set('fit', 'crop')
+      parsed.searchParams.set('w', String(width))
+      parsed.searchParams.set('q', String(quality))
+      return parsed.toString()
+    }
+
+    // Cloudinary: inject format auto and quality auto
+    if (url.includes('res.cloudinary.com')) {
+      return url.replace('/upload/', `/upload/f_auto,q_auto:eco,w_${width}/`)
+    }
+  } catch {
+    // Return original if URL parsing fails
+  }
+
+  return url
+}

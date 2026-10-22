@@ -24,7 +24,7 @@ import { ProductDetailSkeleton } from '@/components/ui/Skeleton'
 import { ProductCard } from '@/components/product/ProductCard'
 import api from '@/lib/api'
 import type { Product, ProductListItem, Review } from '@/types'
-import { cn, formatCurrency, getStockStatus, calculateDiscount, formatRelativeDate } from '@/lib/utils'
+import { cn, formatCurrency, getStockStatus, calculateDiscount, formatRelativeDate, optimizeImageUrl } from '@/lib/utils'
 import { useAuthStore } from '@/store/auth'
 import { useCartStore } from '@/store/cart'
 import { useWishlistStore } from '@/store/wishlist'
@@ -190,13 +190,13 @@ export default function ProductDetailPage({ params }: Props) {
         {/* ── Image Gallery ── */}
         <div className="space-y-4">
           {/* Primary image */}
-          <div className="relative aspect-square rounded-2xl overflow-hidden bg-surface border border-border group">
+          <div className="relative aspect-square rounded-2xl overflow-hidden bg-surface-2 border border-border group">
             {currentImage ? (
               <Image
-                src={currentImage.url}
+                src={optimizeImageUrl(currentImage.url, 900, 75)}
                 alt={currentImage.altText ?? product.name}
                 fill
-                className="object-cover"
+                className="object-cover transition-opacity duration-300"
                 priority
                 sizes="(max-width: 1024px) 100vw, 50vw"
               />
@@ -254,7 +254,7 @@ export default function ProductDetailPage({ params }: Props) {
                   )}
                 >
                   <Image
-                    src={img.url}
+                    src={optimizeImageUrl(img.url, 160, 60)}
                     alt={img.altText ?? `Image ${i + 1}`}
                     fill
                     className="object-cover"

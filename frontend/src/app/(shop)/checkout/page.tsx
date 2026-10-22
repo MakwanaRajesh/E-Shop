@@ -290,55 +290,103 @@ export default function CheckoutPage() {
           </div>
 
           {/* Payment Selection */}
-          <div className="bg-surface border border-border rounded-2xl p-6 sm:p-8 space-y-4">
-            <h2 className="font-serif text-xl font-semibold text-beige border-b border-border pb-3">
-              Payment Method
-            </h2>
+          <div className="bg-surface border border-border rounded-2xl p-6 sm:p-8 space-y-4 shadow-md">
+            <div className="flex items-center justify-between border-b border-border pb-3">
+              <h2 className="font-serif text-xl font-semibold text-beige">
+                Payment Method
+              </h2>
+              <span className="text-xs text-gold font-mono font-medium flex items-center gap-1">
+                <ShieldCheck className="w-4 h-4 text-success" />
+                100% Encrypted & Safe
+              </span>
+            </div>
 
             <div className="space-y-3">
+              {/* Cash On Delivery (COD) - Active & Primary */}
               <label
-                className={`flex items-center justify-between p-4 rounded-xl border cursor-pointer transition-all ${
-                  paymentMethod === 'cod' ? 'border-gold bg-gold/10' : 'border-border bg-surface-2'
+                className={`flex items-start sm:items-center justify-between p-4 rounded-xl border cursor-pointer transition-all ${
+                  paymentMethod === 'cod'
+                    ? 'border-gold bg-gold/10 shadow-md shadow-gold/5'
+                    : 'border-border bg-surface-2 hover:border-gold/30'
                 }`}
               >
-                <div className="flex items-center gap-3">
+                <div className="flex items-start sm:items-center gap-3">
                   <input
                     type="radio"
                     name="payment"
                     value="cod"
                     checked={paymentMethod === 'cod'}
                     onChange={() => setPaymentMethod('cod')}
-                    className="accent-gold w-4 h-4"
+                    className="accent-gold w-4 h-4 mt-0.5 sm:mt-0"
                   />
                   <div>
-                    <p className="text-sm font-medium text-beige">Cash on Delivery (COD)</p>
-                    <p className="text-xs text-beige-muted">Pay comfortably in cash upon luxury doorstep delivery</p>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="text-sm font-semibold text-beige">Cash on Delivery (COD)</p>
+                      <span className="text-[10px] uppercase font-bold bg-success/20 text-success border border-success/30 px-2 py-0.5 rounded-full">
+                        ✓ Available across India
+                      </span>
+                    </div>
+                    <p className="text-xs text-beige-muted mt-0.5">
+                      Pay with Cash or UPI QR to the delivery associate upon white-glove doorstep arrival.
+                    </p>
                   </div>
                 </div>
-                <CheckCircle2 className={`w-5 h-5 ${paymentMethod === 'cod' ? 'text-gold' : 'text-transparent'}`} />
+                <CheckCircle2 className={`w-5 h-5 flex-shrink-0 ${paymentMethod === 'cod' ? 'text-gold' : 'text-transparent'}`} />
               </label>
 
-              <label
-                className={`flex items-center justify-between p-4 rounded-xl border cursor-pointer transition-all ${
-                  paymentMethod === 'razorpay' ? 'border-gold bg-gold/10' : 'border-border bg-surface-2'
-                }`}
+              {/* Online Payment (UPI / Cards / Net Banking) - Currently Unavailable */}
+              <div
+                className="flex items-start sm:items-center justify-between p-4 rounded-xl border border-border/60 bg-surface-2/40 opacity-70 cursor-not-allowed select-none"
+                onClick={() => toast('Online payment gateway is temporarily undergoing banking maintenance. Please use Cash on Delivery (COD).', { icon: '⚠️' })}
               >
-                <div className="flex items-center gap-3">
+                <div className="flex items-start sm:items-center gap-3">
                   <input
                     type="radio"
                     name="payment"
                     value="razorpay"
-                    checked={paymentMethod === 'razorpay'}
-                    onChange={() => setPaymentMethod('razorpay')}
-                    className="accent-gold w-4 h-4"
+                    disabled
+                    checked={false}
+                    className="w-4 h-4 mt-0.5 sm:mt-0 cursor-not-allowed opacity-50"
                   />
                   <div>
-                    <p className="text-sm font-medium text-beige">Prepaid Online Payment (UPI / Cards / Netbanking)</p>
-                    <p className="text-xs text-beige-muted">Secured online payment with instant order confirmation</p>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="text-sm font-medium text-beige-muted">Prepaid Online (UPI / Cards / Net Banking)</p>
+                      <span className="text-[10px] uppercase font-bold bg-amber-500/15 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded-full">
+                        Currently Unavailable
+                      </span>
+                    </div>
+                    <p className="text-xs text-beige-muted/70 mt-0.5">
+                      Online gateway undergoing routine maintenance. Please select Cash on Delivery above to place your order.
+                    </p>
                   </div>
                 </div>
-                <CheckCircle2 className={`w-5 h-5 ${paymentMethod === 'razorpay' ? 'text-gold' : 'text-transparent'}`} />
-              </label>
+              </div>
+
+              {/* Bank Wire / EMI - Currently Unavailable */}
+              <div
+                className="flex items-start sm:items-center justify-between p-4 rounded-xl border border-border/40 bg-surface-2/20 opacity-50 cursor-not-allowed select-none"
+                onClick={() => toast('Direct Bank Transfer is currently unavailable. Please place your order using Cash on Delivery (COD).', { icon: '⚠️' })}
+              >
+                <div className="flex items-start sm:items-center gap-3">
+                  <input
+                    type="radio"
+                    disabled
+                    checked={false}
+                    className="w-4 h-4 mt-0.5 sm:mt-0 cursor-not-allowed opacity-50"
+                  />
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="text-sm font-medium text-beige-muted/80">Direct Bank Wire / EMI</p>
+                      <span className="text-[10px] uppercase font-bold bg-border text-beige-muted px-2 py-0.5 rounded-full">
+                        Currently Unavailable
+                      </span>
+                    </div>
+                    <p className="text-xs text-beige-muted/60 mt-0.5">
+                      Direct wire transfers are reserved for corporate accounts.
+                    </p>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
