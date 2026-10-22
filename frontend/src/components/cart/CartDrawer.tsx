@@ -20,6 +20,7 @@ import { useAuthStore } from '@/store/auth'
 import { useAuthModalStore } from '@/store/authModal'
 import { Button } from '@/components/ui/Button'
 import { formatCurrency } from '@/lib/utils'
+import { CouponSection } from '@/components/cart/CouponSection'
 import toast from 'react-hot-toast'
 
 const FREE_SHIPPING_THRESHOLD = 5000
@@ -232,12 +233,21 @@ export function CartDrawer() {
 
           {/* Sticky Bottom Actions */}
           {items.length > 0 && (
-            <div className="p-5 border-t border-border bg-surface space-y-4">
+            <div className="p-5 border-t border-border bg-surface space-y-4 max-h-[50vh] overflow-y-auto">
+              {/* Promo Code & Available Vouchers */}
+              <CouponSection compact />
+
               <div className="space-y-1.5 text-xs">
                 <div className="flex justify-between text-beige-muted">
                   <span>Subtotal</span>
                   <span className="text-beige font-semibold">{formatCurrency(subtotal)}</span>
                 </div>
+                {((cart as any)?.discountAmount ?? 0) > 0 && (
+                  <div className="flex justify-between text-success font-medium">
+                    <span>Coupon Discount</span>
+                    <span>-{formatCurrency((cart as any).discountAmount)}</span>
+                  </div>
+                )}
                 <div className="flex justify-between text-beige-muted">
                   <span>Estimated Delivery</span>
                   <span className="text-success font-medium">
@@ -247,7 +257,14 @@ export function CartDrawer() {
                 <div className="flex justify-between items-baseline pt-2 border-t border-border">
                   <span className="font-semibold text-beige text-sm">Estimated Total</span>
                   <span className="font-serif text-xl font-bold gold-text-gradient">
-                    {formatCurrency(subtotal + (remainingForFreeShipping === 0 ? 0 : 49))}
+                    {formatCurrency(
+                      Math.max(
+                        0,
+                        subtotal -
+                          ((cart as any)?.discountAmount ?? 0) +
+                          (remainingForFreeShipping === 0 ? 0 : 49),
+                      ),
+                    )}
                   </span>
                 </div>
               </div>

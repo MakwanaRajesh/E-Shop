@@ -440,25 +440,70 @@ public static class DbInitializer
             ]
         });
 
-        // ── 4. Ensure Welcome Coupon ───────────────────────────────────────────
-        if (!await context.Coupons.AnyAsync(c => c.Code == "NEXUS10"))
+        // ── 4. Ensure Welcome & Promotional Coupons ────────────────────────────
+        var initialCoupons = new List<Coupon>
         {
-            var coupon = new Coupon
+            new Coupon
             {
                 Code = "NEXUS10",
-                Description = "Exclusive 10% welcome discount on your first luxury order",
+                Description = "Exclusive 10% welcome discount on your luxury order",
                 DiscountType = DiscountType.Percentage,
                 DiscountValue = 10m,
                 MinOrderValue = 1000m,
                 MaxDiscountAmount = 10000m,
-                UsageLimit = 1000,
+                UsageLimit = 5000,
                 UsedCount = 0,
                 IsActive = true,
                 ExpiresAt = DateTime.UtcNow.AddYears(1),
-            };
-            await context.Coupons.AddAsync(coupon);
-            await context.SaveChangesAsync();
+            },
+            new Coupon
+            {
+                Code = "FIRST500",
+                Description = "Flat ₹500 instant discount on orders above ₹2,000",
+                DiscountType = DiscountType.FixedAmount,
+                DiscountValue = 500m,
+                MinOrderValue = 2000m,
+                UsageLimit = 5000,
+                UsedCount = 0,
+                IsActive = true,
+                ExpiresAt = DateTime.UtcNow.AddYears(1),
+            },
+            new Coupon
+            {
+                Code = "LUXE20",
+                Description = "Elite 20% off on signature luxury collections above ₹5,000",
+                DiscountType = DiscountType.Percentage,
+                DiscountValue = 20m,
+                MinOrderValue = 5000m,
+                MaxDiscountAmount = 15000m,
+                UsageLimit = 5000,
+                UsedCount = 0,
+                IsActive = true,
+                ExpiresAt = DateTime.UtcNow.AddYears(1),
+            },
+            new Coupon
+            {
+                Code = "VIPFESTIVE",
+                Description = "Festive Celebration 15% off on orders above ₹3,000",
+                DiscountType = DiscountType.Percentage,
+                DiscountValue = 15m,
+                MinOrderValue = 3000m,
+                MaxDiscountAmount = 5000m,
+                UsageLimit = 5000,
+                UsedCount = 0,
+                IsActive = true,
+                ExpiresAt = DateTime.UtcNow.AddYears(1),
+            }
+        };
+
+        foreach (var c in initialCoupons)
+        {
+            if (!await context.Coupons.AnyAsync(existing => existing.Code == c.Code))
+            {
+                await context.Coupons.AddAsync(c);
+            }
         }
+        await context.SaveChangesAsync();
 
         // ── 5. Optimize Existing Image URLs for Ultra-Fast CDN Delivery ───────
         var existingImages = await context.ProductImages.ToListAsync();

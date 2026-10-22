@@ -104,8 +104,24 @@ public class CouponController(AppDbContext db, IUnitOfWork uow) : ControllerBase
         return NoContent();
     }
 
-    // ── POST /api/coupons/validate ──────────────────────────────────[Auth]────
-    [Authorize]
+    // ── GET /api/coupons/available ─────────────────────────────────[Public]───
+    [AllowAnonymous]
+    [HttpGet("available")]
+    public async Task<IActionResult> GetAvailableCoupons()
+    {
+        var now = DateTime.UtcNow;
+        var coupons = await _db.Coupons
+            .AsNoTracking()
+            .Where(c => c.IsActive && (!c.ExpiresAt.HasValue || c.ExpiresAt > now))
+            .OrderBy(c => c.MinOrderValue)
+            .Take(8)
+            .ToListAsync();
+
+        return Ok(coupons.Select(MapDto));
+    }
+
+    // ── POST /api/coupons/validate ──────────────────────────────────[Public]───
+    [AllowAnonymous]
     [HttpPost("validate")]
     public async Task<IActionResult> Validate([FromBody] ValidateCouponRequest req)
     {

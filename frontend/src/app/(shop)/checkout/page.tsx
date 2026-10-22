@@ -13,12 +13,13 @@ import { Input } from '@/components/ui/Input'
 import api from '@/lib/api'
 import toast from 'react-hot-toast'
 import { formatCurrency } from '@/lib/utils'
+import { CouponSection } from '@/components/cart/CouponSection'
 import type { Address } from '@/types'
 
 export default function CheckoutPage() {
   const router = useRouter()
   const { user, isAuthenticated } = useAuthStore()
-  const { cart, clearCart, fetchCart } = useCartStore()
+  const { cart, clearCart, fetchCart, appliedCoupon } = useCartStore()
   const { open: openAuthModal } = useAuthModalStore()
 
   const [loading, setLoading] = React.useState(false)
@@ -75,7 +76,8 @@ export default function CheckoutPage() {
 
   const items = cart?.items ?? []
   const subtotal = cart?.subtotal ?? (cart as any)?.subTotal ?? 0
-  const total = cart?.total ?? subtotal
+  const discount = appliedCoupon?.discountAmount ?? (cart as any)?.discountAmount ?? 0
+  const total = Math.max(0, subtotal - discount)
 
   if (items.length === 0) {
     return (
@@ -139,7 +141,7 @@ export default function CheckoutPage() {
       const orderRes = await api.post('/api/orders', {
         addressId: finalAddressId || null,
         paymentMethod: paymentMethod === 'cod' ? 'CashOnDelivery' : 'Razorpay',
-        couponCode: cart?.couponCode ?? null,
+        couponCode: appliedCoupon?.code ?? cart?.couponCode ?? null,
         items: itemsPayload,
         shippingAddress: shippingAddressPayload,
       })
@@ -415,11 +417,22 @@ export default function CheckoutPage() {
 
             <div className="h-px bg-border" />
 
+            {/* Coupons & Promo Codes */}
+            <CouponSection compact />
+
+            <div className="h-px bg-border" />
+
             <div className="space-y-2 text-sm">
               <div className="flex justify-between text-beige-muted">
                 <span>Subtotal</span>
-                <span className="text-beige">{formatCurrency(subtotal)}</span>
+                <span className="text-beige font-semibold">{formatCurrency(subtotal)}</span>
               </div>
+              {discount > 0 && (
+                <div className="flex justify-between text-success font-medium">
+                  <span>Coupon Discount</span>
+                  <span>-{formatCurrency(discount)}</span>
+                </div>
+              )}
               <div className="flex justify-between text-beige-muted">
                 <span>Doorstep Delivery</span>
                 <span className="text-success font-medium">FREE</span>
