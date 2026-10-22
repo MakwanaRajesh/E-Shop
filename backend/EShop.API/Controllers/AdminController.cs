@@ -102,14 +102,33 @@ public class AdminController(AppDbContext db) : ControllerBase
         {
             o.Id,
             o.OrderNumber,
-            CustomerName    = $"{o.User.FirstName} {o.User.LastName}",
-            CustomerEmail   = o.User.Email,
+            CustomerName         = $"{o.User.FirstName} {o.User.LastName}",
+            CustomerEmail        = o.User.Email,
             o.Status,
             o.PaymentStatus,
             o.PaymentMethod,
             o.TotalAmount,
             o.CreatedAt,
-            ItemCount = o.Items.Count
+            ItemCount            = o.Items.Count,
+            ShippingName         = o.ShippingName,
+            ShippingPhone        = o.ShippingPhone,
+            ShippingAddressLine1 = o.ShippingAddressLine1,
+            ShippingAddressLine2 = o.ShippingAddressLine2,
+            ShippingCity         = o.ShippingCity,
+            ShippingState        = o.ShippingState,
+            ShippingPinCode      = o.ShippingPinCode,
+            TrackingNumber       = o.TrackingNumber,
+            Items                = o.Items.Select(i => new
+            {
+                i.Id,
+                i.ProductId,
+                i.ProductName,
+                i.ProductImageUrl,
+                i.VariantName,
+                i.Quantity,
+                i.UnitPrice,
+                i.TotalPrice
+            }).ToList()
         });
 
         return Ok(new { Items = dtos, TotalCount = total, Page = page, PageSize = pageSize, TotalPages = totalPages });

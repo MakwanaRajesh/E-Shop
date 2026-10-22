@@ -70,7 +70,8 @@ public record CreateProductRequest(
     Guid CategoryId,
     string? MetaTitle,
     string? MetaDescription,
-    double? Weight
+    double? Weight,
+    string? ImageUrl = null
 );
 
 public record UpdateProductRequest(

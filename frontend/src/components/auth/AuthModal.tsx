@@ -10,6 +10,8 @@ import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { useAuthModalStore } from '@/store/authModal'
 import { useAuthStore } from '@/store/auth'
+import { useCartStore } from '@/store/cart'
+import { useWishlistStore } from '@/store/wishlist'
 import api from '@/lib/api'
 import type { AuthResponse, LoginRequest, RegisterRequest } from '@/types'
 import { useRouter } from 'next/navigation'
@@ -45,6 +47,9 @@ export function AuthModal() {
       toast.success(`Welcome back, ${response.data.user.firstName}!`)
       close()
       resetLogin()
+      // Sync guest cart and wishlist
+      useCartStore.getState().syncGuestCartToServer().catch(() => null)
+      useWishlistStore.getState().fetchWishlist().catch(() => null)
       if (redirectAfterLogin) router.push(redirectAfterLogin)
     } catch (err: unknown) {
       const msg = (err as { message?: string })?.message ?? 'Invalid credentials'
@@ -66,6 +71,9 @@ export function AuthModal() {
       toast.success(`Welcome to NEXUS, ${response.data.user.firstName}!`)
       close()
       resetSignup()
+      // Sync guest cart and wishlist
+      useCartStore.getState().syncGuestCartToServer().catch(() => null)
+      useWishlistStore.getState().fetchWishlist().catch(() => null)
       if (redirectAfterLogin) router.push(redirectAfterLogin)
     } catch (err: unknown) {
       const msg = (err as { message?: string })?.message ?? 'Registration failed'

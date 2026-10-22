@@ -12,6 +12,7 @@ import { useAuthStore } from '@/store/auth'
 import { useCartStore } from '@/store/cart'
 import { useWishlistStore } from '@/store/wishlist'
 import { useAuthModalStore } from '@/store/authModal'
+import toast from 'react-hot-toast'
 
 interface ProductCardProps {
   product: ProductListItem
@@ -36,13 +37,21 @@ export function ProductCard({ product, className }: ProductCardProps) {
   const handleAddToCart = async (e: React.MouseEvent) => {
     e.preventDefault()
     e.stopPropagation()
-    if (!isAuthenticated) {
-      openAuthModal('login')
-      return
-    }
     setIsAddingToCart(true)
     try {
-      await addItem(product.id, 1)
+      await addItem(product.id, 1, undefined, {
+        name: product.name,
+        slug: product.slug,
+        price: product.price,
+        imageUrl: imageUrl,
+        stock: stockCount,
+      })
+      toast.success(`${product.name} added to cart!`, {
+        icon: '🛍️',
+        position: 'bottom-right',
+      })
+    } catch {
+      toast.error('Failed to add to cart')
     } finally {
       setIsAddingToCart(false)
     }
@@ -52,13 +61,23 @@ export function ProductCard({ product, className }: ProductCardProps) {
     e.preventDefault()
     e.stopPropagation()
     if (!isAuthenticated) {
+      toast('Please sign in to save items to your wishlist', { icon: '🤍' })
       openAuthModal('login')
       return
     }
     if (inWishlist) {
       await removeFromWishlist(product.id)
+      toast.success('Removed from wishlist')
     } else {
-      await addToWishlist(product.id)
+      await addToWishlist(product.id, {
+        id: product.id,
+        name: product.name,
+        slug: product.slug,
+        price: product.price,
+        primaryImageUrl: imageUrl,
+        categoryName: categoryLabel,
+      })
+      toast.success('Saved to wishlist!', { icon: '💛' })
     }
   }
 
@@ -208,10 +227,10 @@ export function ProductCard({ product, className }: ProductCardProps) {
             className="w-full sm:hidden"
             onClick={handleAddToCart}
             isLoading={isAddingToCart}
-            disabled={product.stockQuantity === 0}
+            disabled={stockCount === 0}
           >
             <ShoppingCart className="w-4 h-4" />
-            {product.stockQuantity === 0 ? 'Out of Stock' : 'Add to Cart'}
+            {stockCount === 0 ? 'Out of Stock' : 'Add to Cart'}
           </Button>
         </div>
       </div>

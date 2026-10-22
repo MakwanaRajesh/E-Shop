@@ -73,25 +73,11 @@ export default function CartPage() {
 
   const handleCheckout = () => {
     if (!isAuthenticated) {
+      toast('Please sign in or register to complete your order', { icon: '🔒' })
       openAuthModal('login', '/checkout')
       return
     }
     router.push('/checkout')
-  }
-
-  if (!isAuthenticated) {
-    return (
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20 text-center">
-        <div className="w-24 h-24 rounded-full bg-surface border border-border flex items-center justify-center mx-auto mb-6">
-          <ShoppingBag className="w-10 h-10 text-beige-muted/40" />
-        </div>
-        <h2 className="font-serif text-3xl font-bold text-beige mb-3">Your Cart</h2>
-        <p className="text-beige-muted mb-8">Sign in to view your cart and checkout</p>
-        <Button variant="primary" size="lg" onClick={() => openAuthModal('login', '/cart')}>
-          Sign In to Continue
-        </Button>
-      </div>
-    )
   }
 
   if (isLoading && !cart) {

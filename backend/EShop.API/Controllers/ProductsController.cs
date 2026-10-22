@@ -144,6 +144,18 @@ public class ProductsController(AppDbContext db, IUnitOfWork uow) : ControllerBa
         };
 
         await _db.Products.AddAsync(product);
+
+        if (!string.IsNullOrWhiteSpace(req.ImageUrl))
+        {
+            await _db.ProductImages.AddAsync(new ProductImage
+            {
+                ProductId = product.Id,
+                Url       = req.ImageUrl.Trim(),
+                IsPrimary = true,
+                SortOrder = 0
+            });
+        }
+
         await _uow.SaveChangesAsync();
 
         return CreatedAtAction(nameof(GetBySlug), new { slug = product.Slug }, new { id = product.Id, slug = product.Slug });

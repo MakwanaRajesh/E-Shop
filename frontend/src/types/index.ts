@@ -146,10 +146,12 @@ export interface Cart {
   sessionId?: string
   items: CartItem[]
   subtotal: number
-  discountAmount: number
+  subTotal?: number
+  discountAmount?: number
   couponCode?: string
   total: number
   itemCount: number
+  totalItems?: number
   createdAt: string
   updatedAt: string
 }
@@ -158,16 +160,20 @@ export interface Cart {
 
 export interface Address {
   id: string
-  userId: string
+  userId?: string
   fullName: string
-  phone: string
+  phone?: string
+  phoneNumber?: string
   addressLine1: string
   addressLine2?: string
   city: string
   state: string
-  postalCode: string
-  country: string
-  isDefault: boolean
+  pinCode?: string
+  postalCode?: string
+  country?: string
+  isDefault?: boolean
+  landmark?: string
+  addressType?: string
 }
 
 // ─── Order ────────────────────────────────────────────────────────────────────
@@ -185,9 +191,11 @@ export type PaymentStatus = 'pending' | 'paid' | 'failed' | 'refunded'
 
 export interface OrderItem {
   id: string
-  orderId: string
+  orderId?: string
   productId: string
-  product: Pick<ProductListItem, 'id' | 'name' | 'slug' | 'primaryImage'>
+  product?: Pick<ProductListItem, 'id' | 'name' | 'slug' | 'primaryImage'>
+  productName?: string
+  productImageUrl?: string
   variantId?: string
   variantName?: string
   quantity: number
@@ -206,6 +214,11 @@ export interface Order {
   shippingAddress?: Address
   shippingName?: string
   shippingPhone?: string
+  shippingAddressLine1?: string
+  shippingAddressLine2?: string
+  shippingCity?: string
+  shippingState?: string
+  shippingPinCode?: string
   subtotal?: number
   subTotal?: number
   shippingCost?: number
@@ -217,6 +230,9 @@ export interface Order {
   notes?: string
   trackingNumber?: string
   createdAt: string
+  paidAt?: string
+  shippedAt?: string
+  deliveredAt?: string
   updatedAt?: string
 }
 

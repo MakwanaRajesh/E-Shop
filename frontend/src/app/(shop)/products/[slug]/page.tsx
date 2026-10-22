@@ -3,7 +3,7 @@
 import React from 'react'
 import Image from 'next/image'
 import Link from 'next/link'
-import { notFound } from 'next/navigation'
+import { notFound, useRouter } from 'next/navigation'
 import {
   Star,
   Heart,
@@ -36,6 +36,7 @@ interface Props {
 
 export default function ProductDetailPage({ params }: Props) {
   const { slug } = React.use(params)
+  const router = useRouter()
   const [product, setProduct] = React.useState<Product | null>(null)
   const [related, setRelated] = React.useState<ProductListItem[]>([])
   const [reviews, setReviews] = React.useState<Review[]>([])
@@ -88,13 +89,27 @@ export default function ProductDetailPage({ params }: Props) {
     fetchProduct()
   }, [slug])
 
-  const handleAddToCart = async () => {
-    if (!isAuthenticated) { openAuthModal('login'); return }
+  const handleAddToCart = async (goToCheckout = false) => {
     if (!product) return
     setIsAddingToCart(true)
     try {
-      await addItem(product.id, quantity, selectedVariantId)
-      toast.success('Added to cart!')
+      await addItem(product.id, quantity, selectedVariantId, {
+        name: product.name,
+        slug: product.slug,
+        price: effectivePrice,
+        imageUrl: currentImage?.url ?? product.images?.[0]?.url,
+        stock: effectiveStock,
+        variantName: selectedVariant?.name,
+        variantValue: selectedVariant?.value,
+      })
+      toast.success(`${product.name} added to cart!`, { icon: '🛍️' })
+      if (goToCheckout) {
+        if (!isAuthenticated) {
+          openAuthModal('login', '/checkout')
+        } else {
+          router.push('/checkout')
+        }
+      }
     } catch {
       toast.error('Failed to add to cart')
     } finally {
@@ -103,14 +118,25 @@ export default function ProductDetailPage({ params }: Props) {
   }
 
   const handleWishlist = async () => {
-    if (!isAuthenticated) { openAuthModal('login'); return }
+    if (!isAuthenticated) {
+      toast('Please sign in to save items to your wishlist', { icon: '🤍' })
+      openAuthModal('login')
+      return
+    }
     if (!product) return
     if (isInWishlist(product.id)) {
       await removeFromWishlist(product.id)
       toast.success('Removed from wishlist')
     } else {
-      await addToWishlist(product.id)
-      toast.success('Added to wishlist!')
+      await addToWishlist(product.id, {
+        id: product.id,
+        name: product.name,
+        slug: product.slug,
+        price: product.price,
+        primaryImageUrl: currentImage?.url ?? product.images?.[0]?.url,
+        categoryName: product.categoryName,
+      })
+      toast.success('Saved to wishlist!', { icon: '💛' })
     }
   }
 
@@ -350,12 +376,12 @@ export default function ProductDetailPage({ params }: Props) {
           </div>
 
           {/* CTAs */}
-          <div className="flex gap-3">
+          <div className="flex flex-col sm:flex-row gap-3">
             <Button
-              variant="primary"
+              variant="outline"
               size="lg"
-              className="flex-1"
-              onClick={handleAddToCart}
+              className="flex-1 border-gold/50 text-gold hover:bg-gold hover:text-background"
+              onClick={() => handleAddToCart(false)}
               isLoading={isAddingToCart}
               disabled={effectiveStock === 0}
             >
@@ -363,13 +389,24 @@ export default function ProductDetailPage({ params }: Props) {
               {effectiveStock === 0 ? 'Out of Stock' : 'Add to Cart'}
             </Button>
             <Button
+              variant="primary"
+              size="lg"
+              className="flex-1 font-semibold"
+              onClick={() => handleAddToCart(true)}
+              isLoading={isAddingToCart}
+              disabled={effectiveStock === 0}
+            >
+              Buy Now
+            </Button>
+            <Button
               variant="secondary"
               size="lg"
               onClick={handleWishlist}
               aria-label={inWishlist ? 'Remove from wishlist' : 'Add to wishlist'}
+              className="px-4"
             >
               <Heart
-                className={cn('w-5 h-5', inWishlist && 'fill-error text-error')}
+                className={cn('w-5 h-5 transition-colors', inWishlist ? 'fill-error text-error' : 'text-beige-muted hover:text-error')}
               />
             </Button>
           </div>

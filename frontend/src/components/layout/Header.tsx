@@ -50,6 +50,8 @@ export function Header() {
 
   const handleLogout = () => {
     logout()
+    useCartStore.getState().clearCart()
+    useWishlistStore.getState().clearWishlist()
     router.push('/')
   }
 
@@ -128,8 +130,8 @@ export function Header() {
             </Link>
 
             {/* Cart */}
-            <button
-              onClick={() => setCartOpen(true)}
+            <Link
+              href="/cart"
               className="relative w-9 h-9 flex items-center justify-center rounded text-beige-muted hover:text-beige hover:bg-surface-2 transition-colors"
               aria-label="Cart"
             >
@@ -139,7 +141,7 @@ export function Header() {
                   {cartCount > 99 ? '99+' : cartCount}
                 </span>
               )}
-            </button>
+            </Link>
 
             {/* Account */}
             {isAuthenticated && user ? (
@@ -281,8 +283,9 @@ export function Header() {
                   </span>
                 )}
               </Link>
-              <button
-                onClick={() => { setMobileOpen(false); setCartOpen(true) }}
+              <Link
+                href="/cart"
+                onClick={() => setMobileOpen(false)}
                 className="relative flex items-center gap-2 text-sm text-beige-muted hover:text-beige px-4 py-2"
               >
                 <ShoppingCart className="w-4 h-4" />
@@ -292,7 +295,7 @@ export function Header() {
                     {cartCount}
                   </span>
                 )}
-              </button>
+              </Link>
             </div>
             {isAuthenticated ? (
               <button

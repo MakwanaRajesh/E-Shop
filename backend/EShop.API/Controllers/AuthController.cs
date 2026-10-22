@@ -135,6 +135,27 @@ public class AuthController(
         return Ok(MapUserDto(user));
     }
 
+    // ── PUT /api/auth/me ──────────────────────────────────────────────────────
+    [Authorize]
+    [HttpPut("me")]
+    public async Task<IActionResult> UpdateProfile([FromBody] UpdateProfileRequest req)
+    {
+        var userId = GetCurrentUserId();
+        if (userId == Guid.Empty) return Unauthorized();
+
+        var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId);
+        if (user is null) return NotFound(new { message = "User not found." });
+
+        if (!string.IsNullOrWhiteSpace(req.FirstName)) user.FirstName = req.FirstName.Trim();
+        if (!string.IsNullOrWhiteSpace(req.LastName)) user.LastName = req.LastName.Trim();
+        if (req.PhoneNumber is not null) user.PhoneNumber = req.PhoneNumber.Trim();
+
+        _db.Users.Update(user);
+        await _uow.SaveChangesAsync();
+
+        return Ok(MapUserDto(user));
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
     private Guid GetCurrentUserId()
     {
