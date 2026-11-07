@@ -17,6 +17,27 @@ public class ProductsController(AppDbContext db, IUnitOfWork uow) : ControllerBa
     private readonly AppDbContext _db  = db;
     private readonly IUnitOfWork  _uow = uow;
 
+    // Helper to normalize category queries (man, female, etc.)
+    private static string NormalizeCategoryTerm(string? term)
+    {
+        if (string.IsNullOrWhiteSpace(term)) return string.Empty;
+        var t = term.Trim().ToLowerInvariant();
+        return t switch
+        {
+            "man" or "men" or "male" or "mens" or "men's" or "gents" => "men",
+            "female" or "woman" or "women" or "womens" or "women's" or "ladies" => "women",
+            "kid" or "kids" or "child" or "children" => "kids",
+            "boy" or "boys" => "kids-boys",
+            "girl" or "girls" => "kids-girls",
+            "shoe" or "shoes" or "sneaker" or "sneakers" or "footwear" => "footwear",
+            "watch" or "watches" or "timepiece" => "watches",
+            "perfume" or "perfumes" or "cologne" or "fragrance" or "fragrances" => "fragrances",
+            "jewelry" or "jewellery" => "jewelry",
+            "accessory" or "accessories" => "accessories",
+            _ => t
+        };
+    }
+
     // ── GET /api/products ─────────────────────────────────────────────────────
     [HttpGet]
     public async Task<IActionResult> GetAll([FromQuery] ProductQueryParams q)
@@ -32,8 +53,48 @@ public class ProductsController(AppDbContext db, IUnitOfWork uow) : ControllerBa
         // Intelligent Search (tokens across Title, Tags, Description, Category Name)
         if (!string.IsNullOrWhiteSpace(q.Search))
         {
-            var terms = q.Search.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-            foreach (var term in terms)
+            var rawSearch = q.Search.Trim().ToLowerInvariant();
+            var terms = rawSearch.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+            bool isMenIntent = terms.Any(t => t is "man" or "men" or "male" or "mens" or "gents");
+            bool isWomenIntent = terms.Any(t => t is "female" or "woman" or "women" or "womens" or "ladies");
+            bool isKidsIntent = terms.Any(t => t is "kid" or "kids" or "child" or "children" or "boy" or "boys" or "girl" or "girls");
+
+            if (isMenIntent && !isWomenIntent)
+            {
+                query = query.Where(p =>
+                    (p.Category.Slug == "men" || (p.Category.Parent != null && p.Category.Parent.Slug == "men") ||
+                     (p.Tags != null && EF.Functions.ILike(p.Tags, "%men%"))) &&
+                    p.Category.Slug != "women" &&
+                    (p.Category.Parent == null || p.Category.Parent.Slug != "women")
+                );
+            }
+            else if (isWomenIntent && !isMenIntent)
+            {
+                query = query.Where(p =>
+                    (p.Category.Slug == "women" || (p.Category.Parent != null && p.Category.Parent.Slug == "women") ||
+                     (p.Tags != null && (EF.Functions.ILike(p.Tags, "%women%") || EF.Functions.ILike(p.Tags, "%female%")))) &&
+                    p.Category.Slug != "men" &&
+                    (p.Category.Parent == null || p.Category.Parent.Slug != "men")
+                );
+            }
+            else if (isKidsIntent)
+            {
+                query = query.Where(p =>
+                    p.Category.Slug == "kids" ||
+                    (p.Category.Parent != null && p.Category.Parent.Slug == "kids") ||
+                    (p.Tags != null && EF.Functions.ILike(p.Tags, "%kids%"))
+                );
+            }
+
+            var contentTerms = terms.Where(t =>
+                t is not ("man" or "men" or "male" or "mens" or "gents" or
+                          "female" or "woman" or "women" or "womens" or "ladies" or
+                          "kid" or "kids" or "child" or "children" or
+                          "cloth" or "cloths" or "clothes" or "clothing" or "apparel" or "for" or "in" or "and" or "the")
+            ).ToList();
+
+            foreach (var term in contentTerms)
             {
                 var pattern = $"%{term}%";
                 query = query.Where(p =>
@@ -55,22 +116,118 @@ public class ProductsController(AppDbContext db, IUnitOfWork uow) : ControllerBa
         }
         else if (!string.IsNullOrWhiteSpace(q.Category))
         {
-            var catSlug = q.Category.Trim().ToLowerInvariant();
-            query = query.Where(p =>
-                p.Category.Slug == catSlug ||
-                (p.Category.Parent != null && p.Category.Parent.Slug == catSlug) ||
-                EF.Functions.ILike(p.Category.Name, $"%{catSlug}%") ||
-                (p.Category.Parent != null && EF.Functions.ILike(p.Category.Parent.Name, $"%{catSlug}%"))
-            );
+            var catSlug = NormalizeCategoryTerm(q.Category);
+            if (catSlug == "men")
+            {
+                query = query.Where(p =>
+                    (p.Category.Slug == "men" || (p.Category.Parent != null && p.Category.Parent.Slug == "men")) &&
+                    p.Category.Slug != "women" &&
+                    (p.Category.Parent == null || p.Category.Parent.Slug != "women")
+                );
+            }
+            else if (catSlug == "women")
+            {
+                query = query.Where(p =>
+                    (p.Category.Slug == "women" || (p.Category.Parent != null && p.Category.Parent.Slug == "women")) &&
+                    p.Category.Slug != "men" &&
+                    (p.Category.Parent == null || p.Category.Parent.Slug != "men")
+                );
+            }
+            else if (catSlug == "kids")
+            {
+                query = query.Where(p =>
+                    p.Category.Slug == "kids" ||
+                    (p.Category.Parent != null && p.Category.Parent.Slug == "kids")
+                );
+            }
+            else if (catSlug == "footwear")
+            {
+                query = query.Where(p =>
+                    p.Category.Slug == "footwear" ||
+                    (p.Category.Parent != null && p.Category.Parent.Slug == "footwear") ||
+                    p.Category.Slug == "men-footwear" ||
+                    p.Category.Slug == "women-footwear" ||
+                    p.Category.Slug == "kids-footwear"
+                );
+            }
+            else
+            {
+                query = query.Where(p =>
+                    p.Category.Slug == catSlug ||
+                    (p.Category.Parent != null && p.Category.Parent.Slug == catSlug) ||
+                    p.Category.Name.ToLower() == catSlug ||
+                    (p.Category.Parent != null && p.Category.Parent.Name.ToLower() == catSlug)
+                );
+            }
         }
 
         // Subcategory Filter (by slug or name)
         if (!string.IsNullOrWhiteSpace(q.SubCategory))
         {
-            var subSlug = q.SubCategory.Trim().ToLowerInvariant();
+            var subSlug = NormalizeCategoryTerm(q.SubCategory);
             query = query.Where(p =>
                 p.Category.Slug == subSlug ||
-                EF.Functions.ILike(p.Category.Name, $"%{subSlug}%")
+                (p.Category.Parent != null && p.Category.Parent.Slug == subSlug) ||
+                p.Category.Name.ToLower() == subSlug
+            );
+        }
+
+        // Gender Filter
+        if (!string.IsNullOrWhiteSpace(q.Gender))
+        {
+            var genderSlug = NormalizeCategoryTerm(q.Gender);
+            if (genderSlug == "men")
+            {
+                query = query.Where(p =>
+                    (p.Category.Slug == "men" || (p.Category.Parent != null && p.Category.Parent.Slug == "men")) &&
+                    p.Category.Slug != "women" &&
+                    (p.Category.Parent == null || p.Category.Parent.Slug != "women")
+                );
+            }
+            else if (genderSlug == "women")
+            {
+                query = query.Where(p =>
+                    (p.Category.Slug == "women" || (p.Category.Parent != null && p.Category.Parent.Slug == "women")) &&
+                    p.Category.Slug != "men" &&
+                    (p.Category.Parent == null || p.Category.Parent.Slug != "men")
+                );
+            }
+            else if (genderSlug == "kids")
+            {
+                query = query.Where(p =>
+                    p.Category.Slug == "kids" ||
+                    (p.Category.Parent != null && p.Category.Parent.Slug == "kids")
+                );
+            }
+        }
+
+        // Discount Filter (e.g. 10%, 20%, 30% off and above)
+        if (q.MinDiscount.HasValue && q.MinDiscount.Value > 0)
+        {
+            var discountFactor = 1m - (q.MinDiscount.Value / 100m);
+            query = query.Where(p =>
+                p.CompareAtPrice.HasValue &&
+                p.CompareAtPrice.Value > p.Price &&
+                p.Price <= p.CompareAtPrice.Value * discountFactor
+            );
+        }
+
+        // Size Filter
+        if (!string.IsNullOrWhiteSpace(q.Size))
+        {
+            var sizeTerm = q.Size.Trim();
+            query = query.Where(p =>
+                p.Variants.Any(v => v.IsActive && v.Value == sizeTerm) ||
+                (p.Tags != null && EF.Functions.ILike(p.Tags, $"%{sizeTerm}%"))
+            );
+        }
+
+        // Rating Filter
+        if (q.MinRating.HasValue && q.MinRating.Value > 0)
+        {
+            query = query.Where(p =>
+                p.Reviews.Any(r => r.IsApproved) &&
+                p.Reviews.Where(r => r.IsApproved).Average(r => (double)r.Rating) >= q.MinRating.Value
             );
         }
 
@@ -88,12 +245,14 @@ public class ProductsController(AppDbContext db, IUnitOfWork uow) : ControllerBa
 
         query = q.SortBy?.ToLower() switch
         {
-            "price_asc"  => query.OrderBy(p => p.Price),
-            "price_desc" => query.OrderByDescending(p => p.Price),
-            "name"       => query.OrderBy(p => p.Name),
-            "popular"    => query.OrderByDescending(p => p.Reviews.Count),
-            "rating"     => query.OrderByDescending(p => p.Reviews.Any() ? p.Reviews.Average(r => r.Rating) : 0),
-            _            => query.OrderByDescending(p => p.CreatedAt) // newest
+            "price_asc"              => query.OrderBy(p => p.Price),
+            "price_desc"             => query.OrderByDescending(p => p.Price),
+            "name"                   => query.OrderBy(p => p.Name),
+            "popular"                => query.OrderByDescending(p => p.Reviews.Count),
+            "rating"                 => query.OrderByDescending(p => p.Reviews.Any() ? p.Reviews.Average(r => r.Rating) : 0),
+            "discount"               => query.OrderByDescending(p => p.CompareAtPrice.HasValue ? (p.CompareAtPrice.Value - p.Price) : 0),
+            "relevant" or "featured" => query.OrderByDescending(p => p.IsFeatured).ThenByDescending(p => p.CreatedAt),
+            _                        => query.OrderByDescending(p => p.CreatedAt) // newest / latest
         };
 
         var totalCount = await query.CountAsync();
@@ -119,26 +278,78 @@ public class ProductsController(AppDbContext db, IUnitOfWork uow) : ControllerBa
         if (string.IsNullOrWhiteSpace(q) || q.Trim().Length < 2)
             return Ok(new { products = Array.Empty<object>(), categories = Array.Empty<object>() });
 
-        var term = q.Trim();
-        var pattern = $"%{term}%";
+        var term = q.Trim().ToLowerInvariant();
+        var normalizedCat = NormalizeCategoryTerm(term);
 
-        var matchingCategories = await _db.Categories
+        var catQuery = _db.Categories
             .AsNoTracking()
-            .Where(c => c.IsActive && EF.Functions.ILike(c.Name, pattern))
-            .OrderBy(c => c.Name)
+            .Where(c => c.IsActive);
+
+        if (normalizedCat == "men")
+        {
+            catQuery = catQuery.Where(c => c.Slug == "men" || (c.Parent != null && c.Parent.Slug == "men"));
+        }
+        else if (normalizedCat == "women")
+        {
+            catQuery = catQuery.Where(c => c.Slug == "women" || (c.Parent != null && c.Parent.Slug == "women"));
+        }
+        else if (normalizedCat == "kids")
+        {
+            catQuery = catQuery.Where(c => c.Slug == "kids" || (c.Parent != null && c.Parent.Slug == "kids"));
+        }
+        else
+        {
+            var pattern = $"%{term}%";
+            catQuery = catQuery.Where(c => EF.Functions.ILike(c.Name, pattern) || c.Slug == normalizedCat);
+        }
+
+        var matchingCategories = await catQuery
+            .OrderBy(c => c.SortOrder)
             .Take(4)
             .Select(c => new { c.Id, c.Name, c.Slug })
             .ToListAsync();
 
-        var matchingProducts = await _db.Products
+        var prodQuery = _db.Products
             .AsNoTracking()
             .Include(p => p.Images)
             .Include(p => p.Category)
-            .Where(p => p.IsActive && (
+                .ThenInclude(c => c.Parent)
+            .Where(p => p.IsActive);
+
+        if (normalizedCat == "men")
+        {
+            prodQuery = prodQuery.Where(p =>
+                (p.Category.Slug == "men" || (p.Category.Parent != null && p.Category.Parent.Slug == "men")) &&
+                p.Category.Slug != "women" &&
+                (p.Category.Parent == null || p.Category.Parent.Slug != "women")
+            );
+        }
+        else if (normalizedCat == "women")
+        {
+            prodQuery = prodQuery.Where(p =>
+                (p.Category.Slug == "women" || (p.Category.Parent != null && p.Category.Parent.Slug == "women")) &&
+                p.Category.Slug != "men" &&
+                (p.Category.Parent == null || p.Category.Parent.Slug != "men")
+            );
+        }
+        else if (normalizedCat == "kids")
+        {
+            prodQuery = prodQuery.Where(p =>
+                p.Category.Slug == "kids" ||
+                (p.Category.Parent != null && p.Category.Parent.Slug == "kids")
+            );
+        }
+        else
+        {
+            var pattern = $"%{term}%";
+            prodQuery = prodQuery.Where(p =>
                 EF.Functions.ILike(p.Name, pattern) ||
                 (p.Tags != null && EF.Functions.ILike(p.Tags, pattern)) ||
                 EF.Functions.ILike(p.Category.Name, pattern)
-            ))
+            );
+        }
+
+        var matchingProducts = await prodQuery
             .OrderByDescending(p => p.IsFeatured)
             .ThenByDescending(p => p.CreatedAt)
             .Take(6)
@@ -240,6 +451,74 @@ public class ProductsController(AppDbContext db, IUnitOfWork uow) : ControllerBa
         await _uow.SaveChangesAsync();
 
         return CreatedAtAction(nameof(GetBySlug), new { slug = product.Slug }, new { id = product.Id, slug = product.Slug });
+    }
+
+    // ── POST /api/products/bulk ──────────────────────────────────────────────(Admin)
+    [Authorize(Roles = "Admin")]
+    [HttpPost("bulk")]
+    public async Task<IActionResult> CreateBulk([FromBody] BulkCreateProductsRequest req)
+    {
+        if (req.Products == null || req.Products.Count == 0)
+            return BadRequest(new { message = "No products provided in request." });
+
+        var defaultCategory = await _db.Categories.FindAsync(req.DefaultCategoryId);
+        if (defaultCategory is null)
+            return BadRequest(new { message = "Default category not found." });
+
+        var createdList = new List<object>();
+
+        foreach (var item in req.Products)
+        {
+            if (string.IsNullOrWhiteSpace(item.Name) || item.Price <= 0)
+                continue;
+
+            var categoryId = item.CategoryId.HasValue && item.CategoryId.Value != Guid.Empty
+                ? item.CategoryId.Value
+                : req.DefaultCategoryId;
+
+            var slug = await EnsureUniqueSlug(SlugService.GenerateSlug(item.Name));
+
+            var product = new Product
+            {
+                Name             = item.Name.Trim(),
+                Slug             = slug,
+                Description      = !string.IsNullOrWhiteSpace(item.Description) ? item.Description.Trim() : item.Name.Trim(),
+                ShortDescription = item.ShortDescription?.Trim(),
+                Price            = item.Price,
+                CompareAtPrice   = item.CompareAtPrice,
+                Stock            = item.Stock > 0 ? item.Stock : 10,
+                SKU              = !string.IsNullOrWhiteSpace(item.SKU) ? item.SKU.Trim() : $"NX-{DateTime.UtcNow.Ticks % 1000000}",
+                IsFeatured       = item.IsFeatured,
+                TrackInventory   = true,
+                Tags             = item.Tags,
+                CategoryId       = categoryId,
+                IsActive         = true
+            };
+
+            await _db.Products.AddAsync(product);
+
+            if (!string.IsNullOrWhiteSpace(item.ImageUrl))
+            {
+                await _db.ProductImages.AddAsync(new ProductImage
+                {
+                    ProductId = product.Id,
+                    Url       = item.ImageUrl.Trim(),
+                    IsPrimary = true,
+                    SortOrder = 0
+                });
+            }
+
+            createdList.Add(new { id = product.Id, name = product.Name, slug = product.Slug });
+        }
+
+        await _uow.SaveChangesAsync();
+
+        return Ok(new
+        {
+            message = $"{createdList.Count} products added to catalog successfully.",
+            count   = createdList.Count,
+            items   = createdList
+        });
     }
 
     // ── PUT /api/products/{id} ────────────────────────────────────────────────(Admin)

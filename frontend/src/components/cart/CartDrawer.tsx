@@ -15,7 +15,7 @@ import {
   Sparkles,
   Package,
 } from 'lucide-react'
-import { useCartStore } from '@/store/cart'
+import { useCartStore, MAX_QTY_PER_PRODUCT, MAX_CART_TOTAL_ITEMS } from '@/store/cart'
 import { useAuthStore } from '@/store/auth'
 import { useAuthModalStore } from '@/store/authModal'
 import { Button } from '@/components/ui/Button'
@@ -198,25 +198,51 @@ export function CartDrawer() {
                       </div>
 
                       <div className="flex items-center justify-between pt-2">
-                        {/* Stepper */}
-                        <div className="flex items-center border border-border rounded-lg bg-surface-2 overflow-hidden">
-                          <button
-                            onClick={() => updateItem(item.id, item.quantity - 1)}
-                            disabled={item.quantity <= 1 || isLoading}
-                            className="w-7 h-7 flex items-center justify-center text-beige-muted hover:text-beige disabled:opacity-30"
-                          >
-                            <Minus className="w-3 h-3" />
-                          </button>
-                          <span className="w-8 text-center text-xs font-semibold text-beige">
-                            {item.quantity}
-                          </span>
-                          <button
-                            onClick={() => updateItem(item.id, item.quantity + 1)}
-                            disabled={isLoading}
-                            className="w-7 h-7 flex items-center justify-center text-beige-muted hover:text-beige"
-                          >
-                            <Plus className="w-3 h-3" />
-                          </button>
+                        {/* Stepper with Product (10) and Cart Total (20) Limits */}
+                        <div>
+                          <div className="flex items-center border border-border rounded-lg bg-surface-2 overflow-hidden">
+                            <button
+                              onClick={() => updateItem(item.id, item.quantity - 1)}
+                              disabled={item.quantity <= 1 || isLoading}
+                              className="w-7 h-7 flex items-center justify-center text-beige-muted hover:text-beige disabled:opacity-30 transition-colors"
+                              aria-label="Decrease quantity"
+                            >
+                              <Minus className="w-3 h-3" />
+                            </button>
+                            <span className="w-8 text-center text-xs font-semibold text-beige">
+                              {item.quantity}
+                            </span>
+                            <button
+                              onClick={() => {
+                                if (item.quantity >= MAX_QTY_PER_PRODUCT) {
+                                  toast.error(`Maximum ${MAX_QTY_PER_PRODUCT} units allowed per product.`)
+                                  return
+                                }
+                                if (itemCount >= MAX_CART_TOTAL_ITEMS) {
+                                  toast.error(`Maximum ${MAX_CART_TOTAL_ITEMS} items allowed in cart.`)
+                                  return
+                                }
+                                updateItem(item.id, item.quantity + 1)
+                              }}
+                              disabled={isLoading || item.quantity >= MAX_QTY_PER_PRODUCT || itemCount >= MAX_CART_TOTAL_ITEMS}
+                              title={
+                                item.quantity >= MAX_QTY_PER_PRODUCT
+                                  ? `Max ${MAX_QTY_PER_PRODUCT} per item reached`
+                                  : itemCount >= MAX_CART_TOTAL_ITEMS
+                                  ? `Max ${MAX_CART_TOTAL_ITEMS} items in cart reached`
+                                  : 'Increase quantity'
+                              }
+                              className="w-7 h-7 flex items-center justify-center text-beige-muted hover:text-beige disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                              aria-label="Increase quantity"
+                            >
+                              <Plus className="w-3 h-3" />
+                            </button>
+                          </div>
+                          {item.quantity >= MAX_QTY_PER_PRODUCT && (
+                            <span className="text-[10px] text-gold/80 block mt-0.5">
+                              Max limit reached (10)
+                            </span>
+                          )}
                         </div>
 
                         {/* Price */}

@@ -27,7 +27,7 @@
   },
   "Resend": {
     "ApiKey": "",
-    "FromEmail": "orders@yourdomain.com"
+    "FromEmail": "orders@nexus.com"
   },
   "Logging": {
     "LogLevel": {

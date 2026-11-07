@@ -7,7 +7,7 @@ import { useRouter } from 'next/navigation'
 import { Trash2, Minus, Plus, ShoppingBag, ArrowRight, Package, ShieldCheck } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Skeleton } from '@/components/ui/Skeleton'
-import { useCartStore } from '@/store/cart'
+import { useCartStore, MAX_QTY_PER_PRODUCT, MAX_CART_TOTAL_ITEMS } from '@/store/cart'
 import { useAuthStore } from '@/store/auth'
 import { useAuthModalStore } from '@/store/authModal'
 import { formatCurrency, optimizeImageUrl } from '@/lib/utils'
@@ -28,6 +28,19 @@ export default function CartPage() {
 
   const handleQuantityChange = async (itemId: string, newQty: number) => {
     if (newQty < 1) return
+    if (newQty > MAX_QTY_PER_PRODUCT) {
+      toast.error(`Maximum ${MAX_QTY_PER_PRODUCT} units allowed per product.`)
+      return
+    }
+    const currentItem = cart?.items.find((i) => i.id === itemId)
+    const currentQty = currentItem?.quantity ?? 0
+    const currentTotal = cart?.itemCount ?? cart?.items.reduce((s, i) => s + i.quantity, 0) ?? 0
+    const newTotal = currentTotal + (newQty - currentQty)
+    if (newTotal > MAX_CART_TOTAL_ITEMS) {
+      toast.error(`Maximum ${MAX_CART_TOTAL_ITEMS} items allowed in cart.`)
+      return
+    }
+
     try {
       await updateItem(itemId, newQty)
     } catch {
@@ -161,23 +174,39 @@ export default function CartPage() {
                   </div>
 
                   <div className="flex items-center justify-between mt-3">
-                    {/* Quantity */}
-                    <div className="flex items-center border border-border rounded-lg bg-surface-2 overflow-hidden">
-                      <button
-                        onClick={() => handleQuantityChange(item.id, item.quantity - 1)}
-                        disabled={item.quantity <= 1 || isLoading}
-                        className="w-8 h-8 flex items-center justify-center text-beige-muted hover:text-beige hover:bg-surface transition-colors disabled:opacity-30"
-                      >
-                        <Minus className="w-3 h-3" />
-                      </button>
-                      <span className="w-10 text-center text-sm font-semibold text-beige">{item.quantity}</span>
-                      <button
-                        onClick={() => handleQuantityChange(item.id, item.quantity + 1)}
-                        disabled={isLoading}
-                        className="w-8 h-8 flex items-center justify-center text-beige-muted hover:text-beige hover:bg-surface transition-colors disabled:opacity-30"
-                      >
-                        <Plus className="w-3 h-3" />
-                      </button>
+                    {/* Quantity with limits */}
+                    <div>
+                      <div className="flex items-center border border-border rounded-lg bg-surface-2 overflow-hidden">
+                        <button
+                          onClick={() => handleQuantityChange(item.id, item.quantity - 1)}
+                          disabled={item.quantity <= 1 || isLoading}
+                          className="w-8 h-8 flex items-center justify-center text-beige-muted hover:text-beige hover:bg-surface transition-colors disabled:opacity-30"
+                          aria-label="Decrease quantity"
+                        >
+                          <Minus className="w-3 h-3" />
+                        </button>
+                        <span className="w-10 text-center text-sm font-semibold text-beige">{item.quantity}</span>
+                        <button
+                          onClick={() => handleQuantityChange(item.id, item.quantity + 1)}
+                          disabled={isLoading || item.quantity >= MAX_QTY_PER_PRODUCT || itemCount >= MAX_CART_TOTAL_ITEMS}
+                          title={
+                            item.quantity >= MAX_QTY_PER_PRODUCT
+                              ? `Max ${MAX_QTY_PER_PRODUCT} units allowed per item`
+                              : itemCount >= MAX_CART_TOTAL_ITEMS
+                              ? `Max ${MAX_CART_TOTAL_ITEMS} items allowed in cart`
+                              : 'Increase quantity'
+                          }
+                          className="w-8 h-8 flex items-center justify-center text-beige-muted hover:text-beige hover:bg-surface transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                          aria-label="Increase quantity"
+                        >
+                          <Plus className="w-3 h-3" />
+                        </button>
+                      </div>
+                      {item.quantity >= MAX_QTY_PER_PRODUCT && (
+                        <span className="text-[10px] text-gold/80 block mt-1">
+                          Max limit per product reached ({MAX_QTY_PER_PRODUCT})
+                        </span>
+                      )}
                     </div>
 
                     {/* Price */}
@@ -207,6 +236,12 @@ export default function CartPage() {
             </div>
 
             <div className="h-px bg-border" />
+
+            {/* Cart Limits Reminder */}
+            <div className="bg-surface-2/70 border border-border/80 rounded-lg p-2.5 text-[11px] text-beige-muted flex items-center justify-between">
+              <span>Order Limits:</span>
+              <span className="text-gold font-medium">Max 10 per item • Max 20 per cart</span>
+            </div>
 
             {/* Breakdown */}
             <div className="space-y-3 text-sm">

@@ -9,22 +9,43 @@ import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import api from '@/lib/api'
 import type { ProductListItem, PagedResult, ProductFilters } from '@/types'
-import { cn } from '@/lib/utils'
+import { cn, normalizeCategorySlug } from '@/lib/utils'
 
 const SORT_OPTIONS = [
-  { value: 'newest', label: 'Newest First' },
-  { value: 'popular', label: 'Most Popular' },
+  { value: 'relevant', label: 'Relevant & Featured' },
+  { value: 'newest', label: 'Latest / New Arrivals' },
   { value: 'price_asc', label: 'Price: Low → High' },
   { value: 'price_desc', label: 'Price: High → Low' },
+  { value: 'discount', label: 'Biggest Discount' },
   { value: 'rating', label: 'Highest Rated' },
+  { value: 'popular', label: 'Most Popular' },
 ]
+
+const GENDER_OPTIONS = [
+  { label: 'All', value: '' },
+  { label: 'Men', value: 'men' },
+  { label: 'Women', value: 'women' },
+  { label: 'Kids', value: 'kids' },
+]
+
+const DISCOUNT_OPTIONS = [
+  { label: '50% or more', value: 50 },
+  { label: '40% or more', value: 40 },
+  { label: '30% or more', value: 30 },
+  { label: '20% or more', value: 20 },
+  { label: '10% or more', value: 10 },
+]
+
+const APPAREL_SIZES = ['XS', 'S', 'M', 'L', 'XL', 'XXL']
+const WAIST_SIZES = ['28', '30', '32', '34', '36', '38']
+const FOOTWEAR_SIZES = ['UK 6', 'UK 7', 'UK 8', 'UK 9', 'UK 10', 'UK 11']
 
 const PRICE_RANGES = [
   { label: 'Under ₹2,000', min: 0, max: 2000 },
   { label: '₹2,000 – ₹5,000', min: 2000, max: 5000 },
-  { label: '₹5,000 – ₹15,000', min: 5000, max: 15000 },
-  { label: '₹15,000 – ₹50,000', min: 15000, max: 50000 },
-  { label: 'Above ₹50,000', min: 50000, max: undefined },
+  { label: '₹5,000 – ₹10,000', min: 5000, max: 10000 },
+  { label: '₹10,000 – ₹25,000', min: 10000, max: 25000 },
+  { label: 'Above ₹25,000', min: 25000, max: undefined },
 ]
 
 // AJIO / SHEIN Multi-level Category Tree
@@ -37,7 +58,7 @@ const CATEGORY_TREE = [
       { name: "Shirts", slug: 'men-shirts' },
       { name: "Denim & Jeans", slug: 'men-denim' },
       { name: "Footwear & Sneakers", slug: 'men-footwear' },
-      { name: "Activewear", slug: 'men-activewear' },
+      { name: "Activewear & Hoodies", slug: 'men-activewear' },
       { name: "Innerwear & Lounge", slug: 'men-innerwear' },
       { name: "Shorts & Cargo", slug: 'men-shorts' },
     ],
@@ -47,11 +68,11 @@ const CATEGORY_TREE = [
     slug: 'women',
     subcategories: [
       { name: "Dresses & Western", slug: 'women-dresses' },
-      { name: "Tops & Tees", slug: 'women-tops' },
+      { name: "Tops & Blouses", slug: 'women-tops' },
       { name: "Denim & Trousers", slug: 'women-denim' },
       { name: "Ethnic Wear & Kurtas", slug: 'women-ethnic' },
       { name: "Footwear & Heels", slug: 'women-footwear' },
-      { name: "Handbags & Clutches", slug: 'women-handbags' },
+      { name: "Handbags & Totes", slug: 'women-handbags' },
     ],
   },
   {
@@ -67,9 +88,9 @@ const CATEGORY_TREE = [
     name: 'Footwear',
     slug: 'footwear',
     subcategories: [
-      { name: "Sneakers", slug: 'footwear' },
-      { name: "Formal Shoes", slug: 'footwear' },
-      { name: "Loafers", slug: 'footwear' },
+      { name: "Men's Footwear", slug: 'men-footwear' },
+      { name: "Women's Footwear", slug: 'women-footwear' },
+      { name: "Kids Footwear", slug: 'kids-footwear' },
     ],
   },
   {
@@ -83,7 +104,7 @@ const CATEGORY_TREE = [
     name: 'Accessories & Fragrances',
     slug: 'accessories',
     subcategories: [
-      { name: "Italian Briefcases", slug: 'accessories' },
+      { name: "Italian Leather Bags & Wallets", slug: 'accessories' },
       { name: "Haute Fragrances", slug: 'fragrances' },
       { name: "Fine Jewelry", slug: 'jewelry' },
     ],
@@ -97,16 +118,31 @@ function ProductsContent() {
   const [isLoading, setIsLoading] = React.useState(true)
   const [sidebarOpen, setSidebarOpen] = React.useState(false)
 
-  // Filters from URL
+  // Filters from URL - normalize synonyms like man -> men, female -> women
   const search = searchParams.get('search') ?? ''
-  const category = searchParams.get('category') ?? ''
-  const subCategory = searchParams.get('subCategory') ?? ''
-  const sortBy = (searchParams.get('sort') ?? 'newest') as ProductFilters['sortBy']
+  const rawCategory = searchParams.get('category') ?? ''
+  const rawSubCategory = searchParams.get('subCategory') ?? ''
+  const rawGender = searchParams.get('gender') ?? ''
+  const category = normalizeCategorySlug(rawCategory)
+  const subCategory = normalizeCategorySlug(rawSubCategory)
+  const gender = normalizeCategorySlug(rawGender)
+  const size = searchParams.get('size') ?? ''
+  const minDiscount = searchParams.get('minDiscount') ? Number(searchParams.get('minDiscount')) : undefined
+  const sortBy = (searchParams.get('sort') ?? 'relevant') as ProductFilters['sortBy']
   const page = Number(searchParams.get('page') ?? '1')
   const minPrice = searchParams.get('minPrice') ? Number(searchParams.get('minPrice')) : undefined
   const maxPrice = searchParams.get('maxPrice') ? Number(searchParams.get('maxPrice')) : undefined
   const inStock = searchParams.get('inStock') === 'true'
   const minRating = searchParams.get('minRating') ? Number(searchParams.get('minRating')) : undefined
+
+  // Local state for custom price range inputs
+  const [customMin, setCustomMin] = React.useState(minPrice !== undefined ? String(minPrice) : '')
+  const [customMax, setCustomMax] = React.useState(maxPrice !== undefined ? String(maxPrice) : '')
+
+  React.useEffect(() => {
+    setCustomMin(minPrice !== undefined ? String(minPrice) : '')
+    setCustomMax(maxPrice !== undefined ? String(maxPrice) : '')
+  }, [minPrice, maxPrice])
 
   const updateParam = (key: string, value: string | undefined) => {
     const params = new URLSearchParams(searchParams.toString())
@@ -114,6 +150,23 @@ function ProductsContent() {
       params.set(key, value)
     } else {
       params.delete(key)
+    }
+    params.delete('page')
+    router.push(`/products?${params.toString()}`)
+  }
+
+  const handleApplyCustomPrice = (e: React.FormEvent) => {
+    e.preventDefault()
+    const params = new URLSearchParams(searchParams.toString())
+    if (customMin && !isNaN(Number(customMin))) {
+      params.set('minPrice', customMin)
+    } else {
+      params.delete('minPrice')
+    }
+    if (customMax && !isNaN(Number(customMax))) {
+      params.set('maxPrice', customMax)
+    } else {
+      params.delete('maxPrice')
     }
     params.delete('page')
     router.push(`/products?${params.toString()}`)
@@ -131,6 +184,9 @@ function ProductsContent() {
             search: search || undefined,
             category: category || undefined,
             subCategory: subCategory || undefined,
+            gender: gender || undefined,
+            size: size || undefined,
+            minDiscount,
             sortBy,
             page,
             pageSize: 16,
@@ -148,9 +204,21 @@ function ProductsContent() {
       }
     }
     fetchProducts()
-  }, [search, category, subCategory, sortBy, page, minPrice, maxPrice, inStock, minRating])
+  }, [search, category, subCategory, gender, size, minDiscount, sortBy, page, minPrice, maxPrice, inStock, minRating])
 
-  const hasFilters = !!(search || category || subCategory || minPrice || maxPrice || inStock || minRating)
+  const hasFilters = !!(
+    search ||
+    category ||
+    subCategory ||
+    gender ||
+    size ||
+    minDiscount ||
+    minPrice !== undefined ||
+    maxPrice !== undefined ||
+    inStock ||
+    minRating ||
+    (sortBy && sortBy !== 'relevant')
+  )
 
   const clearAllFilters = () => {
     router.push('/products')
@@ -158,10 +226,67 @@ function ProductsContent() {
 
   const Sidebar = () => (
     <aside className="space-y-6">
-      {/* Category Tree (AJIO / SHEIN style) */}
+      {/* ── 1. Sort By (AJIO / Myntra quick selector) ── */}
       <div>
-        <h3 className="font-semibold text-gold text-xs uppercase tracking-wider mb-3">
-          Departments & Categories
+        <h3 className="font-semibold text-gold text-xs uppercase tracking-wider mb-2.5">
+          Sort By
+        </h3>
+        <div className="space-y-1">
+          {SORT_OPTIONS.map((opt) => {
+            const active = (sortBy ?? 'relevant') === opt.value
+            return (
+              <button
+                key={opt.value}
+                onClick={() => updateParam('sort', opt.value)}
+                className={cn(
+                  'w-full text-left px-2.5 py-1.5 rounded-lg text-xs transition-colors flex items-center justify-between',
+                  active
+                    ? 'bg-gold/15 text-gold border border-gold/30 font-medium'
+                    : 'text-beige-muted hover:text-beige hover:bg-surface-2',
+                )}
+              >
+                <span>{opt.label}</span>
+                {active && <span className="w-1.5 h-1.5 rounded-full bg-gold" />}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      <div className="h-px bg-border" />
+
+      {/* ── 2. Gender / Department Filter ── */}
+      <div>
+        <h3 className="font-semibold text-gold text-xs uppercase tracking-wider mb-2.5">
+          Gender / Department
+        </h3>
+        <div className="grid grid-cols-2 gap-1.5">
+          {GENDER_OPTIONS.map((g) => {
+            const active = g.value === '' ? !gender : gender === g.value
+            return (
+              <button
+                key={g.label}
+                onClick={() => updateParam('gender', g.value || undefined)}
+                className={cn(
+                  'px-3 py-1.5 rounded-lg text-xs font-medium text-center transition-all border',
+                  active
+                    ? 'bg-gold text-background border-gold shadow-sm font-semibold'
+                    : 'bg-surface-2/60 border-border text-beige-muted hover:text-beige hover:border-gold/30',
+                )}
+              >
+                {g.label}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      <div className="h-px bg-border" />
+
+      {/* ── 3. Category Tree (AJIO / SHEIN style) ── */}
+      <div>
+        <h3 className="font-semibold text-gold text-xs uppercase tracking-wider mb-2.5">
+          Categories & Collections
         </h3>
         <div className="space-y-1 text-xs">
           <button
@@ -176,14 +301,14 @@ function ProductsContent() {
                 : 'text-beige-muted hover:text-beige hover:bg-surface-2',
             )}
           >
-            <span>All Departments</span>
+            <span>All Collections</span>
             <ChevronRight className="w-3 h-3 text-gold/60" />
           </button>
 
           {CATEGORY_TREE.map((cat) => {
             const isCatActive = category === cat.slug
             return (
-              <div key={cat.name} className="space-y-1 pt-1">
+              <div key={cat.name} className="space-y-1 pt-0.5">
                 <button
                   onClick={() => {
                     updateParam('category', isCatActive ? undefined : cat.slug)
@@ -232,28 +357,132 @@ function ProductsContent() {
 
       <div className="h-px bg-border" />
 
-      {/* In Stock */}
+      {/* ── 4. Discount Filter ── */}
       <div>
-        <h3 className="font-semibold text-beige text-xs uppercase tracking-wider mb-3">Availability</h3>
-        <label className="flex items-center gap-2.5 cursor-pointer group">
-          <input
-            type="checkbox"
-            className="w-4 h-4 accent-gold"
-            checked={inStock}
-            onChange={(e) => updateParam('inStock', e.target.checked ? 'true' : undefined)}
-          />
-          <span className="text-xs text-beige-muted group-hover:text-beige transition-colors">
-            In Stock Only
-          </span>
-        </label>
+        <h3 className="font-semibold text-gold text-xs uppercase tracking-wider mb-2.5">
+          Special Discounts
+        </h3>
+        <div className="space-y-1">
+          {DISCOUNT_OPTIONS.map((d) => {
+            const active = minDiscount === d.value
+            return (
+              <button
+                key={d.value}
+                onClick={() => updateParam('minDiscount', active ? undefined : String(d.value))}
+                className={cn(
+                  'w-full text-left px-2.5 py-1.5 rounded-lg text-xs transition-colors flex items-center justify-between',
+                  active
+                    ? 'bg-gold/15 text-gold border border-gold/30 font-medium'
+                    : 'text-beige-muted hover:text-beige hover:bg-surface-2',
+                )}
+              >
+                <span>{d.label}</span>
+                {active && <span className="text-[10px] text-gold font-bold">✓</span>}
+              </button>
+            )
+          })}
+        </div>
       </div>
 
       <div className="h-px bg-border" />
 
-      {/* Price Range */}
+      {/* ── 5. Size Filter ── */}
       <div>
-        <h3 className="font-semibold text-beige text-xs uppercase tracking-wider mb-3">Price Range</h3>
-        <div className="space-y-1.5">
+        <div className="flex items-center justify-between mb-2.5">
+          <h3 className="font-semibold text-gold text-xs uppercase tracking-wider">
+            Size Filter
+          </h3>
+          {size && (
+            <button
+              onClick={() => updateParam('size', undefined)}
+              className="text-[11px] text-error hover:underline"
+            >
+              Clear
+            </button>
+          )}
+        </div>
+
+        {/* Clothing Sizes */}
+        <div className="space-y-2">
+          <span className="text-[10px] uppercase font-semibold text-beige-muted/80 block">
+            Clothing & Tops
+          </span>
+          <div className="flex flex-wrap gap-1.5">
+            {APPAREL_SIZES.map((sz) => {
+              const active = size.toUpperCase() === sz.toUpperCase()
+              return (
+                <button
+                  key={sz}
+                  onClick={() => updateParam('size', active ? undefined : sz)}
+                  className={cn(
+                    'w-9 h-7 rounded text-xs font-semibold flex items-center justify-center border transition-all',
+                    active
+                      ? 'bg-gold text-background border-gold shadow-sm'
+                      : 'bg-surface-2/60 border-border text-beige-muted hover:text-beige hover:border-gold/40',
+                  )}
+                >
+                  {sz}
+                </button>
+              )
+            })}
+          </div>
+
+          <span className="text-[10px] uppercase font-semibold text-beige-muted/80 block pt-1.5">
+            Waist & Bottoms
+          </span>
+          <div className="flex flex-wrap gap-1.5">
+            {WAIST_SIZES.map((sz) => {
+              const active = size === sz
+              return (
+                <button
+                  key={sz}
+                  onClick={() => updateParam('size', active ? undefined : sz)}
+                  className={cn(
+                    'w-9 h-7 rounded text-xs font-semibold flex items-center justify-center border transition-all',
+                    active
+                      ? 'bg-gold text-background border-gold shadow-sm'
+                      : 'bg-surface-2/60 border-border text-beige-muted hover:text-beige hover:border-gold/40',
+                  )}
+                >
+                  {sz}
+                </button>
+              )
+            })}
+          </div>
+
+          <span className="text-[10px] uppercase font-semibold text-beige-muted/80 block pt-1.5">
+            Footwear (UK)
+          </span>
+          <div className="flex flex-wrap gap-1.5">
+            {FOOTWEAR_SIZES.map((sz) => {
+              const active = size.toLowerCase() === sz.toLowerCase()
+              return (
+                <button
+                  key={sz}
+                  onClick={() => updateParam('size', active ? undefined : sz)}
+                  className={cn(
+                    'px-2 h-7 rounded text-xs font-semibold flex items-center justify-center border transition-all',
+                    active
+                      ? 'bg-gold text-background border-gold shadow-sm'
+                      : 'bg-surface-2/60 border-border text-beige-muted hover:text-beige hover:border-gold/40',
+                  )}
+                >
+                  {sz}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      </div>
+
+      <div className="h-px bg-border" />
+
+      {/* ── 6. Price Range & Custom Inputs ── */}
+      <div>
+        <h3 className="font-semibold text-gold text-xs uppercase tracking-wider mb-2.5">
+          Price Range
+        </h3>
+        <div className="space-y-1 mb-3">
           {PRICE_RANGES.map((range) => {
             const active = minPrice === range.min && maxPrice === range.max
             return (
@@ -266,25 +495,78 @@ function ProductsContent() {
                        updateParam('maxPrice', range.max ? String(range.max) : undefined))
                 }
                 className={cn(
-                  'w-full text-left px-2.5 py-1.5 rounded-lg text-xs transition-colors',
+                  'w-full text-left px-2.5 py-1.5 rounded-lg text-xs transition-colors flex items-center justify-between',
                   active
                     ? 'bg-gold/15 text-gold border border-gold/30 font-medium'
                     : 'text-beige-muted hover:text-beige hover:bg-surface-2',
                 )}
               >
-                {range.label}
+                <span>{range.label}</span>
+                {active && <span className="text-[10px] text-gold font-bold">✓</span>}
               </button>
             )
           })}
         </div>
+
+        {/* Custom Price Inputs */}
+        <form onSubmit={handleApplyCustomPrice} className="space-y-2 pt-1 border-t border-border/60">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-beige-muted block">
+            Custom Price (₹)
+          </span>
+          <div className="flex items-center gap-2">
+            <input
+              type="number"
+              placeholder="Min"
+              value={customMin}
+              onChange={(e) => setCustomMin(e.target.value)}
+              className="w-full bg-surface-2 border border-border rounded-lg px-2.5 py-1 text-xs text-beige placeholder:text-beige-muted/40 focus:outline-none focus:border-gold font-mono"
+            />
+            <span className="text-beige-muted text-xs">–</span>
+            <input
+              type="number"
+              placeholder="Max"
+              value={customMax}
+              onChange={(e) => setCustomMax(e.target.value)}
+              className="w-full bg-surface-2 border border-border rounded-lg px-2.5 py-1 text-xs text-beige placeholder:text-beige-muted/40 focus:outline-none focus:border-gold font-mono"
+            />
+            <button
+              type="submit"
+              className="px-2.5 py-1 bg-gold hover:bg-gold-light text-background rounded-lg text-xs font-semibold transition-colors"
+            >
+              Go
+            </button>
+          </div>
+        </form>
       </div>
 
       <div className="h-px bg-border" />
 
-      {/* Rating */}
+      {/* ── 7. Availability ── */}
       <div>
-        <h3 className="font-semibold text-beige text-xs uppercase tracking-wider mb-3">Customer Rating</h3>
-        <div className="space-y-1.5">
+        <h3 className="font-semibold text-gold text-xs uppercase tracking-wider mb-2.5">
+          Availability
+        </h3>
+        <label className="flex items-center gap-2.5 cursor-pointer group">
+          <input
+            type="checkbox"
+            className="w-4 h-4 accent-gold cursor-pointer"
+            checked={inStock}
+            onChange={(e) => updateParam('inStock', e.target.checked ? 'true' : undefined)}
+          />
+          <span className="text-xs text-beige-muted group-hover:text-beige transition-colors">
+            In Stock Only
+          </span>
+        </label>
+      </div>
+
+      <div className="h-px bg-border" />
+
+      {/* ── 8. Customer Rating ── */}
+      <div>
+        <h3 className="font-semibold text-gold text-xs uppercase tracking-wider mb-2.5">
+          Customer Rating
+        </h3>
+        <div className="space-y-1">
           {[4, 3].map((rating) => (
             <button
               key={rating}
@@ -294,13 +576,18 @@ function ProductsContent() {
                   : updateParam('minRating', String(rating))
               }
               className={cn(
-                'w-full text-left px-2.5 py-1.5 rounded-lg text-xs transition-colors flex items-center gap-2',
+                'w-full text-left px-2.5 py-1.5 rounded-lg text-xs transition-colors flex items-center justify-between',
                 minRating === rating
                   ? 'bg-gold/15 text-gold border border-gold/30 font-medium'
                   : 'text-beige-muted hover:text-beige hover:bg-surface-2',
               )}
             >
-              {'★'.repeat(rating)}{'☆'.repeat(5 - rating)} & up
+              <span className="flex items-center gap-1">
+                <span className="text-gold">{'★'.repeat(rating)}</span>
+                <span className="text-beige-muted/40">{'★'.repeat(5 - rating)}</span>
+                <span className="ml-1">& above</span>
+              </span>
+              {minRating === rating && <span className="text-[10px] text-gold font-bold">✓</span>}
             </button>
           ))}
         </div>
@@ -310,10 +597,10 @@ function ProductsContent() {
         <Button
           variant="ghost"
           size="sm"
-          className="w-full text-error hover:text-error hover:bg-error/10 text-xs"
+          className="w-full text-error hover:text-error hover:bg-error/10 text-xs border border-error/20"
           onClick={clearAllFilters}
         >
-          <X className="w-3.5 h-3.5" />
+          <X className="w-3.5 h-3.5 mr-1" />
           Reset All Filters
         </Button>
       )}
@@ -325,7 +612,7 @@ function ProductsContent() {
       {/* ── Page Title & Search Term Banner ── */}
       <div className="mb-6">
         <h1 className="font-serif text-2xl sm:text-3xl font-bold text-beige capitalize flex items-center gap-2">
-          {category ? `${category.replace('-', ' ')} Collection` : 'All Luxury Collections'}
+          {category ? `${activeCategoryObj?.name ?? category.replace('-', ' ')} Collection` : 'All Luxury Collections'}
           {search && (
             <span className="text-base font-normal text-beige-muted font-sans">
               matching &ldquo;<span className="text-gold font-medium">{search}</span>&rdquo;
@@ -375,18 +662,42 @@ function ProductsContent() {
       {hasFilters && (
         <div className="flex items-center gap-2 flex-wrap mb-6 bg-surface-2/60 border border-border rounded-xl p-3">
           <span className="text-xs font-semibold text-beige-muted">Active Filters:</span>
+          {gender && (
+            <Badge variant="gold" className="flex items-center gap-1 text-xs capitalize">
+              Gender: {gender}
+              <button onClick={() => updateParam('gender', undefined)} aria-label="Remove gender filter">
+                <X className="w-3 h-3" />
+              </button>
+            </Badge>
+          )}
           {category && (
             <Badge variant="gold" className="flex items-center gap-1 text-xs">
-              Category: {category}
-              <button onClick={() => updateParam('category', undefined)}>
+              Category: {activeCategoryObj?.name ?? category}
+              <button onClick={() => updateParam('category', undefined)} aria-label="Remove category filter">
                 <X className="w-3 h-3" />
               </button>
             </Badge>
           )}
           {subCategory && (
             <Badge variant="gold" className="flex items-center gap-1 text-xs">
-              Subcategory: {subCategory}
-              <button onClick={() => updateParam('subCategory', undefined)}>
+              Subcategory: {activeCategoryObj?.subcategories.find(s => s.slug === subCategory)?.name ?? subCategory.replace('-', ' ')}
+              <button onClick={() => updateParam('subCategory', undefined)} aria-label="Remove subcategory filter">
+                <X className="w-3 h-3" />
+              </button>
+            </Badge>
+          )}
+          {size && (
+            <Badge variant="gold" className="flex items-center gap-1 text-xs">
+              Size: {size}
+              <button onClick={() => updateParam('size', undefined)} aria-label="Remove size filter">
+                <X className="w-3 h-3" />
+              </button>
+            </Badge>
+          )}
+          {minDiscount && (
+            <Badge variant="gold" className="flex items-center gap-1 text-xs">
+              {minDiscount}%+ Off
+              <button onClick={() => updateParam('minDiscount', undefined)} aria-label="Remove discount filter">
                 <X className="w-3 h-3" />
               </button>
             </Badge>
@@ -394,7 +705,7 @@ function ProductsContent() {
           {search && (
             <Badge variant="gold" className="flex items-center gap-1 text-xs">
               Query: {search}
-              <button onClick={() => updateParam('search', undefined)}>
+              <button onClick={() => updateParam('search', undefined)} aria-label="Remove search query">
                 <X className="w-3 h-3" />
               </button>
             </Badge>
@@ -402,7 +713,15 @@ function ProductsContent() {
           {inStock && (
             <Badge variant="gold" className="flex items-center gap-1 text-xs">
               In Stock Only
-              <button onClick={() => updateParam('inStock', undefined)}>
+              <button onClick={() => updateParam('inStock', undefined)} aria-label="Remove in stock filter">
+                <X className="w-3 h-3" />
+              </button>
+            </Badge>
+          )}
+          {minRating && (
+            <Badge variant="gold" className="flex items-center gap-1 text-xs">
+              {minRating}★ & above
+              <button onClick={() => updateParam('minRating', undefined)} aria-label="Remove rating filter">
                 <X className="w-3 h-3" />
               </button>
             </Badge>
@@ -415,6 +734,7 @@ function ProductsContent() {
                   updateParam('minPrice', undefined)
                   updateParam('maxPrice', undefined)
                 }}
+                aria-label="Remove price filter"
               >
                 <X className="w-3 h-3" />
               </button>
@@ -443,7 +763,7 @@ function ProductsContent() {
         <div className="flex items-center gap-2 ml-auto">
           <span className="text-xs text-beige-muted hidden sm:block">Sort By:</span>
           <select
-            value={sortBy ?? 'newest'}
+            value={sortBy ?? 'relevant'}
             onChange={(e) => updateParam('sort', e.target.value)}
             className="bg-surface border border-border rounded-xl px-3 py-2 text-xs text-beige focus:outline-none focus:border-gold cursor-pointer"
           >

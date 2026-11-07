@@ -5,30 +5,36 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
-export function formatCurrency(amount: number, currency = 'INR'): string {
+export function formatCurrency(amount: number | null | undefined, currency = 'INR'): string {
+  const validAmount = typeof amount === 'number' && !isNaN(amount) ? amount : 0
   return new Intl.NumberFormat('en-IN', {
     style: 'currency',
     currency,
     minimumFractionDigits: 0,
     maximumFractionDigits: 2,
-  }).format(amount)
+  }).format(validAmount)
 }
 
-export function formatDate(dateString: string): string {
+export function formatDate(dateString?: string | null): string {
+  if (!dateString) return '—'
+  const d = new Date(dateString)
+  if (isNaN(d.getTime())) return '—'
   return new Intl.DateTimeFormat('en-IN', {
     year: 'numeric',
     month: 'long',
     day: 'numeric',
-  }).format(new Date(dateString))
+  }).format(d)
 }
 
-export function formatRelativeDate(dateString: string): string {
+export function formatRelativeDate(dateString?: string | null): string {
+  if (!dateString) return '—'
   const date = new Date(dateString)
+  if (isNaN(date.getTime())) return '—'
   const now = new Date()
   const diffMs = now.getTime() - date.getTime()
   const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
 
-  if (diffDays === 0) return 'Today'
+  if (diffDays <= 0) return 'Today'
   if (diffDays === 1) return 'Yesterday'
   if (diffDays < 7) return `${diffDays} days ago`
   if (diffDays < 30) return `${Math.floor(diffDays / 7)} weeks ago`
@@ -47,6 +53,22 @@ export function slugify(text: string): string {
 export function truncate(text: string, maxLength: number): string {
   if (text.length <= maxLength) return text
   return text.slice(0, maxLength).trim() + '…'
+}
+
+export function normalizeCategorySlug(slug: string | null | undefined): string {
+  if (!slug) return ''
+  const s = slug.toLowerCase().trim()
+  if (s === 'man' || s === 'men' || s === 'male' || s === 'mens' || s === "men's" || s === 'gents') return 'men'
+  if (s === 'female' || s === 'woman' || s === 'women' || s === 'womens' || s === "women's" || s === 'ladies') return 'women'
+  if (s === 'kid' || s === 'kids' || s === 'child' || s === 'children') return 'kids'
+  if (s === 'boy' || s === 'boys') return 'kids-boys'
+  if (s === 'girl' || s === 'girls') return 'kids-girls'
+  if (s === 'shoe' || s === 'shoes' || s === 'sneaker' || s === 'sneakers' || s === 'footwear') return 'footwear'
+  if (s === 'watch' || s === 'watches' || s === 'timepiece') return 'watches'
+  if (s === 'perfume' || s === 'perfumes' || s === 'fragrance' || s === 'fragrances') return 'fragrances'
+  if (s === 'jewelry' || s === 'jewellery') return 'jewelry'
+  if (s === 'accessory' || s === 'accessories') return 'accessories'
+  return s
 }
 
 export function getStockStatus(quantity: number): {

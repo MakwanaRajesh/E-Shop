@@ -2,6 +2,10 @@ import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 import api from '@/lib/api'
 import type { Cart, CartItem } from '@/types'
+import toast from 'react-hot-toast'
+
+export const MAX_QTY_PER_PRODUCT = 10
+export const MAX_CART_TOTAL_ITEMS = 20
 
 export interface ProductMeta {
   name: string
@@ -141,14 +145,44 @@ export const useCartStore = create<CartState>()(
         // 1. Instant Optimistic Local Update (SHEIN / AJIO pattern)
         const currentCart = get().cart
         const existingItems = currentCart?.items ? [...currentCart.items] : []
+        const currentTotalItems = existingItems.reduce((sum, i) => sum + (i.quantity || 1), 0)
+
         const existingIdx = existingItems.findIndex(
           (i) => i.productId === productId && (variantId ? i.variantId === variantId : true),
         )
 
+        const currentQty = existingIdx >= 0 ? existingItems[existingIdx].quantity : 0
+
+        // Enforce max 10 per product
+        if (currentQty >= MAX_QTY_PER_PRODUCT) {
+          toast.error(`Maximum limit of ${MAX_QTY_PER_PRODUCT} units reached for this item.`)
+          return
+        }
+
+        // Clamp quantity if addition exceeds 10
+        let allowedAddQty = quantity
+        if (currentQty + allowedAddQty > MAX_QTY_PER_PRODUCT) {
+          allowedAddQty = MAX_QTY_PER_PRODUCT - currentQty
+          toast(`Added ${allowedAddQty} unit(s) to meet max product limit of ${MAX_QTY_PER_PRODUCT}.`, { icon: 'ℹ️' })
+        }
+
+        // Enforce max 20 for entire cart
+        if (currentTotalItems >= MAX_CART_TOTAL_ITEMS) {
+          toast.error(`Cart limit reached! Maximum ${MAX_CART_TOTAL_ITEMS} items allowed in the entire bag.`)
+          return
+        }
+
+        if (currentTotalItems + allowedAddQty > MAX_CART_TOTAL_ITEMS) {
+          allowedAddQty = MAX_CART_TOTAL_ITEMS - currentTotalItems
+          toast(`Added ${allowedAddQty} item(s) to meet total cart limit of ${MAX_CART_TOTAL_ITEMS}.`, { icon: 'ℹ️' })
+        }
+
+        if (allowedAddQty <= 0) return
+
         const unitPrice = meta?.price ?? 0
         if (existingIdx >= 0) {
           const current = existingItems[existingIdx]
-          const newQty = current.quantity + quantity
+          const newQty = current.quantity + allowedAddQty
           existingItems[existingIdx] = {
             ...current,
             quantity: newQty,
@@ -164,9 +198,9 @@ export const useCartStore = create<CartState>()(
             variantId,
             variantName: meta?.variantName,
             variantValue: meta?.variantValue,
-            quantity,
+            quantity: allowedAddQty,
             unitPrice,
-            totalPrice: unitPrice * quantity,
+            totalPrice: unitPrice * allowedAddQty,
             availableStock: meta?.stock ?? 10,
           }
           existingItems.push(newItem)
@@ -181,7 +215,7 @@ export const useCartStore = create<CartState>()(
           try {
             const { data } = await api.post<any>('/api/cart/items', {
               productId,
-              quantity,
+              quantity: allowedAddQty,
               variantId: variantId || null,
             })
             if (data) {
@@ -211,21 +245,35 @@ export const useCartStore = create<CartState>()(
 
       updateItem: async (cartItemId: string, quantity: number) => {
         if (quantity < 1) return
+        let validQty = quantity
+
+        if (validQty > MAX_QTY_PER_PRODUCT) {
+          toast.error(`Maximum ${MAX_QTY_PER_PRODUCT} units allowed per product.`)
+          validQty = MAX_QTY_PER_PRODUCT
+        }
+
         const currentItems = get().cart?.items ? [...get().cart!.items] : []
+        const otherItemsCount = currentItems.filter((i) => i.id !== cartItemId).reduce((sum, i) => sum + (i.quantity || 1), 0)
+
+        if (otherItemsCount + validQty > MAX_CART_TOTAL_ITEMS) {
+          validQty = Math.max(1, MAX_CART_TOTAL_ITEMS - otherItemsCount)
+          toast.error(`Cart limit reached! Maximum ${MAX_CART_TOTAL_ITEMS} items allowed in the entire bag.`)
+        }
+
         const idx = currentItems.findIndex((i) => i.id === cartItemId)
         if (idx >= 0) {
           const item = currentItems[idx]
           currentItems[idx] = {
             ...item,
-            quantity,
-            totalPrice: item.unitPrice * quantity,
+            quantity: validQty,
+            totalPrice: item.unitPrice * validQty,
           }
           set({ cart: recalculateCart(currentItems, get().appliedCoupon) })
         }
 
         if (isAuth() && !cartItemId.startsWith('item-')) {
           try {
-            const { data } = await api.put<any>(`/api/cart/items/${cartItemId}`, { quantity })
+            const { data } = await api.put<any>(`/api/cart/items/${cartItemId}`, { quantity: validQty })
             if (data) {
               const currentCoupon = get().appliedCoupon
               const sub = data.subTotal ?? data.subtotal ?? 0

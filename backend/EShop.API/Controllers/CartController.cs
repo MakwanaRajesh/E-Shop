@@ -14,6 +14,9 @@ namespace EShop.API.Controllers;
 [Authorize]
 public class CartController(AppDbContext db, IUnitOfWork uow) : ControllerBase
 {
+    public const int MaxQuantityPerProduct = 10;
+    public const int MaxTotalCartItems = 20;
+
     private readonly AppDbContext _db  = db;
     private readonly IUnitOfWork  _uow = uow;
 
@@ -32,6 +35,9 @@ public class CartController(AppDbContext db, IUnitOfWork uow) : ControllerBase
     {
         if (req.Quantity <= 0)
             return BadRequest(new { message = "Quantity must be greater than zero." });
+
+        if (req.Quantity > MaxQuantityPerProduct)
+            return BadRequest(new { message = $"Maximum {MaxQuantityPerProduct} units allowed for a single product." });
 
         var userId  = GetCurrentUserId();
         var product = await _db.Products.AsNoTracking()
@@ -56,6 +62,10 @@ public class CartController(AppDbContext db, IUnitOfWork uow) : ControllerBase
 
         var cart = await GetOrCreateCartAsync(userId);
 
+        var currentTotalItems = cart.Items.Sum(i => i.Quantity);
+        if (currentTotalItems + req.Quantity > MaxTotalCartItems)
+            return BadRequest(new { message = $"Cart limit reached! Maximum {MaxTotalCartItems} items allowed in the entire bag." });
+
         // Check if same product+variant already in cart
         var existingItem = cart.Items.FirstOrDefault(i =>
             i.ProductId == req.ProductId && i.VariantId == req.VariantId);
@@ -63,6 +73,9 @@ public class CartController(AppDbContext db, IUnitOfWork uow) : ControllerBase
         if (existingItem is not null)
         {
             var newQty = existingItem.Quantity + req.Quantity;
+            if (newQty > MaxQuantityPerProduct)
+                return BadRequest(new { message = $"Maximum {MaxQuantityPerProduct} units allowed for this product in your bag." });
+
             if (newQty > availableStock)
                 return BadRequest(new { message = $"Cannot add more. Only {availableStock} items available." });
 
@@ -95,12 +108,19 @@ public class CartController(AppDbContext db, IUnitOfWork uow) : ControllerBase
         if (req.Quantity <= 0)
             return BadRequest(new { message = "Quantity must be greater than zero." });
 
+        if (req.Quantity > MaxQuantityPerProduct)
+            return BadRequest(new { message = $"Maximum {MaxQuantityPerProduct} units allowed per product." });
+
         var userId = GetCurrentUserId();
         var cart   = await GetCartWithItemsAsync(userId);
         if (cart is null) return NotFound(new { message = "Cart not found." });
 
         var item = cart.Items.FirstOrDefault(i => i.Id == cartItemId);
         if (item is null) return NotFound(new { message = "Cart item not found." });
+
+        var otherItemsCount = cart.Items.Where(i => i.Id != cartItemId).Sum(i => i.Quantity);
+        if (otherItemsCount + req.Quantity > MaxTotalCartItems)
+            return BadRequest(new { message = $"Cart limit reached! Maximum {MaxTotalCartItems} items allowed in the entire bag." });
 
         // Validate stock
         var product = await _db.Products.AsNoTracking()

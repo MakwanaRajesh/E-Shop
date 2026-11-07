@@ -47,6 +47,8 @@ export interface Category {
   parentId?: string
   children?: Category[]
   productCount?: number
+  sortOrder?: number
+  isActive?: boolean
   createdAt: string
 }
 
@@ -105,19 +107,27 @@ export interface ProductListItem {
   id: string
   name: string
   slug: string
+  sku?: string
   shortDescription?: string
   price: number
   compareAtPrice?: number
   primaryImage?: string
   primaryImageUrl?: string
+  categoryId?: string
+  categorySlug?: string
   category?: Pick<Category, 'id' | 'name' | 'slug'>
   categoryName?: string
+  parentCategoryId?: string
+  parentCategoryName?: string
+  parentCategorySlug?: string
+  tags?: string[] | string
   averageRating: number
   reviewCount: number
   stockQuantity?: number
   stock?: number
   isFeatured: boolean
   isActive?: boolean
+  createdAt?: string
 }
 
 // ─── Cart ─────────────────────────────────────────────────────────────────────
@@ -276,11 +286,16 @@ export interface PagedResult<T> {
 export interface ProductFilters {
   search?: string
   categorySlug?: string
+  category?: string
+  subCategory?: string
+  gender?: string
+  size?: string
+  minDiscount?: number
   minPrice?: number
   maxPrice?: number
   inStock?: boolean
   minRating?: number
-  sortBy?: 'newest' | 'price_asc' | 'price_desc' | 'popular' | 'rating'
+  sortBy?: 'newest' | 'price_asc' | 'price_desc' | 'popular' | 'rating' | 'discount' | 'relevant' | 'featured'
   page?: number
   pageSize?: number
   featured?: boolean

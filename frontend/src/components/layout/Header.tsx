@@ -35,6 +35,13 @@ export const MEGA_MENU_CATEGORIES = [
     name: 'Men',
     slug: 'men',
     highlight: 'New Season',
+    spotlight: {
+      tag: 'The Sartorial Edit',
+      title: "Men's Luxury Sartorial",
+      subtitle: 'Californian Supima & French Linen',
+      imageUrl: 'https://images.unsplash.com/photo-1617137984095-74e4e5e3613f?w=800&auto=format&fit=crop&q=85',
+      href: '/products?category=men',
+    },
     columns: [
       {
         title: 'Topwear',
@@ -78,6 +85,13 @@ export const MEGA_MENU_CATEGORIES = [
     name: 'Women',
     slug: 'women',
     highlight: 'Trending',
+    spotlight: {
+      tag: 'Spring Couture',
+      title: "Women's Haute Edit",
+      subtitle: 'Mulberry Silk & Lucknowi Chikankari',
+      imageUrl: 'https://images.unsplash.com/photo-1483985988355-763728e1935b?w=800&auto=format&fit=crop&q=85',
+      href: '/products?category=women',
+    },
     columns: [
       {
         title: 'Western Wear',
@@ -111,6 +125,13 @@ export const MEGA_MENU_CATEGORIES = [
   {
     name: 'Kids',
     slug: 'kids',
+    spotlight: {
+      tag: 'Designer Junior',
+      title: 'Kids Luxury Wardrobe',
+      subtitle: '100% Organic Pima Cotton & Tulle',
+      imageUrl: 'https://images.unsplash.com/photo-1503919545889-aef636e10ad4?w=800&auto=format&fit=crop&q=85',
+      href: '/products?category=kids',
+    },
     columns: [
       {
         title: 'Boys (2–14Y)',
@@ -140,21 +161,36 @@ export const MEGA_MENU_CATEGORIES = [
   {
     name: 'Footwear',
     slug: 'footwear',
+    spotlight: {
+      tag: 'Artisan Craft',
+      title: 'Handcrafted Footwear',
+      subtitle: 'Italian Calfskin & Stiletto Pumps',
+      imageUrl: 'https://images.unsplash.com/photo-1549298916-b41d501d3772?w=800&auto=format&fit=crop&q=85',
+      href: '/products?category=footwear',
+    },
     columns: [
       {
         title: 'Men’s Footwear',
         items: [
-          { label: 'Italian Leather Sneakers', href: '/products?category=men-footwear' },
-          { label: 'Formal Oxford & Derby', href: '/products?category=footwear&search=formal' },
-          { label: 'Penny Loafers', href: '/products?category=footwear&search=loafers' },
+          { label: 'Italian Leather Sneakers', href: '/products?category=men&subCategory=men-footwear' },
+          { label: 'Penny Loafers', href: '/products?category=men&subCategory=men-footwear&search=loafers' },
+          { label: 'All Men’s Shoes', href: '/products?category=men&subCategory=men-footwear' },
         ],
       },
       {
         title: 'Women’s Footwear',
         items: [
-          { label: 'Designer Heels', href: '/products?category=women-footwear' },
-          { label: 'Comfort Ballet Flats', href: '/products?category=women-footwear&search=flats' },
-          { label: 'White Chic Sneakers', href: '/products?category=women-footwear&search=sneakers' },
+          { label: 'Designer Stiletto Heels', href: '/products?category=women&subCategory=women-footwear' },
+          { label: 'Comfort Ballet Flats', href: '/products?category=women&subCategory=women-footwear&search=flats' },
+          { label: 'All Women’s Shoes', href: '/products?category=women&subCategory=women-footwear' },
+        ],
+      },
+      {
+        title: 'Full Footwear Catalog',
+        items: [
+          { label: 'Court Retro Sneakers', href: '/products?category=footwear' },
+          { label: 'Kids Sneakers', href: '/products?category=kids&subCategory=kids-footwear' },
+          { label: 'All Footwear', href: '/products?category=footwear' },
         ],
       },
     ],
@@ -162,6 +198,13 @@ export const MEGA_MENU_CATEGORIES = [
   {
     name: 'Watches',
     slug: 'watches',
+    spotlight: {
+      tag: 'Master Horology',
+      title: 'Precision Timepieces',
+      subtitle: 'Swiss Tourbillon & Chronographs',
+      imageUrl: 'https://images.unsplash.com/photo-1522335789203-aabd1fc54bc9?w=800&auto=format&fit=crop&q=85',
+      href: '/products?category=watches',
+    },
     columns: [
       {
         title: 'Horology Collections',
@@ -171,19 +214,39 @@ export const MEGA_MENU_CATEGORIES = [
           { label: 'Minimalist Dress Timepieces', href: '/products?category=watches&search=minimalist' },
         ],
       },
+      {
+        title: 'Styles & Movements',
+        items: [
+          { label: 'Swiss Automatic Movements', href: '/products?category=watches' },
+          { label: 'Classic Dress Watches', href: '/products?category=watches&search=classic' },
+          { label: 'Rose Gold & Steel Editions', href: '/products?category=watches' },
+        ],
+      },
     ],
   },
   {
     name: 'Accessories',
     slug: 'accessories',
+    spotlight: {
+      tag: 'Signature Accents',
+      title: 'Fine Living Accents',
+      subtitle: 'Florentine Leather & 18k Solid Gold',
+      imageUrl: 'https://images.unsplash.com/photo-1548036328-c9fa89d128fa?w=800&auto=format&fit=crop&q=85',
+      href: '/products?category=accessories',
+    },
     columns: [
       {
-        title: 'Leather & Accents',
+        title: 'Leather & Travel',
         items: [
           { label: 'Italian Leather Briefcases', href: '/products?category=accessories&search=briefcase' },
           { label: 'Designer Wallets & Belts', href: '/products?category=accessories&search=wallet' },
+        ],
+      },
+      {
+        title: 'Fragrances & Jewels',
+        items: [
           { label: 'Haute Fragrances & Oud', href: '/products?category=fragrances' },
-          { label: 'Fine 18k Solid Jewelry', href: '/products?category=jewelry' },
+          { label: 'Fine 18k Solid Gold Jewelry', href: '/products?category=jewelry' },
         ],
       },
     ],
@@ -192,6 +255,13 @@ export const MEGA_MENU_CATEGORIES = [
     name: 'Offers & Sale',
     slug: 'sale',
     highlight: 'Save up to 40%',
+    spotlight: {
+      tag: 'Exclusive Privilege',
+      title: 'The Private Vault',
+      subtitle: 'Curated Deals with Code NEXUS10',
+      imageUrl: 'https://images.unsplash.com/photo-1513094735237-8f2714d57c13?w=800&auto=format&fit=crop&q=85',
+      href: '/products',
+    },
     columns: [
       {
         title: 'Curated Deals',
@@ -199,6 +269,14 @@ export const MEGA_MENU_CATEGORIES = [
           { label: 'Flash Deals Under ₹2,999', href: '/products?maxPrice=2999' },
           { label: 'Bestselling Vault', href: '/products?sort=popular' },
           { label: 'Luxury Specials with Code NEXUS10', href: '/products' },
+        ],
+      },
+      {
+        title: 'Discount Tiers',
+        items: [
+          { label: '50% Off & Above', href: '/products?minDiscount=50' },
+          { label: '30% Off & Above', href: '/products?minDiscount=30' },
+          { label: '20% Off & Above', href: '/products?minDiscount=20' },
         ],
       },
     ],
@@ -211,6 +289,24 @@ export function Header() {
   const [isScrolled, setIsScrolled] = React.useState(false)
   const [mobileOpen, setMobileOpen] = React.useState(false)
   const [activeMegaMenu, setActiveMegaMenu] = React.useState<string | null>(null)
+  const hoverTimeoutRef = React.useRef<NodeJS.Timeout | null>(null)
+
+  const handleMouseEnter = (catName: string) => {
+    if (hoverTimeoutRef.current) {
+      clearTimeout(hoverTimeoutRef.current)
+      hoverTimeoutRef.current = null
+    }
+    setActiveMegaMenu(catName)
+  }
+
+  const handleMouseLeave = () => {
+    if (hoverTimeoutRef.current) {
+      clearTimeout(hoverTimeoutRef.current)
+    }
+    hoverTimeoutRef.current = setTimeout(() => {
+      setActiveMegaMenu(null)
+    }, 280)
+  }
 
   // Live Search state
   const [searchQuery, setSearchQuery] = React.useState('')
@@ -230,12 +326,44 @@ export function Header() {
   const { items: wishlistItems } = useWishlistStore()
   const { open: openAuthModal } = useAuthModalStore()
 
-  // Track scroll
+  // Clean up hover timeout on unmount
   React.useEffect(() => {
-    const handler = () => setIsScrolled(window.scrollY > 15)
+    return () => {
+      if (hoverTimeoutRef.current) {
+        clearTimeout(hoverTimeoutRef.current)
+      }
+    }
+  }, [])
+
+  // Track scroll and close mega menu on scroll
+  React.useEffect(() => {
+    const handler = () => {
+      setIsScrolled(window.scrollY > 15)
+      if (activeMegaMenu) {
+        setActiveMegaMenu(null)
+      }
+    }
     window.addEventListener('scroll', handler, { passive: true })
     return () => window.removeEventListener('scroll', handler)
-  }, [])
+  }, [activeMegaMenu])
+
+  // Close mega menu on route change
+  React.useEffect(() => {
+    setActiveMegaMenu(null)
+  }, [pathname])
+
+  // Close mega menu on outside click
+  React.useEffect(() => {
+    if (!activeMegaMenu) return
+    const handleDocClick = (e: MouseEvent) => {
+      const headerEl = document.querySelector('header')
+      if (headerEl && !headerEl.contains(e.target as Node)) {
+        setActiveMegaMenu(null)
+      }
+    }
+    document.addEventListener('click', handleDocClick)
+    return () => document.removeEventListener('click', handleDocClick)
+  }, [activeMegaMenu])
 
   // Close search suggestions on outside click
   React.useEffect(() => {
@@ -272,12 +400,15 @@ export function Header() {
     return () => clearTimeout(timer)
   }, [searchQuery])
 
-  const handleSearchSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (searchQuery.trim()) {
-      router.push(`/products?search=${encodeURIComponent(searchQuery.trim())}`)
-      setSearchFocused(false)
+  const handleSearchSubmit = (e?: React.FormEvent) => {
+    if (e) e.preventDefault()
+    const q = searchQuery.trim()
+    if (q) {
+      router.push(`/products?search=${encodeURIComponent(q)}`)
+    } else {
+      router.push('/products')
     }
+    setSearchFocused(false)
   }
 
   const handleLogout = () => {
@@ -353,21 +484,34 @@ export function Header() {
 
             {/* ── Center Prominent Search Bar (Flipkart / AJIO style) ── */}
             <div ref={searchContainerRef} className="flex-1 max-w-xl relative hidden md:block">
-              <form onSubmit={handleSearchSubmit} className="relative">
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  onFocus={() => setSearchFocused(true)}
-                  placeholder="Search for T-shirts, Denim, Sneakers, Watches, Perfumes..."
-                  className="w-full bg-surface-2/80 hover:bg-surface-2 border border-border focus:border-gold rounded-full pl-11 pr-24 py-2.5 text-xs text-beige placeholder:text-beige-muted/50 focus:outline-none transition-all shadow-inner"
-                />
-                <Search className="w-4 h-4 text-beige-muted absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <form onSubmit={handleSearchSubmit} className="relative flex items-center">
+                <div className="relative w-full">
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    onFocus={() => setSearchFocused(true)}
+                    placeholder="Search for T-shirts, Denim, Sneakers, Watches, Perfumes..."
+                    className="w-full bg-surface-2/80 hover:bg-surface-2 border border-border focus:border-gold rounded-full pl-11 pr-28 py-2.5 text-xs text-beige placeholder:text-beige-muted/50 focus:outline-none transition-all shadow-inner"
+                  />
+                  <Search className="w-4 h-4 text-beige-muted absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  {searchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setSearchQuery('')}
+                      className="absolute right-24 top-1/2 -translate-y-1/2 text-beige-muted hover:text-beige p-1 transition-colors"
+                      aria-label="Clear search query"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
                 <button
                   type="submit"
-                  className="absolute right-1.5 top-1/2 -translate-y-1/2 bg-gold hover:bg-gold-light text-background px-4 py-1.5 rounded-full text-xs font-semibold transition-colors"
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 bg-gold hover:bg-gold-light active:scale-95 text-background px-4 py-1.5 rounded-full text-xs font-semibold transition-all shadow-sm flex items-center gap-1 cursor-pointer"
                 >
-                  Search
+                  <Search className="w-3 h-3 text-background" />
+                  <span>Search</span>
                 </button>
               </form>
 
@@ -448,7 +592,7 @@ export function Header() {
                         <span>Trending Searches:</span>
                       </div>
                       <div className="flex flex-wrap gap-1.5">
-                        {['Supima T-Shirts', 'Selvedge Denim', 'Italian Sneakers', 'Mulberry Silk Dress', 'Chanderi Kurta', 'Royal Chronograph'].map((tag) => (
+                        {['Men Clothes', 'Women Dresses', 'Kids Apparel', 'Supima T-Shirts', 'Selvedge Denim', 'Italian Sneakers', 'Stiletto Heels', 'Chanderi Kurta'].map((tag) => (
                           <button
                             key={tag}
                             type="button"
@@ -586,7 +730,16 @@ export function Header() {
         </div>
 
         {/* ── Category Mega-Menu Row (Desktop) ── */}
-        <div className="hidden lg:block border-t border-border/70 bg-surface/30">
+        <div
+          className="hidden lg:block border-t border-border/80 bg-[#0d0c0a] relative z-40"
+          onMouseEnter={() => {
+            if (hoverTimeoutRef.current) {
+              clearTimeout(hoverTimeoutRef.current)
+              hoverTimeoutRef.current = null
+            }
+          }}
+          onMouseLeave={handleMouseLeave}
+        >
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <nav className="flex items-center justify-between">
               <div className="flex items-center gap-1">
@@ -595,58 +748,31 @@ export function Header() {
                   return (
                     <div
                       key={cat.name}
+                      onMouseEnter={() => handleMouseEnter(cat.name)}
                       className="relative"
-                      onMouseEnter={() => setActiveMegaMenu(cat.name)}
-                      onMouseLeave={() => setActiveMegaMenu(null)}
                     >
                       <Link
                         href={`/products?category=${cat.slug}`}
                         className={cn(
-                          'flex items-center gap-1 px-4 py-3 text-xs uppercase tracking-wider font-semibold transition-colors duration-200 border-b-2',
+                          'flex items-center gap-1.5 px-4 py-3 text-xs uppercase tracking-wider font-semibold transition-all duration-200 border-b-2',
                           isActive
-                            ? 'text-gold border-gold'
-                            : 'text-beige-muted hover:text-beige border-transparent',
+                            ? 'text-gold border-gold bg-gold/10'
+                            : 'text-beige-muted hover:text-beige border-transparent hover:bg-surface-2/40',
                         )}
                       >
                         <span>{cat.name}</span>
                         {cat.highlight && (
-                          <span className="text-[9px] lowercase bg-gold/15 text-gold px-1.5 py-0.5 rounded-full font-mono font-normal">
+                          <span className="text-[9px] lowercase bg-gold/20 text-gold px-1.5 py-0.5 rounded-full font-mono font-normal">
                             {cat.highlight}
                           </span>
                         )}
                         <ChevronDown
                           className={cn(
-                            'w-3 h-3 transition-transform duration-200',
-                            isActive && 'rotate-180',
+                            'w-3 h-3 transition-transform duration-200 text-beige-muted',
+                            isActive && 'rotate-180 text-gold',
                           )}
                         />
                       </Link>
-
-                      {/* Mega-Menu Dropdown Drawer */}
-                      {isActive && (
-                        <div className="absolute left-0 top-full w-[650px] bg-surface/98 backdrop-blur-xl border border-border rounded-b-2xl shadow-2xl p-6 z-50 animate-fade-in grid grid-cols-3 gap-6">
-                          {cat.columns.map((col, idx) => (
-                            <div key={idx} className="space-y-2.5">
-                              <h4 className="text-xs font-bold text-gold uppercase tracking-wider border-b border-border/80 pb-1.5">
-                                {col.title}
-                              </h4>
-                              <ul className="space-y-1.5">
-                                {col.items.map((item, itemIdx) => (
-                                  <li key={itemIdx}>
-                                    <Link
-                                      href={item.href}
-                                      onClick={() => setActiveMegaMenu(null)}
-                                      className="text-xs text-beige-muted hover:text-beige hover:translate-x-1 transition-all block py-0.5"
-                                    >
-                                      {item.label}
-                                    </Link>
-                                  </li>
-                                ))}
-                              </ul>
-                            </div>
-                          ))}
-                        </div>
-                      )}
                     </div>
                   )
                 })}
@@ -662,24 +788,128 @@ export function Header() {
               </Link>
             </nav>
           </div>
+
+          {/* ── UNIFIED FULL-WIDTH SOLID MEGA-MENU DRAWER ── */}
+          {(() => {
+            const activeCategory = MEGA_MENU_CATEGORIES.find((c) => c.name === activeMegaMenu)
+            if (!activeCategory) return null
+
+            return (
+              <div
+                className="absolute top-full left-0 right-0 z-50 animate-fade-in"
+                onMouseEnter={() => {
+                  if (hoverTimeoutRef.current) {
+                    clearTimeout(hoverTimeoutRef.current)
+                    hoverTimeoutRef.current = null
+                  }
+                }}
+                onMouseLeave={handleMouseLeave}
+              >
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                  <div className="bg-[#0b0a08] border border-gold/40 border-t-2 border-t-gold rounded-b-2xl shadow-[0_35px_90px_rgba(0,0,0,0.98)] p-7 grid grid-cols-12 gap-8">
+                    {/* Category Link Columns */}
+                    <div
+                      className={cn(
+                        'grid gap-6',
+                        activeCategory.columns.length === 4
+                          ? 'col-span-12 lg:col-span-8 sm:grid-cols-4'
+                          : activeCategory.columns.length === 3
+                          ? 'col-span-12 lg:col-span-8 sm:grid-cols-3'
+                          : 'col-span-12 lg:col-span-8 sm:grid-cols-2',
+                      )}
+                    >
+                      {activeCategory.columns.map((col, cIdx) => (
+                        <div key={cIdx} className="space-y-3">
+                          <h4 className="text-xs font-bold text-gold uppercase tracking-wider font-mono border-b border-gold/25 pb-1.5 flex items-center justify-between">
+                            <span>{col.title}</span>
+                          </h4>
+                          <ul className="space-y-2">
+                            {col.items.map((item, iIdx) => (
+                              <li key={iIdx}>
+                                <Link
+                                  href={item.href}
+                                  onClick={() => setActiveMegaMenu(null)}
+                                  className="text-xs text-beige/85 hover:text-gold hover:translate-x-1.5 transition-all block py-0.5 font-medium"
+                                >
+                                  {item.label}
+                                </Link>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Editorial Spotlight Card (Col 9-12) */}
+                    {activeCategory.spotlight && (
+                      <div className="col-span-12 lg:col-span-4 border-t lg:border-t-0 lg:border-l border-border/80 pt-4 lg:pt-0 lg:pl-8 flex flex-col justify-between">
+                        <Link
+                          href={activeCategory.spotlight.href}
+                          onClick={() => setActiveMegaMenu(null)}
+                          className="group block relative rounded-xl overflow-hidden border border-border hover:border-gold/60 transition-all shadow-xl h-full flex flex-col justify-end p-5 min-h-[220px]"
+                        >
+                          <Image
+                            src={activeCategory.spotlight.imageUrl}
+                            alt={activeCategory.spotlight.title}
+                            fill
+                            className="object-cover group-hover:scale-105 transition-transform duration-700"
+                            sizes="(max-width: 1280px) 300px, 400px"
+                          />
+                          <div className="absolute inset-0 bg-gradient-to-t from-black via-black/50 to-transparent" />
+                          <div className="relative z-10 space-y-1.5">
+                            <span className="inline-block px-2.5 py-0.5 rounded-full bg-gold/20 border border-gold/40 text-gold font-mono text-[10px] font-bold uppercase tracking-wider">
+                              {activeCategory.spotlight.tag}
+                            </span>
+                            <h5 className="font-serif text-lg font-bold text-beige group-hover:text-gold transition-colors leading-snug">
+                              {activeCategory.spotlight.title}
+                            </h5>
+                            <p className="text-xs text-beige-muted line-clamp-1">
+                              {activeCategory.spotlight.subtitle}
+                            </p>
+                            <div className="pt-2 text-xs font-semibold text-gold flex items-center gap-1 group-hover:translate-x-1 transition-transform">
+                              <span>Explore Collection</span>
+                              <ChevronRight className="w-3.5 h-3.5" />
+                            </div>
+                          </div>
+                        </Link>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )
+          })()}
         </div>
 
         {/* ── Mobile Search Bar Strip (Visible on mobile screens) ── */}
         <div className="md:hidden px-4 pb-3">
-          <form onSubmit={handleSearchSubmit} className="relative">
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search products, brands, sneakers..."
-              className="w-full bg-surface-2 border border-border rounded-xl pl-10 pr-20 py-2 text-xs text-beige placeholder:text-beige-muted/50 focus:outline-none focus:border-gold"
-            />
-            <Search className="w-3.5 h-3.5 text-beige-muted absolute left-3.5 top-1/2 -translate-y-1/2" />
+          <form onSubmit={handleSearchSubmit} className="relative flex items-center">
+            <div className="relative flex-1">
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search products, brands, sneakers..."
+                className="w-full bg-surface-2 border border-border rounded-xl pl-10 pr-8 py-2 text-xs text-beige placeholder:text-beige-muted/50 focus:outline-none focus:border-gold"
+              />
+              <Search className="w-3.5 h-3.5 text-beige-muted absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-beige-muted hover:text-beige p-0.5"
+                  aria-label="Clear query"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              )}
+            </div>
             <button
               type="submit"
-              className="absolute right-1 top-1/2 -translate-y-1/2 bg-gold text-background px-3 py-1 rounded-lg text-xs font-semibold"
+              className="ml-2 bg-gold active:scale-95 text-background px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-1 shadow-sm transition-transform flex-shrink-0"
             >
-              Go
+              <Search className="w-3.5 h-3.5 text-background" />
+              <span>Search</span>
             </button>
           </form>
         </div>
@@ -765,6 +995,14 @@ export function Header() {
                     </button>
                     {isExpanded && (
                       <div className="bg-surface-2/60 p-3 border-t border-border/60 space-y-3">
+                        <Link
+                          href={`/products?category=${cat.slug}`}
+                          onClick={() => setMobileOpen(false)}
+                          className="text-xs font-bold text-gold flex items-center justify-between py-2 px-2.5 bg-gold/10 hover:bg-gold/20 rounded-lg transition-colors border border-gold/30"
+                        >
+                          <span>Explore Full {cat.name} Collection</span>
+                          <ChevronRight className="w-3.5 h-3.5" />
+                        </Link>
                         {cat.columns.map((col, idx) => (
                           <div key={idx} className="space-y-1">
                             <span className="text-[10px] font-bold text-gold uppercase tracking-wider block">
@@ -820,6 +1058,12 @@ export function Header() {
             </div>
           </div>
         </div>
+      )}
+      {/* ── Background Scrim Overlay (dims page underneath when mega-menu is active) ── */}
+      {activeMegaMenu && (
+        <div
+          className="fixed inset-0 top-full bg-black/75 backdrop-blur-sm z-30 transition-opacity duration-300 pointer-events-none"
+        />
       )}
     </header>
   )

@@ -99,8 +99,12 @@ public record ProductQueryParams
     public Guid? CategoryId { get; init; }
     public string? Category { get; init; }
     public string? SubCategory { get; init; }
+    public string? Gender { get; init; }
     public decimal? MinPrice { get; init; }
     public decimal? MaxPrice { get; init; }
+    public int? MinDiscount { get; init; }
+    public string? Size { get; init; }
+    public double? MinRating { get; init; }
     public bool? InStock { get; init; }
     public bool? Featured { get; init; }
     public string SortBy { get; init; } = "newest";
@@ -114,4 +118,23 @@ public record PagedResult<T>(
     int Page,
     int PageSize,
     int TotalPages
+);
+
+public record BulkProductItemDto(
+    string Name,
+    decimal Price,
+    decimal? CompareAtPrice,
+    int Stock,
+    string? SKU,
+    string? ImageUrl,
+    string? Tags,
+    string? ShortDescription,
+    string? Description,
+    bool IsFeatured,
+    Guid? CategoryId
+);
+
+public record BulkCreateProductsRequest(
+    Guid DefaultCategoryId,
+    List<BulkProductItemDto> Products
 );

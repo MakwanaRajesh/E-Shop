@@ -97,7 +97,7 @@ export function Footer() {
             <ul className="space-y-3">
               <li className="flex items-start gap-3 text-sm text-beige-muted">
                 <MapPin className="w-4 h-4 text-gold mt-0.5 flex-shrink-0" />
-                <span>123 Luxury Lane, Mumbai, Maharashtra 400001, India</span>
+                <span>2 Maruti Chock, Rajkot, Gujarat, 360005</span>
               </li>
               <li className="flex items-center gap-3 text-sm text-beige-muted">
                 <Phone className="w-4 h-4 text-gold flex-shrink-0" />
@@ -107,8 +107,8 @@ export function Footer() {
               </li>
               <li className="flex items-center gap-3 text-sm text-beige-muted">
                 <Mail className="w-4 h-4 text-gold flex-shrink-0" />
-                <a href="mailto:hello@luxestore.com" className="hover:text-gold transition-colors">
-                  hello@luxestore.com
+                <a href="mailto:nexustech1003@gmail.com" className="hover:text-gold transition-colors">
+                  nexustech1003@gmail.com
                 </a>
               </li>
             </ul>
@@ -120,7 +120,7 @@ export function Footer() {
       <div className="border-t border-border">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5 flex flex-col sm:flex-row items-center justify-between gap-3">
           <p className="text-xs text-beige-muted">
-            © {new Date().getFullYear()} Luxe Store. All rights reserved.
+            © {new Date().getFullYear()} NEXUS Luxury Store. All rights reserved.
           </p>
           <div className="flex items-center gap-4">
             <Link href="/privacy" className="text-xs text-beige-muted hover:text-gold transition-colors">
