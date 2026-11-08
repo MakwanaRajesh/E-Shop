@@ -428,24 +428,24 @@ export function Header() {
   return (
     <header className="fixed top-0 left-0 right-0 z-50 transition-all duration-300">
       {/* ── Top Privileges Banner ── */}
-      <div className="bg-[#0f0e0c] border-b border-border/60 py-1.5 px-4 text-[11px] text-beige-muted hidden sm:block">
+      <div className="bg-[#111111] border-b border-[#2A2820] py-1.5 px-4 text-[11px] text-[#FAF8F5] hidden sm:block">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <span className="flex items-center gap-1 text-gold font-medium">
-              <Sparkles className="w-3 h-3 text-gold" />
+            <span className="flex items-center gap-1.5 text-[#FAF8F5] font-medium">
+              <Sparkles className="w-3 h-3 text-[#C5A059]" />
               Complimentary White-Glove Doorstep Delivery on orders ₹5,000+
             </span>
-            <span className="text-border">|</span>
-            <span>Use code <strong className="text-gold font-mono">NEXUS10</strong> for 10% instant off</span>
+            <span className="text-[#57534E]">|</span>
+            <span>Use code <strong className="text-[#C5A059] font-mono font-bold tracking-wider">NEXUS10</strong> for 10% instant off</span>
           </div>
           <div className="flex items-center gap-4">
-            <Link href="/account" className="hover:text-gold transition-colors flex items-center gap-1">
-              <Headphones className="w-3 h-3 text-gold" />
+            <Link href="/account" className="text-[#FAF8F5] hover:text-[#C5A059] transition-colors flex items-center gap-1.5">
+              <Headphones className="w-3 h-3 text-[#C5A059]" />
               24/7 VIP Concierge: 1800-890-6398
             </Link>
-            <span className="text-border">|</span>
-            <span className="flex items-center gap-1 text-xs">
-              <ShieldCheck className="w-3.5 h-3.5 text-success" />
+            <span className="text-[#57534E]">|</span>
+            <span className="flex items-center gap-1 text-xs text-[#FAF8F5]">
+              <ShieldCheck className="w-3.5 h-3.5 text-[#C5A059]" />
               100% Certified Authentic
             </span>
           </div>
@@ -457,8 +457,8 @@ export function Header() {
         className={cn(
           'transition-all duration-300',
           isScrolled
-            ? 'bg-background/95 backdrop-blur-md border-b border-border shadow-lg shadow-black/30'
-            : 'bg-background/90 backdrop-blur-sm border-b border-border/80',
+            ? 'bg-[#FFFFFF]/98 backdrop-blur-md border-b border-[#E7E5E4] shadow-md shadow-black/5'
+            : 'bg-[#FFFFFF] border-b border-[#E7E5E4]',
         )}
       >
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -466,7 +466,7 @@ export function Header() {
             {/* Mobile Hamburger Button */}
             <button
               onClick={() => setMobileOpen(!mobileOpen)}
-              className="lg:hidden w-10 h-10 -ml-2 flex items-center justify-center text-beige-muted hover:text-beige"
+              className="lg:hidden w-10 h-10 -ml-2 flex items-center justify-center text-[#57534E] hover:text-[#111111]"
               aria-label="Toggle Navigation Menu"
             >
               {mobileOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
@@ -474,10 +474,10 @@ export function Header() {
 
             {/* Logo */}
             <Link href="/" className="flex items-center gap-2 group flex-shrink-0">
-              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-gold/30 to-gold/5 border border-gold/40 flex items-center justify-center">
-                <Sparkles className="w-4 h-4 text-gold group-hover:rotate-12 transition-transform" />
+              <div className="w-8 h-8 rounded-lg bg-[#FAF8F5] border border-[#C5A059] flex items-center justify-center shadow-sm group-hover:scale-105 transition-transform">
+                <Sparkles className="w-4 h-4 text-[#C5A059]" />
               </div>
-              <span className="font-serif text-2xl font-bold tracking-wider gold-text-gradient">
+              <span className="font-serif text-2xl font-bold tracking-wider text-[#111111] group-hover:text-[#C5A059] transition-colors">
                 NEXUS
               </span>
             </Link>
@@ -492,14 +492,14 @@ export function Header() {
                     onChange={(e) => setSearchQuery(e.target.value)}
                     onFocus={() => setSearchFocused(true)}
                     placeholder="Search for T-shirts, Denim, Sneakers, Watches, Perfumes..."
-                    className="w-full bg-surface-2/80 hover:bg-surface-2 border border-border focus:border-gold rounded-full pl-11 pr-28 py-2.5 text-xs text-beige placeholder:text-beige-muted/50 focus:outline-none transition-all shadow-inner"
+                    className="w-full bg-[#FAF8F5] hover:bg-[#FFFFFF] border border-[#E7E5E4] focus:border-[#C5A059] rounded-full pl-11 pr-28 py-2.5 text-xs text-[#111111] placeholder:text-[#78716C] focus:outline-none transition-all shadow-inner"
                   />
-                  <Search className="w-4 h-4 text-beige-muted absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <Search className="w-4 h-4 text-[#78716C] absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" />
                   {searchQuery && (
                     <button
                       type="button"
                       onClick={() => setSearchQuery('')}
-                      className="absolute right-24 top-1/2 -translate-y-1/2 text-beige-muted hover:text-beige p-1 transition-colors"
+                      className="absolute right-24 top-1/2 -translate-y-1/2 text-[#78716C] hover:text-[#111111] p-1 transition-colors"
                       aria-label="Clear search query"
                     >
                       <X className="w-3.5 h-3.5" />
@@ -508,16 +508,16 @@ export function Header() {
                 </div>
                 <button
                   type="submit"
-                  className="absolute right-1.5 top-1/2 -translate-y-1/2 bg-gold hover:bg-gold-light active:scale-95 text-background px-4 py-1.5 rounded-full text-xs font-semibold transition-all shadow-sm flex items-center gap-1 cursor-pointer"
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 bg-[#111111] hover:bg-[#C5A059] active:scale-95 text-[#FFFFFF] hover:text-[#111111] px-4 py-1.5 rounded-full text-xs font-semibold transition-all shadow-sm flex items-center gap-1 cursor-pointer"
                 >
-                  <Search className="w-3 h-3 text-background" />
+                  <Search className="w-3 h-3 text-current" />
                   <span>Search</span>
                 </button>
               </form>
 
               {/* Autocomplete Dropdown */}
               {searchFocused && (
-                <div className="absolute left-0 right-0 top-full mt-2 bg-surface border border-border/90 rounded-2xl shadow-2xl p-4 z-50 space-y-3 animate-fade-in">
+                <div className="absolute left-0 right-0 top-full mt-2 bg-[#FFFFFF] border border-[#E7E5E4] rounded-2xl shadow-2xl p-4 z-50 space-y-3 animate-fade-in">
                   {/* Category matches */}
                   {suggestions.categories.length > 0 && (
                     <div>
@@ -618,12 +618,12 @@ export function Header() {
               {/* Wishlist */}
               <Link
                 href="/wishlist"
-                className="relative w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center rounded-xl text-beige-muted hover:text-beige hover:bg-surface-2 transition-colors border border-transparent hover:border-border"
+                className="relative w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center rounded-xl text-[#57534E] hover:text-[#111111] hover:bg-[#FAF8F5] transition-colors border border-transparent hover:border-[#E7E5E4]"
                 aria-label="Wishlist"
               >
                 <Heart className="w-4 h-4 sm:w-5 sm:h-5" />
                 {wishlistCount > 0 && (
-                  <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] rounded-full bg-gradient-to-r from-rose-600 to-rose-500 text-white text-[10px] font-bold flex items-center justify-center px-1 shadow-sm shadow-rose-950/60 border border-rose-400/40">
+                  <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] rounded-full bg-[#FEF2F2] text-[#991B1B] text-[10px] font-bold flex items-center justify-center px-1 shadow-sm border border-[#FECACA]">
                     {wishlistCount}
                   </span>
                 )}
@@ -632,12 +632,12 @@ export function Header() {
               {/* Cart Drawer Trigger */}
               <button
                 onClick={() => setCartOpen(true)}
-                className="relative w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center rounded-xl text-beige-muted hover:text-beige hover:bg-surface-2 transition-colors border border-transparent hover:border-border"
+                className="relative w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center rounded-xl text-[#57534E] hover:text-[#111111] hover:bg-[#FAF8F5] transition-colors border border-transparent hover:border-[#E7E5E4]"
                 aria-label="Bag"
               >
                 <ShoppingCart className="w-4 h-4 sm:w-5 sm:h-5" />
                 {cartCount > 0 && (
-                  <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] rounded-full bg-gold text-background text-[10px] font-bold flex items-center justify-center px-1">
+                  <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] rounded-full bg-[#111111] text-[#FFFFFF] text-[10px] font-bold flex items-center justify-center px-1 shadow-sm">
                     {cartCount > 99 ? '99+' : cartCount}
                   </span>
                 )}
@@ -647,50 +647,50 @@ export function Header() {
               {isAuthenticated && user ? (
                 <DropdownMenu.Root>
                   <DropdownMenu.Trigger asChild>
-                    <button className="flex items-center gap-2 pl-2 pr-3 py-1.5 rounded-xl border border-border hover:border-gold/40 transition-colors text-xs text-beige-muted hover:text-beige bg-surface/40">
-                      <div className="w-6 h-6 rounded-full bg-gold/20 border border-gold/40 flex items-center justify-center">
-                        <span className="text-gold text-[11px] font-bold">
+                    <button className="flex items-center gap-2 pl-2 pr-3 py-1.5 rounded-xl border border-[#E7E5E4] hover:border-[#C5A059]/40 transition-colors text-xs text-[#57534E] hover:text-[#111111] bg-[#FAF8F5]">
+                      <div className="w-6 h-6 rounded-full bg-[#C5A059]/20 border border-[#C5A059]/40 flex items-center justify-center">
+                        <span className="text-[#C5A059] text-[11px] font-bold">
                           {user.firstName[0].toUpperCase()}
                         </span>
                       </div>
                       <span className="hidden sm:block max-w-[80px] truncate">{user.firstName}</span>
-                      <ChevronDown className="w-3 h-3 text-beige-muted" />
+                      <ChevronDown className="w-3 h-3 text-[#78716C]" />
                     </button>
                   </DropdownMenu.Trigger>
                   <DropdownMenu.Portal>
                     <DropdownMenu.Content
-                      className="min-w-[200px] bg-surface border border-border rounded-xl shadow-2xl shadow-black/60 p-1.5 z-50"
+                      className="min-w-[200px] bg-[#FFFFFF] border border-[#E7E5E4] rounded-xl shadow-2xl p-1.5 z-50 text-[#111111]"
                       sideOffset={8}
                       align="end"
                     >
-                      <div className="px-3 py-2 border-b border-border/80 mb-1">
-                        <p className="text-[11px] text-beige-muted">Signed in as</p>
-                        <p className="text-xs font-semibold text-beige truncate">{user.email}</p>
+                      <div className="px-3 py-2 border-b border-[#E7E5E4] mb-1">
+                        <p className="text-[11px] text-[#78716C]">Signed in as</p>
+                        <p className="text-xs font-semibold text-[#111111] truncate">{user.email}</p>
                       </div>
                       <DropdownMenu.Item asChild>
                         <Link
                           href="/account"
-                          className="flex items-center gap-2.5 px-3 py-2 text-xs text-beige-muted hover:text-beige hover:bg-surface-2 rounded-lg cursor-pointer outline-none transition-colors"
+                          className="flex items-center gap-2.5 px-3 py-2 text-xs text-[#57534E] hover:text-[#111111] hover:bg-[#FAF8F5] rounded-lg cursor-pointer outline-none transition-colors"
                         >
-                          <User className="w-3.5 h-3.5 text-gold" />
+                          <User className="w-3.5 h-3.5 text-[#C5A059]" />
                           Account & Profile
                         </Link>
                       </DropdownMenu.Item>
                       <DropdownMenu.Item asChild>
                         <Link
                           href="/account"
-                          className="flex items-center gap-2.5 px-3 py-2 text-xs text-beige-muted hover:text-beige hover:bg-surface-2 rounded-lg cursor-pointer outline-none transition-colors"
+                          className="flex items-center gap-2.5 px-3 py-2 text-xs text-[#57534E] hover:text-[#111111] hover:bg-[#FAF8F5] rounded-lg cursor-pointer outline-none transition-colors"
                         >
-                          <Package className="w-3.5 h-3.5 text-gold" />
+                          <Package className="w-3.5 h-3.5 text-[#C5A059]" />
                           My Orders
                         </Link>
                       </DropdownMenu.Item>
                       <DropdownMenu.Item asChild>
                         <Link
                           href="/account"
-                          className="flex items-center gap-2.5 px-3 py-2 text-xs text-beige-muted hover:text-beige hover:bg-surface-2 rounded-lg cursor-pointer outline-none transition-colors"
+                          className="flex items-center gap-2.5 px-3 py-2 text-xs text-[#57534E] hover:text-[#111111] hover:bg-[#FAF8F5] rounded-lg cursor-pointer outline-none transition-colors"
                         >
-                          <Headphones className="w-3.5 h-3.5 text-gold" />
+                          <Headphones className="w-3.5 h-3.5 text-[#C5A059]" />
                           24/7 VIP Concierge
                         </Link>
                       </DropdownMenu.Item>
@@ -698,17 +698,17 @@ export function Header() {
                         <DropdownMenu.Item asChild>
                           <Link
                             href="/admin"
-                            className="flex items-center gap-2.5 px-3 py-2 text-xs text-gold hover:bg-gold/10 rounded-lg cursor-pointer outline-none transition-colors font-medium"
+                            className="flex items-center gap-2.5 px-3 py-2 text-xs text-[#C5A059] hover:bg-[#C5A059]/10 rounded-lg cursor-pointer outline-none transition-colors font-medium"
                           >
                             <Sparkles className="w-3.5 h-3.5" />
                             Admin Control Center
                           </Link>
                         </DropdownMenu.Item>
                       )}
-                      <DropdownMenu.Separator className="my-1 h-px bg-border" />
+                      <DropdownMenu.Separator className="my-1 h-px bg-[#E7E5E4]" />
                       <DropdownMenu.Item
                         onSelect={handleLogout}
-                        className="flex items-center gap-2.5 px-3 py-2 text-xs text-error hover:bg-error/10 rounded-lg cursor-pointer outline-none transition-colors"
+                        className="flex items-center gap-2.5 px-3 py-2 text-xs text-[#991B1B] hover:bg-[#FEF2F2] rounded-lg cursor-pointer outline-none transition-colors"
                       >
                         <LogOut className="w-3.5 h-3.5" />
                         Sign Out
@@ -719,7 +719,7 @@ export function Header() {
               ) : (
                 <button
                   onClick={() => openAuthModal('login')}
-                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl border border-gold/40 hover:border-gold bg-gold/10 hover:bg-gold/20 text-xs font-semibold text-gold transition-all"
+                  className="flex items-center gap-1.5 px-4 py-1.5 rounded-xl bg-[#111111] hover:bg-[#C5A059] text-xs font-semibold text-[#FFFFFF] hover:text-[#111111] transition-all shadow-sm"
                 >
                   <User className="w-3.5 h-3.5" />
                   <span>Sign In</span>
@@ -731,7 +731,7 @@ export function Header() {
 
         {/* ── Category Mega-Menu Row (Desktop) ── */}
         <div
-          className="hidden lg:block border-t border-border/80 bg-[#0d0c0a] relative z-40"
+          className="hidden lg:block border-t border-[#E7E5E4] border-b border-[#E7E5E4] bg-[#FAF8F5] relative z-40"
           onMouseEnter={() => {
             if (hoverTimeoutRef.current) {
               clearTimeout(hoverTimeoutRef.current)
@@ -756,20 +756,27 @@ export function Header() {
                         className={cn(
                           'flex items-center gap-1.5 px-4 py-3 text-xs uppercase tracking-wider font-semibold transition-all duration-200 border-b-2',
                           isActive
-                            ? 'text-gold border-gold bg-gold/10'
-                            : 'text-beige-muted hover:text-beige border-transparent hover:bg-surface-2/40',
+                            ? 'text-[#C5A059] border-[#C5A059] bg-[#C5A059]/10'
+                            : 'text-[#111111] hover:text-[#C5A059] border-transparent hover:bg-[#FFFFFF]',
                         )}
                       >
                         <span>{cat.name}</span>
                         {cat.highlight && (
-                          <span className="text-[9px] lowercase bg-gold/20 text-gold px-1.5 py-0.5 rounded-full font-mono font-normal">
+                          <span
+                            className={cn(
+                              'text-[9px] font-mono px-2 py-0.5 rounded-full font-medium',
+                              cat.slug === 'sale'
+                                ? 'bg-[#FEF2F2] text-[#991B1B] border border-[#FECACA] font-bold'
+                                : 'bg-[#111111] text-[#FAF8F5]'
+                            )}
+                          >
                             {cat.highlight}
                           </span>
                         )}
                         <ChevronDown
                           className={cn(
-                            'w-3 h-3 transition-transform duration-200 text-beige-muted',
-                            isActive && 'rotate-180 text-gold',
+                            'w-3 h-3 transition-transform duration-200 text-[#78716C]',
+                            isActive && 'rotate-180 text-[#C5A059]',
                           )}
                         />
                       </Link>
@@ -781,10 +788,10 @@ export function Header() {
               {/* Quick Catalog Access */}
               <Link
                 href="/products"
-                className="text-xs font-semibold text-gold hover:text-gold-light transition-colors flex items-center gap-1 uppercase tracking-wider py-3"
+                className="text-xs font-semibold text-[#111111] hover:text-[#C5A059] transition-colors flex items-center gap-1 uppercase tracking-wider py-3"
               >
                 <span>Full Catalog</span>
-                <ChevronRight className="w-3.5 h-3.5" />
+                <ChevronRight className="w-3.5 h-3.5 text-[#C5A059]" />
               </Link>
             </nav>
           </div>
@@ -806,7 +813,7 @@ export function Header() {
                 onMouseLeave={handleMouseLeave}
               >
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                  <div className="bg-[#0b0a08] border border-gold/40 border-t-2 border-t-gold rounded-b-2xl shadow-[0_35px_90px_rgba(0,0,0,0.98)] p-7 grid grid-cols-12 gap-8">
+                  <div className="bg-[#FFFFFF] border border-[#E7E5E4] border-t-2 border-t-[#C5A059] rounded-b-2xl shadow-[0_25px_60px_rgba(0,0,0,0.12)] p-7 grid grid-cols-12 gap-8">
                     {/* Category Link Columns */}
                     <div
                       className={cn(
@@ -820,7 +827,7 @@ export function Header() {
                     >
                       {activeCategory.columns.map((col, cIdx) => (
                         <div key={cIdx} className="space-y-3">
-                          <h4 className="text-xs font-bold text-gold uppercase tracking-wider font-mono border-b border-gold/25 pb-1.5 flex items-center justify-between">
+                          <h4 className="text-xs font-bold text-[#C5A059] uppercase tracking-wider font-mono border-b border-[#E7E5E4] pb-1.5 flex items-center justify-between">
                             <span>{col.title}</span>
                           </h4>
                           <ul className="space-y-2">
@@ -829,7 +836,7 @@ export function Header() {
                                 <Link
                                   href={item.href}
                                   onClick={() => setActiveMegaMenu(null)}
-                                  className="text-xs text-beige/85 hover:text-gold hover:translate-x-1.5 transition-all block py-0.5 font-medium"
+                                  className="text-xs text-[#57534E] hover:text-[#111111] hover:translate-x-1.5 transition-all block py-0.5 font-medium"
                                 >
                                   {item.label}
                                 </Link>
@@ -857,16 +864,16 @@ export function Header() {
                           />
                           <div className="absolute inset-0 bg-gradient-to-t from-black via-black/50 to-transparent" />
                           <div className="relative z-10 space-y-1.5">
-                            <span className="inline-block px-2.5 py-0.5 rounded-full bg-gold/20 border border-gold/40 text-gold font-mono text-[10px] font-bold uppercase tracking-wider">
+                            <span className="inline-block px-2.5 py-0.5 rounded-full bg-[#C5A059]/20 border border-[#C5A059]/40 text-[#C5A059] font-mono text-[10px] font-bold uppercase tracking-wider">
                               {activeCategory.spotlight.tag}
                             </span>
-                            <h5 className="font-serif text-lg font-bold text-beige group-hover:text-gold transition-colors leading-snug">
+                            <h5 className="font-serif text-lg font-bold text-[#FAF8F5] group-hover:text-[#D4AF37] transition-colors leading-snug">
                               {activeCategory.spotlight.title}
                             </h5>
-                            <p className="text-xs text-beige-muted line-clamp-1">
+                            <p className="text-xs text-[#A8A29E] line-clamp-1">
                               {activeCategory.spotlight.subtitle}
                             </p>
-                            <div className="pt-2 text-xs font-semibold text-gold flex items-center gap-1 group-hover:translate-x-1 transition-transform">
+                            <div className="pt-2 text-xs font-semibold text-[#C5A059] flex items-center gap-1 group-hover:translate-x-1 transition-transform">
                               <span>Explore Collection</span>
                               <ChevronRight className="w-3.5 h-3.5" />
                             </div>

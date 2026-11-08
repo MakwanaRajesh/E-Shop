@@ -92,18 +92,18 @@ export function ProductCard({ product, className }: ProductCardProps) {
     >
       <div
         className={cn(
-          'bg-surface border border-border rounded-xl overflow-hidden',
-          'transition-all duration-300',
-          isHovered && 'border-gold/30 shadow-xl shadow-gold/5 -translate-y-1',
+          'bg-white border border-[#E7E5E4] rounded-2xl overflow-hidden',
+          'transition-all duration-300 shadow-sm',
+          isHovered && 'border-[#C5A059] shadow-xl -translate-y-1',
         )}
       >
         {/* Image */}
-        <div className="relative aspect-square overflow-hidden bg-surface-2">
+        <div className="relative aspect-square overflow-hidden bg-[#F5F2EB]">
           {/* Shimmer skeleton until image loads */}
           {!imageLoaded && (
-            <div className="absolute inset-0 bg-surface-2 animate-pulse flex items-center justify-center z-0">
-              <div className="w-8 h-8 rounded-full border border-gold/20 flex items-center justify-center">
-                <span className="w-2 h-2 rounded-full bg-gold/40 animate-ping" />
+            <div className="absolute inset-0 bg-[#F5F2EB] animate-pulse flex items-center justify-center z-0">
+              <div className="w-8 h-8 rounded-full border border-[#C5A059]/30 flex items-center justify-center">
+                <span className="w-2 h-2 rounded-full bg-[#C5A059]/60 animate-ping" />
               </div>
             </div>
           )}
@@ -123,7 +123,7 @@ export function ProductCard({ product, className }: ProductCardProps) {
               sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
             />
           ) : (
-            <div className="absolute inset-0 flex items-center justify-center text-beige-muted/20">
+            <div className="absolute inset-0 flex items-center justify-center text-[#A8A29E]/40">
               <ShoppingCart className="w-16 h-16" />
             </div>
           )}
@@ -131,7 +131,7 @@ export function ProductCard({ product, className }: ProductCardProps) {
           {/* Overlay badges */}
           <div className="absolute top-3 left-3 flex flex-col gap-1.5 z-20">
             {discount > 0 && (
-              <span className="bg-gradient-to-r from-rose-600 via-rose-500 to-rose-600 text-white font-mono font-bold text-[10px] uppercase px-2 py-0.5 rounded-full shadow-md shadow-rose-950/60 border border-rose-400/40 tracking-wider">
+              <span className="bg-[#FEF2F2] text-[#991B1B] border border-[#FECACA] font-mono font-bold text-[10px] uppercase px-2.5 py-0.5 rounded-full shadow-sm tracking-wider">
                 -{discount}% OFF
               </span>
             )}
@@ -147,11 +147,11 @@ export function ProductCard({ product, className }: ProductCardProps) {
             onClick={handleWishlist}
             className={cn(
               'absolute top-3 right-3 w-8 h-8 rounded-full flex items-center justify-center',
-              'bg-background/80 backdrop-blur-sm border border-border',
-              'transition-all duration-200',
+              'bg-white/90 backdrop-blur-sm border border-[#E7E5E4] shadow-sm',
+              'transition-all duration-200 z-20',
               inWishlist
-                ? 'text-error border-error/40'
-                : 'text-beige-muted hover:text-error hover:border-error/40',
+                ? 'text-[#991B1B] border-[#FECACA] bg-[#FEF2F2]'
+                : 'text-[#78716C] hover:text-[#991B1B] hover:border-[#FECACA]',
             )}
             aria-label={inWishlist ? 'Remove from wishlist' : 'Add to wishlist'}
           >
@@ -161,18 +161,18 @@ export function ProductCard({ product, className }: ProductCardProps) {
             />
           </button>
 
-          {/* Add to cart overlay on mobile */}
+          {/* Add to cart overlay */}
           <div
             className={cn(
-              'absolute inset-x-0 bottom-0 p-3 transition-all duration-300',
-              'bg-gradient-to-t from-background/90 to-transparent',
-              isHovered ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-2',
+              'absolute inset-x-0 bottom-0 p-3 transition-all duration-300 z-20',
+              'bg-gradient-to-t from-black/60 to-transparent',
+              isHovered ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-2 pointer-events-none',
             )}
           >
             <Button
               variant="primary"
               size="sm"
-              className="w-full"
+              className="w-full bg-[#111111] hover:bg-[#C5A059] text-white hover:text-[#111111] shadow-lg font-semibold"
               onClick={handleAddToCart}
               isLoading={isAddingToCart}
               disabled={stockCount === 0}
@@ -186,12 +186,12 @@ export function ProductCard({ product, className }: ProductCardProps) {
         {/* Content */}
         <div className="p-4 space-y-2">
           {/* Category */}
-          <p className="text-xs text-gold uppercase tracking-wider font-medium">
+          <p className="text-xs text-[#C5A059] uppercase tracking-wider font-semibold">
             {categoryLabel}
           </p>
 
           {/* Name */}
-          <h3 className="font-serif text-base font-medium text-beige leading-snug line-clamp-2 group-hover:text-gold transition-colors duration-200">
+          <h3 className="font-serif text-base font-semibold text-[#111111] leading-snug line-clamp-2 group-hover:text-[#C5A059] transition-colors duration-200">
             {product.name}
           </h3>
 
@@ -205,23 +205,23 @@ export function ProductCard({ product, className }: ProductCardProps) {
                     className={cn(
                       'w-3 h-3',
                       i < Math.round(product.averageRating)
-                        ? 'text-gold fill-gold'
-                        : 'text-beige-muted/30',
+                        ? 'text-[#C5A059] fill-[#C5A059]'
+                        : 'text-[#E7E5E4] fill-[#E7E5E4]',
                     )}
                   />
                 ))}
               </div>
-              <span className="text-xs text-beige-muted">({product.reviewCount})</span>
+              <span className="text-xs text-[#78716C]">({product.reviewCount})</span>
             </div>
           )}
 
           {/* Price */}
           <div className="flex items-baseline gap-2 pt-1">
-            <span className="text-lg font-semibold text-beige">
+            <span className="text-lg font-bold text-[#111111]">
               {formatCurrency(product.price)}
             </span>
             {product.compareAtPrice && product.compareAtPrice > product.price && (
-              <span className="text-sm text-beige-muted line-through">
+              <span className="text-sm text-[#78716C] line-through font-normal">
                 {formatCurrency(product.compareAtPrice)}
               </span>
             )}
@@ -231,7 +231,7 @@ export function ProductCard({ product, className }: ProductCardProps) {
           <Button
             variant="primary"
             size="sm"
-            className="w-full sm:hidden"
+            className="w-full sm:hidden bg-[#111111] hover:bg-[#C5A059] text-white hover:text-[#111111]"
             onClick={handleAddToCart}
             isLoading={isAddingToCart}
             disabled={stockCount === 0}

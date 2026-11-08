@@ -13,15 +13,15 @@ const buttonVariants = cva(
     variants: {
       variant: {
         primary:
-          'gold-gradient text-background font-semibold shadow-lg hover:shadow-gold/20 hover:brightness-110 active:brightness-90',
+          'bg-obsidian text-white hover:bg-gold hover:text-obsidian font-semibold shadow-md hover:shadow-lg transition-all duration-200 active:scale-95',
         secondary:
-          'border border-beige/30 text-beige bg-transparent hover:border-gold hover:text-gold',
+          'border border-border text-obsidian bg-surface hover:border-gold hover:text-gold hover:bg-background transition-all duration-200',
         ghost:
-          'text-beige-muted hover:text-beige hover:bg-surface-2',
+          'text-slate hover:text-obsidian hover:bg-surface-2 transition-colors',
         danger:
-          'bg-error/10 border border-error/40 text-error hover:bg-error/20',
+          'bg-bordeaux-blush text-bordeaux border border-bordeaux-border hover:bg-red-100 transition-colors',
         outline:
-          'border border-gold/50 text-gold bg-transparent hover:bg-gold/10',
+          'border border-gold text-obsidian bg-transparent hover:bg-gold hover:text-white transition-all duration-200',
       },
       size: {
         sm: 'h-8 px-3 text-sm rounded',

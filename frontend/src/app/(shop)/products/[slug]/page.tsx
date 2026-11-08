@@ -275,7 +275,7 @@ export default function ProductDetailPage({ params }: Props) {
             )}
             {discount > 0 && (
               <div className="absolute top-4 left-4 z-10">
-                <span className="bg-gradient-to-r from-rose-600 via-rose-500 to-rose-600 text-white font-mono font-bold text-xs uppercase px-3 py-1 rounded-full shadow-lg shadow-rose-950/60 border border-rose-400/40 tracking-wider">
+                <span className="bg-[#FEF2F2] text-[#991B1B] border border-[#FECACA] font-mono font-bold text-xs uppercase px-3 py-1 rounded-full shadow-sm tracking-wider">
                   -{discount}% OFF
                 </span>
               </div>
@@ -389,7 +389,7 @@ export default function ProductDetailPage({ params }: Props) {
               </span>
             )}
             {discount > 0 && (
-              <span className="text-sm font-semibold text-success">
+              <span className="text-xs font-bold text-[#991B1B] bg-[#FEF2F2] border border-[#FECACA] px-2.5 py-0.5 rounded-full">
                 Save {discount}%
               </span>
             )}

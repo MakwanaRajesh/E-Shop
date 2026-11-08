@@ -10,16 +10,30 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        background: '#0A0A0A',
-        surface: '#141414',
-        'surface-2': '#1A1A1A',
-        beige: '#F5F0E8',
-        'beige-muted': '#B8B0A0',
-        gold: '#C9A84C',
-        'gold-light': '#E8C96A',
-        'gold-dark': '#A07832',
-        border: '#2A2820',
-        error: '#EF4444',
+        background: '#FAF8F5', // Warm Alabaster (60% background)
+        surface: '#FFFFFF',    // Pure White (cards, sticky navbar)
+        'surface-2': '#F5F2EB', // Warm Ivory secondary surface
+        'surface-3': '#ECE7DE', // Subtle stone surface
+        obsidian: '#111111',   // Rich Obsidian Black (30% brand & typography)
+        charcoal: '#1C1917',   // Warm Charcoal
+        slate: {
+          DEFAULT: '#57534E',  // Warm Slate for secondary descriptions
+          muted: '#78716C',
+          light: '#A8A29E',
+        },
+        beige: '#111111',       // Maps primary text to Obsidian Black for high luxury contrast
+        'beige-muted': '#57534E', // Maps secondary text to Warm Slate
+        gold: '#C5A059',        // Antique Gold (10% luxury accent)
+        'gold-light': '#D4AF37', // Champagne Gold highlight
+        'gold-hover': '#B08D46', // Burnished hover state
+        'gold-dark': '#9E7A36',
+        bordeaux: {
+          DEFAULT: '#991B1B',   // Deep Bordeaux for refined urgency
+          blush: '#FEF2F2',     // Soft blush background
+          border: '#FECACA',    // Soft blush border
+        },
+        border: '#E7E5E4',      // Soft warm stone border
+        error: '#991B1B',       // Deep Bordeaux for error/alerts
         success: '#10B981',
         emerald: {
           DEFAULT: '#10B981',
@@ -27,9 +41,9 @@ const config: Config = {
           dark: '#059669',
         },
         ruby: {
-          DEFAULT: '#EF4444',
+          DEFAULT: '#991B1B',
           light: '#F87171',
-          dark: '#DC2626',
+          dark: '#7F1D1D',
         },
         sapphire: {
           DEFAULT: '#0EA5E9',
@@ -37,9 +51,9 @@ const config: Config = {
           dark: '#0284C7',
         },
         amber: {
-          DEFAULT: '#F59E0B',
-          light: '#FBBF24',
-          dark: '#D97706',
+          DEFAULT: '#C5A059',
+          light: '#D4AF37',
+          dark: '#B08D46',
         },
         amethyst: {
           DEFAULT: '#8B5CF6',
