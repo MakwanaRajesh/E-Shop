@@ -175,6 +175,55 @@ function ProductsContent() {
   // Active Category info for quick subcategory bar
   const activeCategoryObj = CATEGORY_TREE.find((c) => c.slug === category)
 
+  // Accordion Expand/Collapse state for sidebar filters
+  const [openSections, setOpenSections] = React.useState<Record<string, boolean>>({
+    sort: !!(sortBy && sortBy !== 'relevant'),
+    gender: !!gender,
+    category: !!(category || subCategory),
+    price: !!(minPrice !== undefined || maxPrice !== undefined),
+    discount: !!minDiscount,
+    size: !!size,
+    availability: inStock,
+    rating: !!minRating,
+  })
+
+  const toggleSection = (key: string) => {
+    setOpenSections((prev) => ({
+      ...prev,
+      [key]: !prev[key],
+    }))
+  }
+
+  const allOpen = Object.values(openSections).every(Boolean)
+
+  const toggleAllSections = () => {
+    const nextState = !allOpen
+    setOpenSections({
+      sort: nextState,
+      gender: nextState,
+      category: nextState,
+      price: nextState,
+      discount: nextState,
+      size: nextState,
+      availability: nextState,
+      rating: nextState,
+    })
+  }
+
+  // Top bar custom Sort By popover dropdown state
+  const [sortDropdownOpen, setSortDropdownOpen] = React.useState(false)
+  const sortDropdownRef = React.useRef<HTMLDivElement>(null)
+
+  React.useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (sortDropdownRef.current && !sortDropdownRef.current.contains(e.target as Node)) {
+        setSortDropdownOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
   React.useEffect(() => {
     const fetchProducts = async () => {
       setIsLoading(true)
@@ -224,22 +273,127 @@ function ProductsContent() {
     router.push('/products')
   }
 
+  // Active label helpers for accordion badges
+  const activeSortObj = SORT_OPTIONS.find((o) => o.value === (sortBy ?? 'relevant'))
+  const activeSortLabel = sortBy && sortBy !== 'relevant' ? activeSortObj?.label : null
+
+  const activeGenderLabel = gender
+    ? GENDER_OPTIONS.find((g) => g.value === gender)?.label ?? (gender.charAt(0).toUpperCase() + gender.slice(1))
+    : null
+
+  const activeCatLabel = subCategory
+    ? CATEGORY_TREE.flatMap((c) => c.subcategories).find((s) => s.slug === subCategory)?.name ?? subCategory.replace('-', ' ')
+    : category
+    ? activeCategoryObj?.name ?? category.replace('-', ' ')
+    : null
+
+  const activePriceLabel =
+    minPrice !== undefined || maxPrice !== undefined
+      ? `₹${minPrice ?? 0} – ${maxPrice ? `₹${maxPrice}` : 'Above'}`
+      : null
+
+  const activeDiscountLabel = minDiscount ? `${minDiscount}%+ Off` : null
+  const activeSizeLabel = size ? `Size: ${size}` : null
+  const activeAvailLabel = inStock ? 'In Stock' : null
+  const activeRatingLabel = minRating ? `${minRating}★ & above` : null
+
+  // Reusable Collapsible Filter Section Component
+  const AccordionSection = ({
+    title,
+    sectionKey,
+    activeBadge,
+    children,
+  }: {
+    title: string
+    sectionKey: string
+    activeBadge?: string | null
+    children: React.ReactNode
+  }) => {
+    const isOpen = !!openSections[sectionKey]
+    return (
+      <div className="border-b border-border/70 pb-3 pt-1">
+        <button
+          type="button"
+          onClick={() => toggleSection(sectionKey)}
+          className="w-full flex items-center justify-between py-2 text-left group transition-all rounded-lg hover:bg-surface-2/50 px-2 -mx-2"
+          aria-expanded={isOpen}
+        >
+          <div className="flex items-center gap-2 min-w-0 pr-2">
+            <span className="font-semibold text-gold text-xs uppercase tracking-wider group-hover:text-gold-light transition-colors">
+              {title}
+            </span>
+            {activeBadge && (
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-gold/15 text-gold border border-gold/30 truncate max-w-[130px] font-medium">
+                {activeBadge}
+              </span>
+            )}
+          </div>
+          <div className="w-5 h-5 rounded-md flex items-center justify-center text-beige-muted group-hover:text-gold transition-colors flex-shrink-0">
+            <ChevronDown
+              className={cn(
+                'w-3.5 h-3.5 transition-transform duration-200',
+                isOpen && 'rotate-180 text-gold'
+              )}
+            />
+          </div>
+        </button>
+
+        {isOpen && (
+          <div className="pt-2 pb-1 space-y-1 animate-fade-in">
+            {children}
+          </div>
+        )}
+      </div>
+    )
+  }
+
   const Sidebar = () => (
-    <aside className="space-y-6">
-      {/* ── 1. Sort By (AJIO / Myntra quick selector) ── */}
-      <div>
-        <h3 className="font-semibold text-gold text-xs uppercase tracking-wider mb-2.5">
-          Sort By
-        </h3>
+    <aside className="space-y-1">
+      {/* ── Filters Header with Expand All / Collapse All & Reset ── */}
+      <div className="flex items-center justify-between pb-3.5 border-b border-border">
+        <div className="flex items-center gap-2">
+          <SlidersHorizontal className="w-4 h-4 text-gold" />
+          <span className="font-serif text-sm font-bold text-beige tracking-wide">Filters</span>
+          {hasFilters && (
+            <span className="w-2 h-2 rounded-full bg-gold animate-pulse" />
+          )}
+        </div>
+        <div className="flex items-center gap-2.5">
+          <button
+            type="button"
+            onClick={toggleAllSections}
+            className="text-[11px] text-gold hover:underline font-medium cursor-pointer"
+          >
+            {allOpen ? 'Collapse All' : 'Expand All'}
+          </button>
+          {hasFilters && (
+            <button
+              type="button"
+              onClick={clearAllFilters}
+              className="text-[11px] text-error hover:underline font-medium cursor-pointer"
+            >
+              Reset
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* ── 1. Sort By (Expands sub-filter on click) ── */}
+      <AccordionSection
+        title="Sort By"
+        sectionKey="sort"
+        activeBadge={activeSortLabel}
+      >
         <div className="space-y-1">
           {SORT_OPTIONS.map((opt) => {
             const active = (sortBy ?? 'relevant') === opt.value
             return (
               <button
                 key={opt.value}
+                type="button"
                 onClick={() => updateParam('sort', opt.value)}
                 className={cn(
-                  'w-full text-left px-2.5 py-1.5 rounded-lg text-xs transition-colors flex items-center justify-between',
+                  'w-full text-left px-2.5 py-1.5 rounded-lg text-xs transition-colors flex items-center justify-between cursor-pointer',
                   active
                     ? 'bg-gold/15 text-gold border border-gold/30 font-medium'
                     : 'text-beige-muted hover:text-beige hover:bg-surface-2',
@@ -251,24 +405,24 @@ function ProductsContent() {
             )
           })}
         </div>
-      </div>
-
-      <div className="h-px bg-border" />
+      </AccordionSection>
 
       {/* ── 2. Gender / Department Filter ── */}
-      <div>
-        <h3 className="font-semibold text-gold text-xs uppercase tracking-wider mb-2.5">
-          Gender / Department
-        </h3>
-        <div className="grid grid-cols-2 gap-1.5">
+      <AccordionSection
+        title="Gender / Department"
+        sectionKey="gender"
+        activeBadge={activeGenderLabel}
+      >
+        <div className="grid grid-cols-2 gap-1.5 pt-0.5">
           {GENDER_OPTIONS.map((g) => {
             const active = g.value === '' ? !gender : gender === g.value
             return (
               <button
                 key={g.label}
+                type="button"
                 onClick={() => updateParam('gender', g.value || undefined)}
                 className={cn(
-                  'px-3 py-1.5 rounded-lg text-xs font-medium text-center transition-all border',
+                  'px-3 py-1.5 rounded-lg text-xs font-medium text-center transition-all border cursor-pointer',
                   active
                     ? 'bg-gold text-background border-gold shadow-sm font-semibold'
                     : 'bg-surface-2/60 border-border text-beige-muted hover:text-beige hover:border-gold/30',
@@ -279,23 +433,23 @@ function ProductsContent() {
             )
           })}
         </div>
-      </div>
+      </AccordionSection>
 
-      <div className="h-px bg-border" />
-
-      {/* ── 3. Category Tree (AJIO / SHEIN style) ── */}
-      <div>
-        <h3 className="font-semibold text-gold text-xs uppercase tracking-wider mb-2.5">
-          Categories & Collections
-        </h3>
-        <div className="space-y-1 text-xs">
+      {/* ── 3. Categories & Collections ── */}
+      <AccordionSection
+        title="Categories & Collections"
+        sectionKey="category"
+        activeBadge={activeCatLabel}
+      >
+        <div className="space-y-1 text-xs pt-0.5">
           <button
+            type="button"
             onClick={() => {
               updateParam('category', undefined)
               updateParam('subCategory', undefined)
             }}
             className={cn(
-              'w-full text-left px-2.5 py-1.5 rounded-lg transition-colors flex items-center justify-between font-medium',
+              'w-full text-left px-2.5 py-1.5 rounded-lg transition-colors flex items-center justify-between font-medium cursor-pointer',
               !category && !subCategory
                 ? 'bg-gold/15 text-gold border border-gold/30'
                 : 'text-beige-muted hover:text-beige hover:bg-surface-2',
@@ -310,12 +464,13 @@ function ProductsContent() {
             return (
               <div key={cat.name} className="space-y-1 pt-0.5">
                 <button
+                  type="button"
                   onClick={() => {
                     updateParam('category', isCatActive ? undefined : cat.slug)
                     updateParam('subCategory', undefined)
                   }}
                   className={cn(
-                    'w-full text-left px-2.5 py-1.5 rounded-lg transition-colors flex items-center justify-between font-medium',
+                    'w-full text-left px-2.5 py-1.5 rounded-lg transition-colors flex items-center justify-between font-medium cursor-pointer',
                     isCatActive && !subCategory
                       ? 'bg-gold/15 text-gold border border-gold/30'
                       : 'text-beige-muted hover:text-beige hover:bg-surface-2',
@@ -335,9 +490,10 @@ function ProductsContent() {
                       return (
                         <button
                           key={sub.name}
+                          type="button"
                           onClick={() => updateParam('subCategory', isSubActive ? undefined : sub.slug)}
                           className={cn(
-                            'w-full text-left px-2 py-1 rounded text-xs transition-colors block truncate',
+                            'w-full text-left px-2 py-1 rounded text-xs transition-colors block truncate cursor-pointer',
                             isSubActive
                               ? 'text-gold font-bold bg-gold/10'
                               : 'text-beige-muted/80 hover:text-beige',
@@ -353,141 +509,21 @@ function ProductsContent() {
             )
           })}
         </div>
-      </div>
+      </AccordionSection>
 
-      <div className="h-px bg-border" />
-
-      {/* ── 4. Discount Filter ── */}
-      <div>
-        <h3 className="font-semibold text-gold text-xs uppercase tracking-wider mb-2.5">
-          Special Discounts
-        </h3>
-        <div className="space-y-1">
-          {DISCOUNT_OPTIONS.map((d) => {
-            const active = minDiscount === d.value
-            return (
-              <button
-                key={d.value}
-                onClick={() => updateParam('minDiscount', active ? undefined : String(d.value))}
-                className={cn(
-                  'w-full text-left px-2.5 py-1.5 rounded-lg text-xs transition-colors flex items-center justify-between',
-                  active
-                    ? 'bg-gold/15 text-gold border border-gold/30 font-medium'
-                    : 'text-beige-muted hover:text-beige hover:bg-surface-2',
-                )}
-              >
-                <span>{d.label}</span>
-                {active && <span className="text-[10px] text-gold font-bold">✓</span>}
-              </button>
-            )
-          })}
-        </div>
-      </div>
-
-      <div className="h-px bg-border" />
-
-      {/* ── 5. Size Filter ── */}
-      <div>
-        <div className="flex items-center justify-between mb-2.5">
-          <h3 className="font-semibold text-gold text-xs uppercase tracking-wider">
-            Size Filter
-          </h3>
-          {size && (
-            <button
-              onClick={() => updateParam('size', undefined)}
-              className="text-[11px] text-error hover:underline"
-            >
-              Clear
-            </button>
-          )}
-        </div>
-
-        {/* Clothing Sizes */}
-        <div className="space-y-2">
-          <span className="text-[10px] uppercase font-semibold text-beige-muted/80 block">
-            Clothing & Tops
-          </span>
-          <div className="flex flex-wrap gap-1.5">
-            {APPAREL_SIZES.map((sz) => {
-              const active = size.toUpperCase() === sz.toUpperCase()
-              return (
-                <button
-                  key={sz}
-                  onClick={() => updateParam('size', active ? undefined : sz)}
-                  className={cn(
-                    'w-9 h-7 rounded text-xs font-semibold flex items-center justify-center border transition-all',
-                    active
-                      ? 'bg-gold text-background border-gold shadow-sm'
-                      : 'bg-surface-2/60 border-border text-beige-muted hover:text-beige hover:border-gold/40',
-                  )}
-                >
-                  {sz}
-                </button>
-              )
-            })}
-          </div>
-
-          <span className="text-[10px] uppercase font-semibold text-beige-muted/80 block pt-1.5">
-            Waist & Bottoms
-          </span>
-          <div className="flex flex-wrap gap-1.5">
-            {WAIST_SIZES.map((sz) => {
-              const active = size === sz
-              return (
-                <button
-                  key={sz}
-                  onClick={() => updateParam('size', active ? undefined : sz)}
-                  className={cn(
-                    'w-9 h-7 rounded text-xs font-semibold flex items-center justify-center border transition-all',
-                    active
-                      ? 'bg-gold text-background border-gold shadow-sm'
-                      : 'bg-surface-2/60 border-border text-beige-muted hover:text-beige hover:border-gold/40',
-                  )}
-                >
-                  {sz}
-                </button>
-              )
-            })}
-          </div>
-
-          <span className="text-[10px] uppercase font-semibold text-beige-muted/80 block pt-1.5">
-            Footwear (UK)
-          </span>
-          <div className="flex flex-wrap gap-1.5">
-            {FOOTWEAR_SIZES.map((sz) => {
-              const active = size.toLowerCase() === sz.toLowerCase()
-              return (
-                <button
-                  key={sz}
-                  onClick={() => updateParam('size', active ? undefined : sz)}
-                  className={cn(
-                    'px-2 h-7 rounded text-xs font-semibold flex items-center justify-center border transition-all',
-                    active
-                      ? 'bg-gold text-background border-gold shadow-sm'
-                      : 'bg-surface-2/60 border-border text-beige-muted hover:text-beige hover:border-gold/40',
-                  )}
-                >
-                  {sz}
-                </button>
-              )
-            })}
-          </div>
-        </div>
-      </div>
-
-      <div className="h-px bg-border" />
-
-      {/* ── 6. Price Range & Custom Inputs ── */}
-      <div>
-        <h3 className="font-semibold text-gold text-xs uppercase tracking-wider mb-2.5">
-          Price Range
-        </h3>
-        <div className="space-y-1 mb-3">
+      {/* ── 4. Price Range ── */}
+      <AccordionSection
+        title="Price Range"
+        sectionKey="price"
+        activeBadge={activePriceLabel}
+      >
+        <div className="space-y-1 mb-3 pt-0.5">
           {PRICE_RANGES.map((range) => {
             const active = minPrice === range.min && maxPrice === range.max
             return (
               <button
                 key={range.label}
+                type="button"
                 onClick={() =>
                   active
                     ? (updateParam('minPrice', undefined), updateParam('maxPrice', undefined))
@@ -495,7 +531,7 @@ function ProductsContent() {
                        updateParam('maxPrice', range.max ? String(range.max) : undefined))
                 }
                 className={cn(
-                  'w-full text-left px-2.5 py-1.5 rounded-lg text-xs transition-colors flex items-center justify-between',
+                  'w-full text-left px-2.5 py-1.5 rounded-lg text-xs transition-colors flex items-center justify-between cursor-pointer',
                   active
                     ? 'bg-gold/15 text-gold border border-gold/30 font-medium'
                     : 'text-beige-muted hover:text-beige hover:bg-surface-2',
@@ -531,22 +567,143 @@ function ProductsContent() {
             />
             <button
               type="submit"
-              className="px-2.5 py-1 bg-gold hover:bg-gold-light text-background rounded-lg text-xs font-semibold transition-colors"
+              className="px-2.5 py-1 bg-gold hover:bg-gold-light text-background rounded-lg text-xs font-semibold transition-colors cursor-pointer"
             >
               Go
             </button>
           </div>
         </form>
-      </div>
+      </AccordionSection>
 
-      <div className="h-px bg-border" />
+      {/* ── 5. Special Discounts ── */}
+      <AccordionSection
+        title="Special Discounts"
+        sectionKey="discount"
+        activeBadge={activeDiscountLabel}
+      >
+        <div className="space-y-1 pt-0.5">
+          {DISCOUNT_OPTIONS.map((d) => {
+            const active = minDiscount === d.value
+            return (
+              <button
+                key={d.value}
+                type="button"
+                onClick={() => updateParam('minDiscount', active ? undefined : String(d.value))}
+                className={cn(
+                  'w-full text-left px-2.5 py-1.5 rounded-lg text-xs transition-colors flex items-center justify-between cursor-pointer',
+                  active
+                    ? 'bg-gold/15 text-gold border border-gold/30 font-medium'
+                    : 'text-beige-muted hover:text-beige hover:bg-surface-2',
+                )}
+              >
+                <span>{d.label}</span>
+                {active && <span className="text-[10px] text-gold font-bold">✓</span>}
+              </button>
+            )
+          })}
+        </div>
+      </AccordionSection>
+
+      {/* ── 6. Size Filter ── */}
+      <AccordionSection
+        title="Size & Fit"
+        sectionKey="size"
+        activeBadge={activeSizeLabel}
+      >
+        <div className="space-y-2 pt-0.5">
+          {size && (
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => updateParam('size', undefined)}
+                className="text-[11px] text-error hover:underline cursor-pointer"
+              >
+                Clear Size
+              </button>
+            </div>
+          )}
+
+          <span className="text-[10px] uppercase font-semibold text-beige-muted/80 block">
+            Clothing & Tops
+          </span>
+          <div className="flex flex-wrap gap-1.5">
+            {APPAREL_SIZES.map((sz) => {
+              const active = size.toUpperCase() === sz.toUpperCase()
+              return (
+                <button
+                  key={sz}
+                  type="button"
+                  onClick={() => updateParam('size', active ? undefined : sz)}
+                  className={cn(
+                    'w-9 h-7 rounded text-xs font-semibold flex items-center justify-center border transition-all cursor-pointer',
+                    active
+                      ? 'bg-gold text-background border-gold shadow-sm'
+                      : 'bg-surface-2/60 border-border text-beige-muted hover:text-beige hover:border-gold/40',
+                  )}
+                >
+                  {sz}
+                </button>
+              )
+            })}
+          </div>
+
+          <span className="text-[10px] uppercase font-semibold text-beige-muted/80 block pt-1.5">
+            Waist & Bottoms
+          </span>
+          <div className="flex flex-wrap gap-1.5">
+            {WAIST_SIZES.map((sz) => {
+              const active = size === sz
+              return (
+                <button
+                  key={sz}
+                  type="button"
+                  onClick={() => updateParam('size', active ? undefined : sz)}
+                  className={cn(
+                    'w-9 h-7 rounded text-xs font-semibold flex items-center justify-center border transition-all cursor-pointer',
+                    active
+                      ? 'bg-gold text-background border-gold shadow-sm'
+                      : 'bg-surface-2/60 border-border text-beige-muted hover:text-beige hover:border-gold/40',
+                  )}
+                >
+                  {sz}
+                </button>
+              )
+            })}
+          </div>
+
+          <span className="text-[10px] uppercase font-semibold text-beige-muted/80 block pt-1.5">
+            Footwear (UK)
+          </span>
+          <div className="flex flex-wrap gap-1.5">
+            {FOOTWEAR_SIZES.map((sz) => {
+              const active = size.toLowerCase() === sz.toLowerCase()
+              return (
+                <button
+                  key={sz}
+                  type="button"
+                  onClick={() => updateParam('size', active ? undefined : sz)}
+                  className={cn(
+                    'px-2 h-7 rounded text-xs font-semibold flex items-center justify-center border transition-all cursor-pointer',
+                    active
+                      ? 'bg-gold text-background border-gold shadow-sm'
+                      : 'bg-surface-2/60 border-border text-beige-muted hover:text-beige hover:border-gold/40',
+                  )}
+                >
+                  {sz}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      </AccordionSection>
 
       {/* ── 7. Availability ── */}
-      <div>
-        <h3 className="font-semibold text-gold text-xs uppercase tracking-wider mb-2.5">
-          Availability
-        </h3>
-        <label className="flex items-center gap-2.5 cursor-pointer group">
+      <AccordionSection
+        title="Availability"
+        sectionKey="availability"
+        activeBadge={activeAvailLabel}
+      >
+        <label className="flex items-center gap-2.5 cursor-pointer group py-1">
           <input
             type="checkbox"
             className="w-4 h-4 accent-gold cursor-pointer"
@@ -557,26 +714,26 @@ function ProductsContent() {
             In Stock Only
           </span>
         </label>
-      </div>
-
-      <div className="h-px bg-border" />
+      </AccordionSection>
 
       {/* ── 8. Customer Rating ── */}
-      <div>
-        <h3 className="font-semibold text-gold text-xs uppercase tracking-wider mb-2.5">
-          Customer Rating
-        </h3>
-        <div className="space-y-1">
+      <AccordionSection
+        title="Customer Rating"
+        sectionKey="rating"
+        activeBadge={activeRatingLabel}
+      >
+        <div className="space-y-1 pt-0.5">
           {[4, 3].map((rating) => (
             <button
               key={rating}
+              type="button"
               onClick={() =>
                 minRating === rating
                   ? updateParam('minRating', undefined)
                   : updateParam('minRating', String(rating))
               }
               className={cn(
-                'w-full text-left px-2.5 py-1.5 rounded-lg text-xs transition-colors flex items-center justify-between',
+                'w-full text-left px-2.5 py-1.5 rounded-lg text-xs transition-colors flex items-center justify-between cursor-pointer',
                 minRating === rating
                   ? 'bg-gold/15 text-gold border border-gold/30 font-medium'
                   : 'text-beige-muted hover:text-beige hover:bg-surface-2',
@@ -591,18 +748,21 @@ function ProductsContent() {
             </button>
           ))}
         </div>
-      </div>
+      </AccordionSection>
 
+      {/* Quick Reset All button */}
       {hasFilters && (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="w-full text-error hover:text-error hover:bg-error/10 text-xs border border-error/20"
-          onClick={clearAllFilters}
-        >
-          <X className="w-3.5 h-3.5 mr-1" />
-          Reset All Filters
-        </Button>
+        <div className="pt-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="w-full text-error hover:text-error hover:bg-error/10 text-xs border border-error/20"
+            onClick={clearAllFilters}
+          >
+            <X className="w-3.5 h-3.5 mr-1" />
+            Reset All Filters
+          </Button>
+        </div>
       )}
     </aside>
   )
@@ -740,9 +900,17 @@ function ProductsContent() {
               </button>
             </Badge>
           )}
+          {sortBy && sortBy !== 'relevant' && (
+            <Badge variant="gold" className="flex items-center gap-1 text-xs">
+              Sort: {activeSortObj?.label ?? sortBy}
+              <button onClick={() => updateParam('sort', undefined)} aria-label="Reset sort">
+                <X className="w-3 h-3" />
+              </button>
+            </Badge>
+          )}
           <button
             onClick={clearAllFilters}
-            className="text-xs text-error hover:underline ml-auto font-medium"
+            className="text-xs text-error hover:underline ml-auto font-medium cursor-pointer"
           >
             Clear All
           </button>
@@ -753,26 +921,64 @@ function ProductsContent() {
       <div className="flex items-center justify-between gap-4 mb-6">
         <button
           onClick={() => setSidebarOpen(true)}
-          className="lg:hidden flex items-center gap-2 px-3.5 py-2 rounded-xl bg-surface border border-border text-xs text-beige hover:border-gold/40 transition-colors"
+          className="lg:hidden flex items-center gap-2 px-3.5 py-2 rounded-xl bg-surface border border-border text-xs text-beige hover:border-gold/40 transition-colors cursor-pointer"
         >
           <SlidersHorizontal className="w-3.5 h-3.5 text-gold" />
           <span>Filters</span>
           {hasFilters && <span className="w-2 h-2 rounded-full bg-gold" />}
         </button>
 
-        <div className="flex items-center gap-2 ml-auto">
-          <span className="text-xs text-beige-muted hidden sm:block">Sort By:</span>
-          <select
-            value={sortBy ?? 'relevant'}
-            onChange={(e) => updateParam('sort', e.target.value)}
-            className="bg-surface border border-border rounded-xl px-3 py-2 text-xs text-beige focus:outline-none focus:border-gold cursor-pointer"
-          >
-            {SORT_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value} className="bg-surface text-beige">
-                {opt.label}
-              </option>
-            ))}
-          </select>
+        {/* Custom Luxury Sort Dropdown */}
+        <div className="relative ml-auto" ref={sortDropdownRef}>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-beige-muted hidden sm:block">Sort By:</span>
+            <button
+              type="button"
+              onClick={() => setSortDropdownOpen((prev) => !prev)}
+              className="bg-surface hover:bg-surface-2 border border-border hover:border-gold/50 rounded-xl px-3.5 py-2 text-xs text-beige flex items-center gap-2 transition-all shadow-sm cursor-pointer"
+              aria-expanded={sortDropdownOpen}
+            >
+              <span className="font-medium text-gold font-mono">
+                {activeSortObj?.label ?? 'Relevant & Featured'}
+              </span>
+              <ChevronDown
+                className={cn(
+                  'w-3.5 h-3.5 text-beige-muted transition-transform duration-200',
+                  sortDropdownOpen && 'rotate-180 text-gold'
+                )}
+              />
+            </button>
+          </div>
+
+          {/* Floating Dropdown Menu */}
+          {sortDropdownOpen && (
+            <div className="absolute right-0 top-full mt-2 w-56 bg-surface border border-gold/40 rounded-xl shadow-2xl p-1.5 z-50 animate-fade-in divide-y divide-border/40">
+              <div className="py-1 space-y-0.5">
+                {SORT_OPTIONS.map((opt) => {
+                  const isSelected = (sortBy ?? 'relevant') === opt.value
+                  return (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => {
+                        updateParam('sort', opt.value)
+                        setSortDropdownOpen(false)
+                      }}
+                      className={cn(
+                        'w-full text-left px-3 py-2 rounded-lg text-xs transition-colors flex items-center justify-between cursor-pointer',
+                        isSelected
+                          ? 'bg-gold/15 text-gold font-semibold'
+                          : 'text-beige-muted hover:text-beige hover:bg-surface-2',
+                      )}
+                    >
+                      <span>{opt.label}</span>
+                      {isSelected && <span className="text-gold font-bold text-xs">✓</span>}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
