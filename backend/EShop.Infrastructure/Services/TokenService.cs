@@ -58,6 +58,17 @@ public class TokenService(IConfiguration configuration)
         return Convert.ToBase64String(bytes);
     }
 
+    /// <summary>Hashes a refresh token with SHA-256 so raw tokens are never stored in the DB.</summary>
+    public static string HashRefreshToken(string refreshToken)
+    {
+        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(refreshToken));
+        return Convert.ToBase64String(bytes);
+    }
+
+    /// <summary>Returns configured refresh token lifetime in days.</summary>
+    public int GetRefreshTokenExpiryDays() =>
+        int.TryParse(_configuration["Jwt:RefreshTokenExpiryDays"], out var days) && days > 0 ? days : 7;
+
     /// <summary>
     /// Validates an (optionally expired) JWT and returns its ClaimsPrincipal.
     /// Used during token refresh to extract the user identity.

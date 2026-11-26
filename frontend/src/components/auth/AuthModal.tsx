@@ -277,6 +277,9 @@ export function AuthModal() {
                       {...registerSignup('password', {
                         required: 'Password is required',
                         minLength: { value: 8, message: 'At least 8 characters' },
+                        validate: (val: string) =>
+                          (/[A-Z]/.test(val) && /[a-z]/.test(val) && /[0-9]/.test(val)) ||
+                          'Include uppercase, lowercase, and a number',
                       })}
                     />
                     <Input

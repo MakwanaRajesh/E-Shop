@@ -1,4 +1,7 @@
+using System.Net.Mail;
 using System.Security.Claims;
+using System.Text.RegularExpressions;
+using EShop.API.Services;
 using EShop.Core.DTOs;
 using EShop.Core.Entities;
 using EShop.Core.Interfaces;
@@ -15,31 +18,43 @@ namespace EShop.API.Controllers;
 public class AuthController(
     AppDbContext db,
     IUnitOfWork  uow,
-    TokenService tokenService) : ControllerBase
+    TokenService tokenService,
+    SecurityMonitorService securityMonitor) : ControllerBase
 {
-    private readonly AppDbContext  _db           = db;
-    private readonly IUnitOfWork   _uow          = uow;
-    private readonly TokenService  _tokenService = tokenService;
+    private readonly AppDbContext           _db              = db;
+    private readonly IUnitOfWork            _uow             = uow;
+    private readonly TokenService           _tokenService    = tokenService;
+    private readonly SecurityMonitorService _securityMonitor = securityMonitor;
 
     // ── POST /api/auth/register ───────────────────────────────────────────────
     [HttpPost("register")]
     public async Task<IActionResult> Register([FromBody] RegisterRequest req)
     {
-        if (await _db.Users.AnyAsync(u => u.Email == req.Email.ToLower()))
+        if (string.IsNullOrWhiteSpace(req.FirstName) || string.IsNullOrWhiteSpace(req.LastName))
+            return BadRequest(new { message = "First name and last name are required." });
+
+        var email = (req.Email ?? string.Empty).Trim().ToLowerInvariant();
+        if (!IsValidEmail(email))
+            return BadRequest(new { message = "Please provide a valid email address." });
+
+        if (!IsStrongPassword(req.Password, out var passwordError))
+            return BadRequest(new { message = passwordError });
+
+        if (await _db.Users.AnyAsync(u => u.Email == email))
             return Conflict(new { message = "Email is already registered." });
 
         var user = new User
         {
-            FirstName    = req.FirstName.Trim(),
-            LastName     = req.LastName.Trim(),
-            Email        = req.Email.Trim().ToLower(),
+            FirstName    = req.FirstName.Trim()[..Math.Min(100, req.FirstName.Trim().Length)],
+            LastName     = req.LastName.Trim()[..Math.Min(100, req.LastName.Trim().Length)],
+            Email        = email,
             PasswordHash = BCrypt.Net.BCrypt.HashPassword(req.Password),
             PhoneNumber  = req.EffectivePhone?.Trim()
         };
 
         var refreshToken = _tokenService.GenerateRefreshToken();
-        var refreshDays  = int.Parse("7"); // default; read from config if desired
-        user.RefreshToken       = refreshToken;
+        var refreshDays  = _tokenService.GetRefreshTokenExpiryDays();
+        user.RefreshToken       = TokenService.HashRefreshToken(refreshToken);
         user.RefreshTokenExpiry = DateTime.UtcNow.AddDays(refreshDays);
 
         await _db.Users.AddAsync(user);
@@ -53,18 +68,35 @@ public class AuthController(
     [HttpPost("login")]
     public async Task<IActionResult> Login([FromBody] LoginRequest req)
     {
-        var user = await _db.Users.FirstOrDefaultAsync(
-            u => u.Email == req.Email.Trim().ToLower());
+        var email = (req.Email ?? string.Empty).Trim().ToLowerInvariant();
+        var clientIp = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
 
-        if (user is null || !BCrypt.Net.BCrypt.Verify(req.Password, user.PasswordHash))
+        var (isLockedOut, retryAfter) = _securityMonitor.CheckLoginLockout(email);
+        if (isLockedOut)
+        {
+            return StatusCode(StatusCodes.Status429TooManyRequests, new
+            {
+                message = $"Too many failed login attempts. Try again in {Math.Max(1, (int)Math.Ceiling(retryAfter!.Value.TotalMinutes))} minute(s)."
+            });
+        }
+
+        var user = await _db.Users.FirstOrDefaultAsync(u => u.Email == email);
+
+        if (user is null || !BCrypt.Net.BCrypt.Verify(req.Password ?? string.Empty, user.PasswordHash))
+        {
+            _securityMonitor.RecordFailedLogin(email, clientIp);
             return Unauthorized(new { message = "Invalid email or password." });
+        }
 
         if (!user.IsActive)
             return Unauthorized(new { message = "Account is disabled. Please contact support." });
 
+        _securityMonitor.ResetFailedLogins(email);
+
         var refreshToken = _tokenService.GenerateRefreshToken();
-        user.RefreshToken       = refreshToken;
-        user.RefreshTokenExpiry = DateTime.UtcNow.AddDays(7);
+        var refreshDays  = _tokenService.GetRefreshTokenExpiryDays();
+        user.RefreshToken       = TokenService.HashRefreshToken(refreshToken);
+        user.RefreshTokenExpiry = DateTime.UtcNow.AddDays(refreshDays);
         _db.Users.Update(user);
         await _uow.SaveChangesAsync();
 
@@ -79,7 +111,8 @@ public class AuthController(
         if (string.IsNullOrWhiteSpace(req.RefreshToken))
             return Unauthorized(new { message = "Refresh token is required." });
 
-        var user = await _db.Users.FirstOrDefaultAsync(u => u.RefreshToken == req.RefreshToken);
+        var hashedToken = TokenService.HashRefreshToken(req.RefreshToken);
+        var user = await _db.Users.FirstOrDefaultAsync(u => u.RefreshToken == hashedToken);
         if (user is null || !user.RefreshTokenExpiry.HasValue || user.RefreshTokenExpiry.Value < DateTime.UtcNow)
         {
             return Unauthorized(new { message = "Refresh token is invalid or has expired." });
@@ -92,8 +125,9 @@ public class AuthController(
 
         var newAccessToken  = _tokenService.GenerateAccessToken(user);
         var newRefreshToken = _tokenService.GenerateRefreshToken();
-        user.RefreshToken       = newRefreshToken;
-        user.RefreshTokenExpiry = DateTime.UtcNow.AddDays(7);
+        var refreshDays     = _tokenService.GetRefreshTokenExpiryDays();
+        user.RefreshToken       = TokenService.HashRefreshToken(newRefreshToken);
+        user.RefreshTokenExpiry = DateTime.UtcNow.AddDays(refreshDays);
         _db.Users.Update(user);
         await _uow.SaveChangesAsync();
 
@@ -129,8 +163,8 @@ public class AuthController(
         if (userId == Guid.Empty) return Unauthorized();
 
         var user = await _db.Users.AsNoTracking()
-                                  .FirstOrDefaultAsync(u => u.Id == userId);
-        if (user is null) return NotFound(new { message = "User not found." });
+                                  .FirstOrDefaultAsync(u => u.Id == userId && u.IsActive);
+        if (user is null) return Unauthorized(new { message = "User not found or disabled." });
 
         return Ok(MapUserDto(user));
     }
@@ -143,8 +177,8 @@ public class AuthController(
         var userId = GetCurrentUserId();
         if (userId == Guid.Empty) return Unauthorized();
 
-        var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId);
-        if (user is null) return NotFound(new { message = "User not found." });
+        var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId && u.IsActive);
+        if (user is null) return Unauthorized(new { message = "User not found or disabled." });
 
         if (!string.IsNullOrWhiteSpace(req.FirstName)) user.FirstName = req.FirstName.Trim();
         if (!string.IsNullOrWhiteSpace(req.LastName)) user.LastName = req.LastName.Trim();
@@ -157,6 +191,27 @@ public class AuthController(
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
+    private static bool IsValidEmail(string email)
+    {
+        if (string.IsNullOrWhiteSpace(email) || email.Length > 256) return false;
+        return MailAddress.TryCreate(email, out var addr) && addr.Address.Equals(email, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsStrongPassword(string? password, out string error)
+    {
+        if (string.IsNullOrWhiteSpace(password) || password.Length < 8)
+        {
+            error = "Password must be at least 8 characters long.";
+            return false;
+        }
+        if (!Regex.IsMatch(password, "[A-Z]") || !Regex.IsMatch(password, "[a-z]") || !Regex.IsMatch(password, "[0-9]"))
+        {
+            error = "Password must include at least one uppercase letter, one lowercase letter, and one digit.";
+            return false;
+        }
+        error = string.Empty;
+        return true;
+    }
     private Guid GetCurrentUserId()
     {
         var raw = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;

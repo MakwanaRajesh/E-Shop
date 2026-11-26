@@ -116,6 +116,8 @@ function ProductsContent() {
   const router = useRouter()
   const [result, setResult] = React.useState<PagedResult<ProductListItem> | null>(null)
   const [isLoading, setIsLoading] = React.useState(true)
+  const [fetchError, setFetchError] = React.useState<string | null>(null)
+  const [retryTick, setRetryTick] = React.useState(0)
   const [sidebarOpen, setSidebarOpen] = React.useState(false)
 
   // Filters from URL - normalize synonyms like man -> men, female -> women
@@ -144,15 +146,21 @@ function ProductsContent() {
     setCustomMax(maxPrice !== undefined ? String(maxPrice) : '')
   }, [minPrice, maxPrice])
 
-  const updateParam = (key: string, value: string | undefined) => {
+  const updateParams = (updates: Record<string, string | undefined>) => {
     const params = new URLSearchParams(searchParams.toString())
-    if (value) {
-      params.set(key, value)
-    } else {
-      params.delete(key)
-    }
+    Object.entries(updates).forEach(([key, value]) => {
+      if (value) {
+        params.set(key, value)
+      } else {
+        params.delete(key)
+      }
+    })
     params.delete('page')
     router.push(`/products?${params.toString()}`)
+  }
+
+  const updateParam = (key: string, value: string | undefined) => {
+    updateParams({ [key]: value })
   }
 
   const handleApplyCustomPrice = (e: React.FormEvent) => {
@@ -227,6 +235,7 @@ function ProductsContent() {
   React.useEffect(() => {
     const fetchProducts = async () => {
       setIsLoading(true)
+      setFetchError(null)
       try {
         const { data } = await api.get<PagedResult<ProductListItem>>('/api/products', {
           params: {
@@ -246,14 +255,15 @@ function ProductsContent() {
           },
         })
         setResult(data)
-      } catch {
+      } catch (err: any) {
         setResult(null)
+        setFetchError(err?.message ?? 'Unable to connect to the catalog server. Please ensure the backend API is running.')
       } finally {
         setIsLoading(false)
       }
     }
     fetchProducts()
-  }, [search, category, subCategory, gender, size, minDiscount, sortBy, page, minPrice, maxPrice, inStock, minRating])
+  }, [search, category, subCategory, gender, size, minDiscount, sortBy, page, minPrice, maxPrice, inStock, minRating, retryTick])
 
   const hasFilters = !!(
     search ||
@@ -445,8 +455,7 @@ function ProductsContent() {
           <button
             type="button"
             onClick={() => {
-              updateParam('category', undefined)
-              updateParam('subCategory', undefined)
+              updateParams({ category: undefined, subCategory: undefined })
             }}
             className={cn(
               'w-full text-left px-2.5 py-1.5 rounded-lg transition-colors flex items-center justify-between font-medium cursor-pointer',
@@ -784,9 +793,15 @@ function ProductsContent() {
         </p>
       </div>
 
-      {/* ── Subcategory Quick Navigation Bar (When Category is selected) ── */}
-      {activeCategoryObj && activeCategoryObj.subcategories.length > 0 && (
+      {/* ── Category / Subcategory Quick Navigation Bar ── */}
+      {activeCategoryObj && activeCategoryObj.subcategories.length > 0 ? (
         <div className="mb-6 flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none">
+          <button
+            onClick={() => updateParams({ category: undefined, subCategory: undefined })}
+            className="px-3.5 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-all border bg-surface-2 border-border text-beige-muted hover:text-beige hover:border-gold/30"
+          >
+            View All Catalog
+          </button>
           <button
             onClick={() => updateParam('subCategory', undefined)}
             className={cn(
@@ -812,6 +827,37 @@ function ProductsContent() {
                 )}
               >
                 {sub.name}
+              </button>
+            )
+          })}
+        </div>
+      ) : (
+        <div className="mb-6 flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none">
+          <button
+            onClick={() => updateParams({ category: undefined, subCategory: undefined })}
+            className={cn(
+              'px-3.5 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-all border',
+              !category
+                ? 'bg-gold text-background border-gold shadow-md shadow-gold/20'
+                : 'bg-surface-2 border-border text-beige-muted hover:text-beige hover:border-gold/30',
+            )}
+          >
+            View All Items
+          </button>
+          {CATEGORY_TREE.map((cat) => {
+            const isSelected = category === cat.slug
+            return (
+              <button
+                key={cat.slug}
+                onClick={() => updateParams({ category: isSelected ? undefined : cat.slug, subCategory: undefined })}
+                className={cn(
+                  'px-3.5 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-all border',
+                  isSelected
+                    ? 'bg-gold text-background border-gold shadow-md shadow-gold/20'
+                    : 'bg-surface-2 border-border text-beige-muted hover:text-beige hover:border-gold/30',
+                )}
+              >
+                {cat.name}
               </button>
             )
           })}
@@ -891,8 +937,7 @@ function ProductsContent() {
               ₹{minPrice ?? 0} – {maxPrice ? `₹${maxPrice}` : 'Above'}
               <button
                 onClick={() => {
-                  updateParam('minPrice', undefined)
-                  updateParam('maxPrice', undefined)
+                  updateParams({ minPrice: undefined, maxPrice: undefined })
                 }}
                 aria-label="Remove price filter"
               >
@@ -1032,6 +1077,17 @@ function ProductsContent() {
                 </div>
               )}
             </>
+          ) : fetchError ? (
+            <div className="text-center py-20 bg-surface border border-error/30 rounded-2xl p-8 space-y-4">
+              <Search className="w-12 h-12 text-error/60 mx-auto" />
+              <h3 className="font-serif text-xl font-bold text-beige">Unable to load products</h3>
+              <p className="text-xs text-beige-muted max-w-md mx-auto">
+                {fetchError}
+              </p>
+              <Button variant="primary" size="sm" onClick={() => setRetryTick((t) => t + 1)}>
+                Retry Connection
+              </Button>
+            </div>
           ) : (
             <div className="text-center py-20 bg-surface border border-border rounded-2xl p-8 space-y-4">
               <Search className="w-12 h-12 text-gold/40 mx-auto" />

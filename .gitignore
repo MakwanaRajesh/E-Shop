@@ -13,6 +13,8 @@ backend/publish/
 
 ## Secrets - NEVER commit these
 appsettings.Production.json
+appsettings.Local.json
+appsettings.*.local.json
 **/secrets.json
 
 ## Logs

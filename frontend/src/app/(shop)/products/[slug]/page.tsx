@@ -34,6 +34,7 @@ import { useAuthStore } from '@/store/auth'
 import { useCartStore } from '@/store/cart'
 import { useWishlistStore } from '@/store/wishlist'
 import { useAuthModalStore } from '@/store/authModal'
+import { useRecentlyViewedStore } from '@/store/recentlyViewed'
 import toast from 'react-hot-toast'
 
 const TOPS_SIZE_DATA = [
@@ -63,6 +64,91 @@ const FOOTWEAR_SIZE_DATA = [
   { uk: 'UK 11', us: 'US 12', eu: 'EU 45', lengthIn: '11.8', lengthCm: '30.0' },
 ]
 
+function getSimilarProductQuery(product: Product): {
+  params: Record<string, string | number>
+  label: string
+  viewAllHref: string
+} {
+  const tagsStr = Array.isArray(product.tags) ? product.tags.join(' ') : (product.tags ?? '')
+  const text = `${product.name} ${product.categoryName ?? ''} ${tagsStr}`.toLowerCase()
+
+  if (/\b(t-shirt|tshirt|tee|tees|polo)\b/.test(text)) {
+    return {
+      params: { search: 't-shirt', pageSize: 12 },
+      label: 'More T-Shirts & Tees',
+      viewAllHref: '/products?search=t-shirt',
+    }
+  }
+  if (/\b(denim|jeans|trouser|palazzo)\b/.test(text)) {
+    return {
+      params: { search: 'denim', pageSize: 12 },
+      label: 'More Denim & Jeans',
+      viewAllHref: '/products?search=denim',
+    }
+  }
+  if (/\b(footwear|shoe|shoes|sneaker|sneakers|heel|heels|loafer|loafers|flat|flats)\b/.test(text)) {
+    return {
+      params: { category: 'footwear', pageSize: 12 },
+      label: 'More Footwear',
+      viewAllHref: '/products?category=footwear',
+    }
+  }
+  if (/\b(dress|dresses|gown)\b/.test(text)) {
+    return {
+      params: { search: 'dress', pageSize: 12 },
+      label: 'More Dresses',
+      viewAllHref: '/products?search=dress',
+    }
+  }
+  if (/\b(kurta|kurti|ethnic|sharara|chikankari)\b/.test(text)) {
+    return {
+      params: { search: 'kurta', pageSize: 12 },
+      label: 'More Ethnic & Kurtas',
+      viewAllHref: '/products?search=kurta',
+    }
+  }
+  if (/\b(shirt|blouse|top)\b/.test(text)) {
+    return {
+      params: { search: 'shirt', pageSize: 12 },
+      label: 'More Shirts & Tops',
+      viewAllHref: '/products?search=shirt',
+    }
+  }
+  if (/\b(watch|watches|tourbillon|chronograph|automatic)\b/.test(text)) {
+    return {
+      params: { category: 'watches', pageSize: 12 },
+      label: 'More Luxury Watches',
+      viewAllHref: '/products?category=watches',
+    }
+  }
+  if (/\b(parfum|perfume|fragrance|extrait)\b/.test(text)) {
+    return {
+      params: { category: 'fragrances', pageSize: 12 },
+      label: 'More Fragrances',
+      viewAllHref: '/products?category=fragrances',
+    }
+  }
+  if (/\b(ring|chain|jewelry|jewellery|diamond)\b/.test(text)) {
+    return {
+      params: { category: 'jewelry', pageSize: 12 },
+      label: 'More Fine Jewelry',
+      viewAllHref: '/products?category=jewelry',
+    }
+  }
+  if (/\b(bag|tote|handbag|clutch|wallet|briefcase)\b/.test(text)) {
+    return {
+      params: { search: 'leather', pageSize: 12 },
+      label: 'More Bags & Accessories',
+      viewAllHref: '/products?category=accessories',
+    }
+  }
+  return {
+    params: { pageSize: 12, ...(product.categoryId ? { categoryId: product.categoryId } : {}) },
+    label: `More in ${product.categoryName ?? 'This Collection'}`,
+    viewAllHref: product.category?.slug ? `/products?category=${product.category.slug}` : '/products',
+  }
+}
+
 interface Props {
   params: Promise<{ slug: string }>
 }
@@ -72,6 +158,15 @@ export default function ProductDetailPage({ params }: Props) {
   const router = useRouter()
   const [product, setProduct] = React.useState<Product | null>(null)
   const [related, setRelated] = React.useState<ProductListItem[]>([])
+  const [relatedMeta, setRelatedMeta] = React.useState<{ label: string; viewAllHref: string }>({
+    label: 'You May Also Like',
+    viewAllHref: '/products',
+  })
+  const [moreProducts, setMoreProducts] = React.useState<ProductListItem[]>([])
+  const [morePage, setMorePage] = React.useState(1)
+  const [hasMoreProducts, setHasMoreProducts] = React.useState(true)
+  const [loadingMore, setLoadingMore] = React.useState(false)
+  const loadMoreRef = React.useRef<HTMLDivElement | null>(null)
   const [reviews, setReviews] = React.useState<Review[]>([])
   const [isLoading, setIsLoading] = React.useState(true)
   const [selectedImageIdx, setSelectedImageIdx] = React.useState(0)
@@ -99,6 +194,47 @@ export default function ProductDetailPage({ params }: Props) {
   const { addItem } = useCartStore()
   const { isInWishlist, addItem: addToWishlist, removeItem: removeFromWishlist } = useWishlistStore()
   const { open: openAuthModal } = useAuthModalStore()
+  const { items: recentlyViewed, addProduct: addRecentlyViewed } = useRecentlyViewedStore()
+
+  // Write Review state
+  const [showReviewForm, setShowReviewForm] = React.useState(false)
+  const [reviewRating, setReviewRating] = React.useState(5)
+  const [reviewTitle, setReviewTitle] = React.useState('')
+  const [reviewComment, setReviewComment] = React.useState('')
+  const [isSubmittingReview, setIsSubmittingReview] = React.useState(false)
+
+  const handleSubmitReview = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!product) return
+    if (!isAuthenticated) {
+      toast('Please sign in to write a review', { icon: '✍️' })
+      openAuthModal('login')
+      return
+    }
+    if (!reviewComment.trim()) {
+      toast.error('Please share your review comment.')
+      return
+    }
+    setIsSubmittingReview(true)
+    try {
+      const { data } = await api.post<Review>('/api/reviews', {
+        productId: product.id,
+        rating: reviewRating,
+        title: reviewTitle.trim() || null,
+        comment: reviewComment.trim(),
+      })
+      setReviews((prev) => [data, ...prev])
+      setReviewTitle('')
+      setReviewComment('')
+      setReviewRating(5)
+      setShowReviewForm(false)
+      toast.success('Thank you! Your review has been published.')
+    } catch (err: any) {
+      toast.error(err?.message ?? 'Unable to submit review')
+    } finally {
+      setIsSubmittingReview(false)
+    }
+  }
 
   React.useEffect(() => {
     const fetchProduct = async () => {
@@ -106,6 +242,20 @@ export default function ProductDetailPage({ params }: Props) {
       try {
         const productRes = await api.get<Product>(`/api/products/${slug}`)
         setProduct(productRes.data)
+        addRecentlyViewed({
+          id: productRes.data.id,
+          name: productRes.data.name,
+          slug: productRes.data.slug,
+          shortDescription: productRes.data.shortDescription,
+          price: productRes.data.price,
+          compareAtPrice: productRes.data.compareAtPrice,
+          primaryImageUrl: productRes.data.images?.[0]?.url,
+          categoryName: productRes.data.categoryName,
+          averageRating: productRes.data.averageRating ?? 0,
+          reviewCount: productRes.data.reviewCount ?? 0,
+          stock: productRes.data.stock ?? productRes.data.stockQuantity ?? 0,
+          isFeatured: !!productRes.data.isFeatured,
+        })
 
         if (productRes.data.variants?.length > 0) {
           setSelectedVariantId(productRes.data.variants[0].id)
@@ -150,15 +300,47 @@ export default function ProductDetailPage({ params }: Props) {
           setReviews([])
         }
 
-        // Fetch related products
+        // Fetch smart similar-type products (e.g. T-shirts across Men/Women, Denim, Footwear) + same category
+        const similarQuery = getSimilarProductQuery(productRes.data)
+        setRelatedMeta({ label: similarQuery.label, viewAllHref: similarQuery.viewAllHref })
+        let relatedIds = new Set<string>([productRes.data.id])
         try {
-          const relatedRes = await api.get<{ data?: ProductListItem[]; items?: ProductListItem[] }>('/api/products', {
-            params: { pageSize: 4, categoryId: productRes.data.categoryId },
-          })
-          const list = relatedRes.data.items ?? relatedRes.data.data ?? []
-          setRelated(list.filter((p) => p.id !== productRes.data.id).slice(0, 4))
+          const [similarRes, catRes] = await Promise.all([
+            api.get<{ data?: ProductListItem[]; items?: ProductListItem[] }>('/api/products', {
+              params: similarQuery.params,
+            }),
+            productRes.data.categoryId
+              ? api.get<{ data?: ProductListItem[]; items?: ProductListItem[] }>('/api/products', {
+                  params: { pageSize: 8, categoryId: productRes.data.categoryId },
+                })
+              : Promise.resolve(null),
+          ])
+          const similarList = similarRes.data.items ?? similarRes.data.data ?? []
+          const catList = catRes?.data?.items ?? catRes?.data?.data ?? []
+          const merged: ProductListItem[] = []
+          for (const item of [...similarList, ...catList]) {
+            if (!relatedIds.has(item.id)) {
+              relatedIds.add(item.id)
+              merged.push(item)
+            }
+          }
+          setRelated(merged.slice(0, 8))
         } catch {
           setRelated([])
+        }
+
+        // Fetch initial batch of other catalog products for scroll discovery
+        try {
+          const moreRes = await api.get<{ data?: ProductListItem[]; items?: ProductListItem[]; totalPages?: number }>('/api/products', {
+            params: { page: 1, pageSize: 8, sortBy: 'featured' },
+          })
+          const moreList = (moreRes.data.items ?? moreRes.data.data ?? []).filter((p) => !relatedIds.has(p.id))
+          setMoreProducts(moreList)
+          setMorePage(1)
+          setHasMoreProducts((moreRes.data.totalPages ?? 1) > 1)
+        } catch {
+          setMoreProducts([])
+          setHasMoreProducts(false)
         }
       } catch {
         notFound()
@@ -168,6 +350,42 @@ export default function ProductDetailPage({ params }: Props) {
     }
     fetchProduct()
   }, [slug])
+
+  const loadNextMoreProducts = React.useCallback(async () => {
+    if (loadingMore || !hasMoreProducts || !product) return
+    setLoadingMore(true)
+    try {
+      const nextPage = morePage + 1
+      const res = await api.get<{ data?: ProductListItem[]; items?: ProductListItem[]; totalPages?: number }>('/api/products', {
+        params: { page: nextPage, pageSize: 8, sortBy: 'featured' },
+      })
+      const incoming = res.data.items ?? res.data.data ?? []
+      const excludeIds = new Set([product.id, ...related.map((r) => r.id), ...moreProducts.map((m) => m.id)])
+      const uniqueIncoming = incoming.filter((p) => !excludeIds.has(p.id))
+      setMoreProducts((prev) => [...prev, ...uniqueIncoming])
+      setMorePage(nextPage)
+      setHasMoreProducts(nextPage < (res.data.totalPages ?? 1))
+    } catch {
+      setHasMoreProducts(false)
+    } finally {
+      setLoadingMore(false)
+    }
+  }, [loadingMore, hasMoreProducts, product, morePage, related, moreProducts])
+
+  React.useEffect(() => {
+    const el = loadMoreRef.current
+    if (!el || !hasMoreProducts) return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          loadNextMoreProducts()
+        }
+      },
+      { rootMargin: '250px' },
+    )
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [hasMoreProducts, loadNextMoreProducts])
 
   const handleAddToCart = async (goToCheckout = false) => {
     if (!product) return
@@ -831,66 +1049,216 @@ export default function ProductDetailPage({ params }: Props) {
         </Accordion.Root>
       </div>
 
-      {/* ── Reviews ── */}
-      {reviews.length > 0 && (
-        <section className="mb-16">
-          <h2 className="font-serif text-2xl font-bold text-beige mb-6">
-            Customer Reviews
-          </h2>
+      {/* ── Reviews & Write a Review ── */}
+      <section className="mb-16">
+        <div className="flex items-center justify-between flex-wrap gap-4 mb-6">
+          <div>
+            <h2 className="font-serif text-2xl font-bold text-beige">
+              Customer Reviews {reviews.length > 0 && `(${reviews.length})`}
+            </h2>
+            <p className="text-xs text-beige-muted mt-0.5">
+              Verified buyer feedback & craftsmanship ratings
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              if (!isAuthenticated) {
+                toast('Please sign in to write a review', { icon: '✍️' })
+                openAuthModal('login')
+                return
+              }
+              setShowReviewForm((prev) => !prev)
+            }}
+          >
+            {showReviewForm ? 'Cancel' : 'Write a Review'}
+          </Button>
+        </div>
+
+        {showReviewForm && (
+          <form
+            onSubmit={handleSubmitReview}
+            className="bg-surface border border-gold/40 rounded-2xl p-5 sm:p-6 mb-6 space-y-4 shadow-sm animate-fade-in"
+          >
+            <div>
+              <label className="block text-xs font-semibold text-beige uppercase tracking-wider mb-2">
+                Your Rating
+              </label>
+              <div className="flex items-center gap-1.5">
+                {[1, 2, 3, 4, 5].map((star) => (
+                  <button
+                    key={star}
+                    type="button"
+                    onClick={() => setReviewRating(star)}
+                    className="p-1 transition-transform hover:scale-110"
+                    aria-label={`Rate ${star} stars`}
+                  >
+                    <Star
+                      className={cn(
+                        'w-6 h-6',
+                        star <= reviewRating ? 'text-gold fill-gold' : 'text-beige-muted/30',
+                      )}
+                    />
+                  </button>
+                ))}
+                <span className="text-xs text-beige-muted ml-2">{reviewRating} / 5</span>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-beige uppercase tracking-wider mb-1.5">
+                Review Headline (Optional)
+              </label>
+              <input
+                type="text"
+                value={reviewTitle}
+                onChange={(e) => setReviewTitle(e.target.value)}
+                placeholder="e.g. Exceptional fabric & tailored fit"
+                className="w-full bg-surface-2 border border-border rounded-xl px-3.5 py-2.5 text-sm text-beige focus:outline-none focus:border-gold"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-beige uppercase tracking-wider mb-1.5">
+                Your Review
+              </label>
+              <textarea
+                rows={3}
+                value={reviewComment}
+                onChange={(e) => setReviewComment(e.target.value)}
+                placeholder="Share details on quality, sizing, and comfort..."
+                required
+                className="w-full bg-surface-2 border border-border rounded-xl px-3.5 py-2.5 text-sm text-beige focus:outline-none focus:border-gold"
+              />
+            </div>
+
+            <div className="flex justify-end">
+              <Button type="submit" variant="primary" size="sm" isLoading={isSubmittingReview}>
+                Publish Review
+              </Button>
+            </div>
+          </form>
+        )}
+
+        {reviews.length > 0 ? (
           <div className="space-y-4">
-            {reviews.map((review) => (
-              <div key={review.id} className="bg-surface border border-border rounded-xl p-5">
-                <div className="flex items-start justify-between mb-3">
-                  <div className="flex items-center gap-3">
-                    <div className="w-9 h-9 rounded-full bg-gold/10 border border-gold/20 flex items-center justify-center">
-                      <span className="text-gold text-sm font-bold">
-                        {review.user.firstName[0]}
-                      </span>
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium text-beige">
-                        {review.user.firstName} {review.user.lastName}
-                      </p>
-                      <div className="flex gap-0.5 mt-0.5">
-                        {Array.from({ length: 5 }).map((_, i) => (
-                          <Star
-                            key={i}
-                            className={cn(
-                              'w-3 h-3',
-                              i < review.rating
-                                ? 'text-gold fill-gold'
-                                : 'text-beige-muted/30',
-                            )}
-                          />
-                        ))}
+            {reviews.map((review) => {
+              const displayName =
+                (review as any).userName ||
+                (review.user ? `${review.user.firstName} ${review.user.lastName}`.trim() : 'Verified Client')
+              const initial = displayName.charAt(0).toUpperCase() || 'N'
+              const reviewText = (review as any).comment ?? review.body ?? ''
+              return (
+                <div key={review.id} className="bg-surface border border-border rounded-xl p-5">
+                  <div className="flex items-start justify-between mb-3">
+                    <div className="flex items-center gap-3">
+                      <div className="w-9 h-9 rounded-full bg-gold/10 border border-gold/20 flex items-center justify-center">
+                        <span className="text-gold text-sm font-bold">{initial}</span>
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-beige">{displayName}</p>
+                        <div className="flex gap-0.5 mt-0.5">
+                          {Array.from({ length: 5 }).map((_, i) => (
+                            <Star
+                              key={i}
+                              className={cn(
+                                'w-3 h-3',
+                                i < review.rating
+                                  ? 'text-gold fill-gold'
+                                  : 'text-beige-muted/30',
+                              )}
+                            />
+                          ))}
+                        </div>
                       </div>
                     </div>
+                    <div className="flex items-center gap-2 flex-wrap justify-end">
+                      {review.isVerifiedPurchase && (
+                        <Badge variant="success" className="text-xs">Verified</Badge>
+                      )}
+                      <span className="text-xs text-beige-muted">{formatRelativeDate(review.createdAt)}</span>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2 flex-wrap justify-end">
-                    {review.isVerifiedPurchase && (
-                      <Badge variant="success" className="text-xs">Verified</Badge>
-                    )}
-                    <span className="text-xs text-beige-muted">{formatRelativeDate(review.createdAt)}</span>
-                  </div>
+                  {review.title && (
+                    <h4 className="font-medium text-beige mb-1">{review.title}</h4>
+                  )}
+                  {reviewText && <p className="text-sm text-beige-muted">{reviewText}</p>}
                 </div>
-                {review.title && (
-                  <h4 className="font-medium text-beige mb-1">{review.title}</h4>
-                )}
-                <p className="text-sm text-beige-muted">{review.body}</p>
-              </div>
+              )
+            })}
+          </div>
+        ) : (
+          <div className="bg-surface border border-border rounded-xl p-6 text-center text-xs text-beige-muted">
+            No reviews yet. Be the first to share your thoughts on this piece.
+          </div>
+        )}
+      </section>
+
+      {/* ── Smart Similar-Type Suggestions ── */}
+      {related.length > 0 && (
+        <section className="mb-16">
+          <div className="flex items-center justify-between mb-6 gap-4">
+            <div>
+              <p className="text-xs text-gold uppercase tracking-widest font-semibold mb-1">
+                Similar Style
+              </p>
+              <h2 className="font-serif text-2xl font-bold text-beige">{relatedMeta.label}</h2>
+            </div>
+            <Link
+              href={relatedMeta.viewAllHref}
+              className="text-xs font-semibold text-gold hover:underline flex items-center gap-1 whitespace-nowrap"
+            >
+              <span>View All Similar</span>
+              <ChevronRight className="w-3.5 h-3.5" />
+            </Link>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+            {related.map((relProd) => (
+              <ProductCard key={relProd.id} product={relProd} />
             ))}
           </div>
         </section>
       )}
 
-      {/* ── Related Products ── */}
-      {related.length > 0 && (
-        <section>
-          <h2 className="font-serif text-2xl font-bold text-beige mb-6">You May Also Like</h2>
+      {/* ── Discover More Products on Scroll ── */}
+      {moreProducts.length > 0 && (
+        <section className="pt-10 border-t border-border">
+          <div className="flex items-center justify-between mb-6 gap-4">
+            <div>
+              <p className="text-xs text-gold uppercase tracking-widest font-semibold mb-1">
+                Keep Exploring
+              </p>
+              <h2 className="font-serif text-2xl font-bold text-beige">
+                More Pieces From NEXUS
+              </h2>
+            </div>
+            <Link
+              href="/products"
+              className="inline-flex items-center gap-1.5 border border-border hover:border-gold/60 text-beige hover:text-gold px-4 py-2 rounded-xl text-xs font-semibold transition-colors whitespace-nowrap"
+            >
+              <span>View All Catalog</span>
+              <ChevronRight className="w-3.5 h-3.5" />
+            </Link>
+          </div>
+
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-            {related.map((product) => (
-              <ProductCard key={product.id} product={product} />
+            {moreProducts.map((item) => (
+              <ProductCard key={item.id} product={item} />
             ))}
+          </div>
+
+          <div ref={loadMoreRef} className="mt-10 flex justify-center">
+            {hasMoreProducts && (
+              <Button
+                variant="outline"
+                size="md"
+                onClick={loadNextMoreProducts}
+                isLoading={loadingMore}
+              >
+                {loadingMore ? 'Loading More Pieces...' : 'Explore More Products'}
+              </Button>
+            )}
           </div>
         </section>
       )}

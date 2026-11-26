@@ -20,11 +20,30 @@ Log.Logger = new LoggerConfiguration()
 
 builder.Host.UseSerilog();
 
+// ── Request Size Limits ───────────────────────────────────────────────────────
+builder.WebHost.ConfigureKestrel(options =>
+{
+    options.Limits.MaxRequestBodySize = 1_048_576; // 1 MB max request body
+});
+
 // ── Database ──────────────────────────────────────────────────────────────────
+var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
+if (string.IsNullOrWhiteSpace(connectionString))
+    throw new InvalidOperationException(
+        "Database connection string 'ConnectionStrings:DefaultConnection' is not configured. " +
+        "Set it via environment variables or dotnet user-secrets.");
+
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseNpgsql(
-        builder.Configuration.GetConnectionString("DefaultConnection"),
-        npgsql => npgsql.MigrationsAssembly("EShop.Infrastructure")
+        connectionString,
+        npgsql =>
+        {
+            npgsql.MigrationsAssembly("EShop.Infrastructure");
+            npgsql.EnableRetryOnFailure(
+                maxRetryCount: 3,
+                maxRetryDelay: TimeSpan.FromSeconds(5),
+                errorCodesToAdd: null);
+        }
     )
 );
 
@@ -32,17 +51,27 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 builder.Services.AddScoped(typeof(IRepository<>), typeof(Repository<>));
 builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
 builder.Services.AddScoped<EShop.Infrastructure.Services.TokenService>();
+builder.Services.AddSingleton<EShop.API.Services.SecurityMonitorService>();
 builder.Services.AddMemoryCache();
 builder.Services.AddHttpClient();
 
 // ── JWT Authentication ────────────────────────────────────────────────────────
-var jwtKey = builder.Configuration["Jwt:Key"]!;
-var jwtIssuer = builder.Configuration["Jwt:Issuer"]!;
-var jwtAudience = builder.Configuration["Jwt:Audience"]!;
+var jwtKey = builder.Configuration["Jwt:Key"] ?? string.Empty;
+if (string.IsNullOrWhiteSpace(jwtKey) || Encoding.UTF8.GetByteCount(jwtKey) < 32 ||
+    jwtKey.Contains("CHANGE_THIS", StringComparison.OrdinalIgnoreCase) ||
+    (!builder.Environment.IsDevelopment() && jwtKey.Contains("DEV_ONLY", StringComparison.OrdinalIgnoreCase)))
+{
+    throw new InvalidOperationException(
+        "JWT signing key 'Jwt:Key' is missing, insecure, or shorter than 256 bits (32 bytes). " +
+        "Set a strong secret via environment variables or dotnet user-secrets.");
+}
+var jwtIssuer = builder.Configuration["Jwt:Issuer"] ?? "EShopAPI";
+var jwtAudience = builder.Configuration["Jwt:Audience"] ?? "EShopClient";
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
+        options.RequireHttpsMetadata = !builder.Environment.IsDevelopment();
         options.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuerSigningKey = true,
@@ -69,26 +98,20 @@ builder.Services.AddCors(options =>
         policy.SetIsOriginAllowed(origin =>
         {
             if (string.IsNullOrWhiteSpace(origin)) return false;
-            if (allowedOrigins.Contains(origin)) return true;
+            if (allowedOrigins.Any(o => origin.Equals(o.TrimEnd('/'), StringComparison.OrdinalIgnoreCase)))
+                return true;
             if (!string.IsNullOrWhiteSpace(frontendUrl) &&
-                (origin.Equals(frontendUrl, StringComparison.OrdinalIgnoreCase) ||
-                 origin.Equals(frontendUrl.TrimEnd('/'), StringComparison.OrdinalIgnoreCase)))
+                origin.Equals(frontendUrl.TrimEnd('/'), StringComparison.OrdinalIgnoreCase))
             {
                 return true;
             }
-            try
+            if (builder.Environment.IsDevelopment() &&
+                Uri.TryCreate(origin, UriKind.Absolute, out var uri) &&
+                (uri.Host == "localhost" || uri.Host == "127.0.0.1"))
             {
-                var uri = new Uri(origin);
-                return uri.Host == "localhost"
-                    || uri.Host.EndsWith(".vercel.app")
-                    || uri.Host == "vercel.app"
-                    || uri.Host.EndsWith(".netlify.app")
-                    || uri.Host.EndsWith(".onrender.com");
+                return true;
             }
-            catch
-            {
-                return false;
-            }
+            return false;
         })
         .AllowAnyHeader()
         .AllowAnyMethod()
@@ -171,12 +194,35 @@ app.UseForwardedHeaders(new ForwardedHeadersOptions
                      | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto
 });
 
-app.UseSwagger();
-app.UseSwaggerUI(c =>
+if (!app.Environment.IsDevelopment())
 {
-    c.SwaggerEndpoint("/swagger/v1/swagger.json", "EShop API v1");
-    c.RoutePrefix = "swagger";
+    app.UseHsts();
+}
+
+// ── Security Headers ──────────────────────────────────────────────────────────
+app.Use(async (context, next) =>
+{
+    context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+    context.Response.Headers["X-Frame-Options"] = "DENY";
+    context.Response.Headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
+    context.Response.Headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()";
+    context.Response.Headers["X-XSS-Protection"] = "0";
+    if (!context.Request.Path.StartsWithSegments("/swagger"))
+    {
+        context.Response.Headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'";
+    }
+    await next();
 });
+
+if (app.Environment.IsDevelopment() || builder.Configuration.GetValue<bool>("Swagger:Enabled"))
+{
+    app.UseSwagger();
+    app.UseSwaggerUI(c =>
+    {
+        c.SwaggerEndpoint("/swagger/v1/swagger.json", "EShop API v1");
+        c.RoutePrefix = "swagger";
+    });
+}
 
 app.UseMiddleware<EShop.API.Middleware.GlobalExceptionMiddleware>();
 app.UseCors("EShopPolicy");

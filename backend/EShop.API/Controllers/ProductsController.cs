@@ -409,6 +409,12 @@ public class ProductsController(AppDbContext db, IUnitOfWork uow) : ControllerBa
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] CreateProductRequest req)
     {
+        if (string.IsNullOrWhiteSpace(req.Name) || req.Price <= 0 || req.Stock < 0)
+            return BadRequest(new { message = "Valid product name, positive price, and non-negative stock are required." });
+
+        if (!IsSafeImageUrl(req.ImageUrl))
+            return BadRequest(new { message = "Image URL must start with http://, https://, or /." });
+
         var category = await _db.Categories.FindAsync(req.CategoryId);
         if (category is null)
             return BadRequest(new { message = "Category not found." });
@@ -526,6 +532,9 @@ public class ProductsController(AppDbContext db, IUnitOfWork uow) : ControllerBa
     [HttpPut("{id:guid}")]
     public async Task<IActionResult> Update(Guid id, [FromBody] UpdateProductRequest req)
     {
+        if (string.IsNullOrWhiteSpace(req.Name) || req.Price <= 0 || req.Stock < 0)
+            return BadRequest(new { message = "Valid product name, positive price, and non-negative stock are required." });
+
         var product = await _db.Products.FindAsync(id);
         if (product is null) return NotFound(new { message = "Product not found." });
 
@@ -576,6 +585,9 @@ public class ProductsController(AppDbContext db, IUnitOfWork uow) : ControllerBa
     [HttpPost("{id:guid}/images")]
     public async Task<IActionResult> AddImage(Guid id, [FromBody] AddProductImageRequest req)
     {
+        if (string.IsNullOrWhiteSpace(req.Url) || !IsSafeImageUrl(req.Url))
+            return BadRequest(new { message = "Image URL must start with http://, https://, or /." });
+
         var product = await _db.Products.FindAsync(id);
         if (product is null) return NotFound(new { message = "Product not found." });
 
@@ -618,6 +630,15 @@ public class ProductsController(AppDbContext db, IUnitOfWork uow) : ControllerBa
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
+    private static bool IsSafeImageUrl(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url)) return true;
+        var trimmed = url.Trim();
+        return trimmed.StartsWith("https://", StringComparison.OrdinalIgnoreCase)
+            || trimmed.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+            || (trimmed.StartsWith('/') && !trimmed.StartsWith("//"));
+    }
+
     private async Task<string> EnsureUniqueSlug(string baseSlug, Guid? excludeId = null)
     {
         var slug      = baseSlug;

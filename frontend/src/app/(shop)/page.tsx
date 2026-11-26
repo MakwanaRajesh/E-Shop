@@ -3,12 +3,13 @@
 import React from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
-import { ArrowRight, Truck, ShieldCheck, RefreshCw, Star, Mail, Sparkles, ChevronRight } from 'lucide-react'
+import { ArrowRight, Truck, ShieldCheck, RefreshCw, Star, Mail, Sparkles, ChevronRight, LayoutGrid } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { ProductCard } from '@/components/product/ProductCard'
 import { ProductCardSkeleton } from '@/components/ui/Skeleton'
 import type { ProductListItem } from '@/types'
 import api from '@/lib/api'
+import { useRecentlyViewedStore } from '@/store/recentlyViewed'
 import toast from 'react-hot-toast'
 
 // Quick Category Circles (SHEIN / AJIO style)
@@ -50,7 +51,7 @@ const CATEGORY_CIRCLES = [
   {
     name: 'Denim',
     href: '/products?category=men&subCategory=men-denim',
-    imageUrl: 'https://images.unsplash.com/photo-1542272604-780c96856592?auto=format&fit=crop&w=600&q=85',
+    imageUrl: 'https://images.unsplash.com/photo-1576995853123-5a10305d93c0?auto=format&fit=crop&w=600&q=85',
   },
   {
     name: 'Watches',
@@ -60,7 +61,7 @@ const CATEGORY_CIRCLES = [
   {
     name: 'Fragrances',
     href: '/products?category=fragrances',
-    imageUrl: 'https://images.unsplash.com/photo-1541643600914-78b084683702?auto=format&fit=crop&w=600&q=85',
+    imageUrl: 'https://images.unsplash.com/photo-1547887537-6158d64c35b3?auto=format&fit=crop&w=600&q=85',
   },
   {
     name: 'Jewelry',
@@ -116,6 +117,12 @@ export default function HomePage() {
   const [isLoading, setIsLoading] = React.useState(true)
   const [email, setEmail] = React.useState('')
   const [subscribeLoading, setSubscribeLoading] = React.useState(false)
+  const { items: recentlyViewed } = useRecentlyViewedStore()
+  const [mounted, setMounted] = React.useState(false)
+
+  React.useEffect(() => {
+    setMounted(true)
+  }, [])
 
   React.useEffect(() => {
     const fetchFeatured = async () => {
@@ -175,6 +182,24 @@ export default function HomePage() {
                 </span>
               </Link>
             ))}
+
+            {/* View All Categories Circle */}
+            <Link
+              href="/products"
+              className="flex flex-col items-center gap-2 flex-shrink-0 group"
+            >
+              <div className="relative w-16 h-16 sm:w-20 sm:h-20 rounded-full p-0.5 border-2 border-[#C5A059]/60 group-hover:border-[#C5A059] transition-all duration-300 shadow-sm group-hover:shadow-md">
+                <div className="w-full h-full rounded-full overflow-hidden relative bg-[#111111] flex items-center justify-center group-hover:bg-[#1C1917] transition-colors">
+                  <LayoutGrid className="w-6 h-6 sm:w-7 sm:h-7 text-[#D4AF37] group-hover:scale-110 transition-transform duration-300" />
+                </div>
+                <span className="absolute -top-1 -right-1 bg-[#C5A059] text-[#111111] text-[9px] font-bold px-2 py-0.5 rounded-full uppercase shadow">
+                  All
+                </span>
+              </div>
+              <span className="text-xs font-semibold text-[#111111] group-hover:text-[#C5A059] transition-colors">
+                View All
+              </span>
+            </Link>
           </div>
         </div>
       </section>
@@ -246,13 +271,22 @@ export default function HomePage() {
 
       {/* ── Featured Curated Collections ──────────────────────── */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20 bg-[#FAF8F5]">
-        <div className="text-center mb-12">
-          <p className="text-[#C5A059] text-xs font-semibold uppercase tracking-widest mb-2">
-            The Atelier
-          </p>
-          <h2 className="font-serif text-3xl md:text-5xl font-bold text-[#111111]">
-            Curated Collections
-          </h2>
+        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-12">
+          <div>
+            <p className="text-[#C5A059] text-xs font-semibold uppercase tracking-widest mb-2">
+              The Atelier
+            </p>
+            <h2 className="font-serif text-3xl md:text-5xl font-bold text-[#111111]">
+              Curated Collections
+            </h2>
+          </div>
+          <Link
+            href="/products"
+            className="inline-flex items-center gap-2 border border-[#111111] text-[#111111] hover:bg-[#111111] hover:text-[#FAF8F5] px-4 py-2 rounded-xl text-xs font-semibold transition-colors self-start sm:self-auto"
+          >
+            <span>View All Items</span>
+            <ArrowRight className="w-4 h-4" />
+          </Link>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
@@ -340,6 +374,34 @@ export default function HomePage() {
           )}
         </div>
       </section>
+
+      {/* ── Recently Viewed ───────────────────────────────────── */}
+      {mounted && recentlyViewed.length > 0 && (
+        <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16 bg-[#FAF8F5] border-t border-[#E7E5E4]">
+          <div className="flex items-end justify-between mb-10">
+            <div>
+              <p className="text-[#C5A059] text-xs font-semibold uppercase tracking-widest mb-2">
+                Continue Exploring
+              </p>
+              <h2 className="font-serif text-2xl md:text-4xl font-bold text-[#111111]">
+                Recently Viewed
+              </h2>
+            </div>
+            <Link
+              href="/products"
+              className="text-xs font-semibold text-[#C5A059] hover:underline flex items-center gap-1"
+            >
+              <span>Browse Catalog</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </Link>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+            {recentlyViewed.slice(0, 4).map((product) => (
+              <ProductCard key={product.id} product={product} />
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* ── Why Choose Us ─────────────────────────────────────── */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20 bg-[#FAF8F5]">

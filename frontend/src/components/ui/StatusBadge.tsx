@@ -62,8 +62,8 @@ export function StatusBadge({
 
   // 1. Delivered / Completed / Paid / In Stock -> Vibrant Luxury Emerald Green
   if (['delivered', 'completed', 'paid', 'instock', 'active'].includes(norm)) {
-    badgeStyle = 'bg-emerald-500/15 text-emerald-400 border-emerald-500/40 shadow-sm shadow-emerald-500/15 hover:border-emerald-400'
-    dotStyle = 'bg-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.7)]'
+    badgeStyle = 'bg-emerald-50 text-emerald-700 border-emerald-200 shadow-sm hover:border-emerald-400'
+    dotStyle = 'bg-emerald-500'
     IconComponent = CheckCircle2
     if (!label) {
       if (norm === 'instock') displayLabel = 'In Stock'
@@ -74,8 +74,8 @@ export function StatusBadge({
   }
   // 2. Cancelled / Failed / Out of Stock / Inactive -> Rich Velvet Ruby Red
   else if (['cancelled', 'failed', 'outofstock', 'inactive'].includes(norm)) {
-    badgeStyle = 'bg-rose-500/15 text-rose-400 border-rose-500/40 shadow-sm shadow-rose-500/15 hover:border-rose-400'
-    dotStyle = 'bg-rose-500 shadow-[0_0_8px_rgba(239,68,68,0.7)]'
+    badgeStyle = 'bg-rose-50 text-rose-700 border-rose-200 shadow-sm hover:border-rose-400'
+    dotStyle = 'bg-rose-500'
     IconComponent = XCircle
     if (!label) {
       if (norm === 'outofstock') displayLabel = 'Out of Stock'
@@ -86,8 +86,8 @@ export function StatusBadge({
   }
   // 3. Shipped / Out for Delivery / In Transit -> Sapphire Azure Blue
   else if (['shipped', 'outfordelivery', 'dispatched', 'intransit'].includes(norm)) {
-    badgeStyle = 'bg-sky-500/15 text-sky-400 border-sky-500/40 shadow-sm shadow-sky-500/15 hover:border-sky-400'
-    dotStyle = 'bg-sky-400 animate-pulse shadow-[0_0_8px_rgba(14,165,233,0.7)]'
+    badgeStyle = 'bg-sky-50 text-sky-700 border-sky-200 shadow-sm hover:border-sky-400'
+    dotStyle = 'bg-sky-500 animate-pulse'
     IconComponent = Truck
     if (!label) {
       if (norm.includes('outfordelivery')) displayLabel = 'Out for Delivery'
@@ -96,22 +96,22 @@ export function StatusBadge({
   }
   // 4. Processing / Preparing -> Royal Amethyst Purple
   else if (['processing', 'inproduction', 'preparing'].includes(norm)) {
-    badgeStyle = 'bg-purple-500/15 text-purple-300 border-purple-500/40 shadow-sm shadow-purple-500/15 hover:border-purple-400'
-    dotStyle = 'bg-purple-400 animate-ping'
+    badgeStyle = 'bg-purple-50 text-purple-700 border-purple-200 shadow-sm hover:border-purple-400'
+    dotStyle = 'bg-purple-500 animate-ping'
     IconComponent = Sparkles
     if (!label) displayLabel = 'Processing'
   }
   // 5. Confirmed -> Imperial Gold
   else if (['confirmed'].includes(norm)) {
-    badgeStyle = 'bg-gold/15 text-gold border-gold/40 shadow-sm shadow-gold/15 hover:border-gold'
-    dotStyle = 'bg-gold shadow-[0_0_8px_rgba(201,168,76,0.7)]'
+    badgeStyle = 'bg-gold/15 text-gold-dark border-gold/40 shadow-sm hover:border-gold'
+    dotStyle = 'bg-gold'
     IconComponent = ShieldCheck
     if (!label) displayLabel = 'Confirmed'
   }
   // 6. Pending / Payment Pending / Low Stock -> Radiant Topaz Amber
   else if (['pending', 'paymentpending', 'lowstock', 'awaitingpayment'].includes(norm)) {
-    badgeStyle = 'bg-amber-500/15 text-amber-400 border-amber-500/40 shadow-sm shadow-amber-500/15 hover:border-amber-400 animate-pulse'
-    dotStyle = 'bg-amber-400 animate-pulse shadow-[0_0_8px_rgba(245,158,11,0.7)]'
+    badgeStyle = 'bg-amber-50 text-amber-700 border-amber-200 shadow-sm hover:border-amber-400'
+    dotStyle = 'bg-amber-500 animate-pulse'
     IconComponent = norm === 'lowstock' ? AlertTriangle : Clock
     if (!label) {
       if (norm === 'lowstock') displayLabel = 'Low Stock'
@@ -121,8 +121,8 @@ export function StatusBadge({
   }
   // 7. Refunded -> Plum Slate
   else if (['refunded', 'returned'].includes(norm)) {
-    badgeStyle = 'bg-slate-500/15 text-slate-300 border-slate-500/40 shadow-sm shadow-slate-500/15'
-    dotStyle = 'bg-slate-400'
+    badgeStyle = 'bg-slate-100 text-slate-700 border-slate-300 shadow-sm'
+    dotStyle = 'bg-slate-500'
     IconComponent = RotateCcw
     if (!label) displayLabel = 'Refunded'
   }

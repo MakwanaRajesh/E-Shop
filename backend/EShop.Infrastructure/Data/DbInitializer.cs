@@ -8,6 +8,26 @@ public static class DbInitializer
 {
     public static async Task SeedAsync(AppDbContext context)
     {
+        // Fast-path: if already seeded and no broken/legacy images remain, skip redundant round-trips
+        var hasAdmin = await context.Users.AnyAsync(u => u.Email == "admin@nexus.com" && u.Role == UserRole.Admin);
+        var productCount = await context.Products.CountAsync();
+        if (hasAdmin && productCount >= 40)
+        {
+            var hasBrokenImages = await context.ProductImages.AnyAsync(i =>
+                i.Url.StartsWith("data:") ||
+                i.Url.Contains("gstatic") ||
+                i.Url.Contains("photo-1542272604-780c96856592") ||
+                i.Url.Contains("photo-1541643600914-78b084683702") ||
+                i.Url.Contains("photo-1625910513413-7ec40a5a4155") ||
+                i.Url.Contains("photo-1547996160-71dfabb1a7b1"));
+
+            if (!hasBrokenImages)
+            {
+                Console.WriteLine("[DbInitializer] Database already initialized. Skipping seed.");
+                return;
+            }
+        }
+
         // ── 1. Ensure Admin User ──────────────────────────────────────────────
         const string adminEmail = "admin@nexus.com";
         var admin = await context.Users.FirstOrDefaultAsync(u => u.Email == adminEmail);
@@ -53,7 +73,7 @@ public static class DbInitializer
 
         var menDenim = await EnsureCategoryAsync(context, "Men's Denim & Jeans", "men-denim",
             "Japanese raw selvedge denim, vintage fade straight cuts, and tailored stretch comfort chinos.",
-            "https://images.unsplash.com/photo-1542272604-780c96856592?w=800&q=80", 13, menCat.Id);
+            "https://images.unsplash.com/photo-1576995853123-5a10305d93c0?w=800&q=80", 13, menCat.Id);
 
         var menFootwear = await EnsureCategoryAsync(context, "Men's Footwear", "men-footwear",
             "Handcrafted Tuscan leather sneakers, penny loafers, and Goodyear-welted Chelsea boots.",
@@ -133,7 +153,7 @@ public static class DbInitializer
 
         var fragrancesCat = await EnsureCategoryAsync(context, "Haute Fragrances", "fragrances",
             "Artisanal extrait de parfum and rare niche essences.",
-            "https://images.unsplash.com/photo-1541643600914-78b084683702?w=800&q=80", 7);
+            "https://images.unsplash.com/photo-1547887537-6158d64c35b3?w=800&q=80", 7);
 
         var jewelryCat = await EnsureCategoryAsync(context, "Fine Jewelry", "jewelry",
             "18k solid gold, platinum, and ethically sourced gems.",
@@ -239,7 +259,7 @@ public static class DbInitializer
             Tags = "denim,jeans,pant,men,selvedge,bottomwear",
             Images =
             [
-                new ProductImage { Url = "https://images.unsplash.com/photo-1542272604-780c96856592?w=800&q=80", IsPrimary = true, SortOrder = 1, AltText = "Selvedge Jeans" },
+                new ProductImage { Url = "https://images.unsplash.com/photo-1576995853123-5a10305d93c0?w=800&q=80", IsPrimary = true, SortOrder = 1, AltText = "Selvedge Jeans" },
                 new ProductImage { Url = "https://images.unsplash.com/photo-1541099649105-f69ad21f3246?w=800&q=80", IsPrimary = false, SortOrder = 2, AltText = "Selvedge Jeans Cuff" }
             ],
             Variants =
@@ -1038,7 +1058,7 @@ public static class DbInitializer
                 "Nexus Boxy Streetwear Tee"
             ),
             ["polo-t-shirt"] = (
-                "https://images.unsplash.com/photo-1625910513413-7ec40a5a4155?w=1200&auto=format&fit=crop&q=85",
+                "https://images.unsplash.com/photo-1586363104862-3a5e2ab60d99?w=1200&auto=format&fit=crop&q=85",
                 "https://images.unsplash.com/photo-1586363104862-3a5e2ab60d99?w=1200&auto=format&fit=crop&q=85",
                 "Nexus Mercerized Navy Pique Polo"
             ),
@@ -1067,7 +1087,7 @@ public static class DbInitializer
 
             // Men's Denim
             ["nexus-selvedge-slim-taper-denim-jeans"] = (
-                "https://images.unsplash.com/photo-1542272604-780c96856592?w=1200&auto=format&fit=crop&q=85",
+                "https://images.unsplash.com/photo-1576995853123-5a10305d93c0?w=1200&auto=format&fit=crop&q=85",
                 "https://images.unsplash.com/photo-1541099649105-f69ad21f3246?w=1200&auto=format&fit=crop&q=85",
                 "Nexus Japanese Selvedge Denim"
             ),
@@ -1230,7 +1250,7 @@ public static class DbInitializer
                 "Nexus Royal Chronograph 41mm"
             ),
             ["nexus-grand-tourbillon-rose-gold"] = (
-                "https://images.unsplash.com/photo-1547996160-71dfabb1a7b1?w=1200&auto=format&fit=crop&q=85",
+                "https://images.unsplash.com/photo-1524592094714-0f0654e20314?w=1200&auto=format&fit=crop&q=85",
                 null,
                 "Nexus Grand Tourbillon Rose Gold"
             ),
@@ -1242,7 +1262,7 @@ public static class DbInitializer
 
             // Fragrances
             ["nexus-noir-extrait-de-parfum-100ml"] = (
-                "https://images.unsplash.com/photo-1541643600914-78b084683702?w=1200&auto=format&fit=crop&q=85",
+                "https://images.unsplash.com/photo-1547887537-6158d64c35b3?w=1200&auto=format&fit=crop&q=85",
                 null,
                 "Nexus Noir Extrait de Parfum"
             ),
@@ -1345,7 +1365,7 @@ public static class DbInitializer
         // Purge any base64 or google static images across all products
         await context.Database.ExecuteSqlRawAsync(
             @"UPDATE ""ProductImages"" 
-              SET ""Url"" = 'https://images.unsplash.com/photo-1625910513413-7ec40a5a4155?w=1200&auto=format&fit=crop&q=85' 
+              SET ""Url"" = 'https://images.unsplash.com/photo-1586363104862-3a5e2ab60d99?w=1200&auto=format&fit=crop&q=85' 
               WHERE ""Url"" LIKE 'data:%' OR ""Url"" LIKE '%gstatic%' OR ""Url"" NOT LIKE 'http%';");
 
         // Upgrade category banner images to high-res editorial photos
@@ -1356,13 +1376,13 @@ public static class DbInitializer
             ["kids"] = "https://images.unsplash.com/photo-1503919545889-aef636e10ad4?w=1200&auto=format&fit=crop&q=85",
             ["watches"] = "https://images.unsplash.com/photo-1522335789203-aabd1fc54bc9?w=1200&auto=format&fit=crop&q=85",
             ["accessories"] = "https://images.unsplash.com/photo-1548036328-c9fa89d128fa?w=1200&auto=format&fit=crop&q=85",
-            ["fragrances"] = "https://images.unsplash.com/photo-1541643600914-78b084683702?w=1200&auto=format&fit=crop&q=85",
+            ["fragrances"] = "https://images.unsplash.com/photo-1547887537-6158d64c35b3?w=1200&auto=format&fit=crop&q=85",
             ["jewelry"] = "https://images.unsplash.com/photo-1599643478518-a784e5dc4c8f?w=1200&auto=format&fit=crop&q=85",
             ["footwear"] = "https://images.unsplash.com/photo-1549298916-b41d501d3772?w=1200&auto=format&fit=crop&q=85",
-            ["t-shirt"] = "https://images.unsplash.com/photo-1625910513413-7ec40a5a4155?w=1200&auto=format&fit=crop&q=85",
+            ["t-shirt"] = "https://images.unsplash.com/photo-1586363104862-3a5e2ab60d99?w=1200&auto=format&fit=crop&q=85",
             ["men-t-shirts"] = "https://images.unsplash.com/photo-1521572267360-ee0c2909d518?w=1200&auto=format&fit=crop&q=85",
             ["men-shirts"] = "https://images.unsplash.com/photo-1596755094514-f87e34085b2c?w=1200&auto=format&fit=crop&q=85",
-            ["men-denim"] = "https://images.unsplash.com/photo-1542272604-780c96856592?w=1200&auto=format&fit=crop&q=85",
+            ["men-denim"] = "https://images.unsplash.com/photo-1576995853123-5a10305d93c0?w=1200&auto=format&fit=crop&q=85",
             ["men-footwear"] = "https://images.unsplash.com/photo-1549298916-b41d501d3772?w=1200&auto=format&fit=crop&q=85",
             ["men-activewear"] = "https://images.unsplash.com/photo-1581655353564-df123a1eb820?w=1200&auto=format&fit=crop&q=85",
             ["men-innerwear"] = "https://images.unsplash.com/photo-1582533561751-ef6f6ab93a2e?w=1200&auto=format&fit=crop&q=85",
@@ -1387,7 +1407,7 @@ public static class DbInitializer
 
         await context.Database.ExecuteSqlRawAsync(
             @"UPDATE ""Categories"" 
-              SET ""ImageUrl"" = 'https://images.unsplash.com/photo-1625910513413-7ec40a5a4155?w=1200&auto=format&fit=crop&q=85' 
+              SET ""ImageUrl"" = 'https://images.unsplash.com/photo-1586363104862-3a5e2ab60d99?w=1200&auto=format&fit=crop&q=85' 
               WHERE ""ImageUrl"" LIKE 'data:%' OR ""ImageUrl"" LIKE '%gstatic%' OR ""ImageUrl"" NOT LIKE 'http%';");
 
         Console.WriteLine("[DbInitializer] Successfully upgraded all catalog images to Vogue-tier editorial luxury photography.");

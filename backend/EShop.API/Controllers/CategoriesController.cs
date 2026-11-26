@@ -62,6 +62,12 @@ public class CategoriesController(AppDbContext db, IUnitOfWork uow) : Controller
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] CreateCategoryRequest req)
     {
+        if (string.IsNullOrWhiteSpace(req.Name))
+            return BadRequest(new { message = "Category name is required." });
+
+        if (!IsSafeImageUrl(req.ImageUrl))
+            return BadRequest(new { message = "Image URL must start with http://, https://, or /." });
+
         var slug = await EnsureUniqueSlug(SlugService.GenerateSlug(req.Name));
 
         var category = new Category
@@ -86,6 +92,12 @@ public class CategoriesController(AppDbContext db, IUnitOfWork uow) : Controller
     [HttpPut("{id:guid}")]
     public async Task<IActionResult> Update(Guid id, [FromBody] UpdateCategoryRequest req)
     {
+        if (string.IsNullOrWhiteSpace(req.Name))
+            return BadRequest(new { message = "Category name is required." });
+
+        if (!IsSafeImageUrl(req.ImageUrl))
+            return BadRequest(new { message = "Image URL must start with http://, https://, or /." });
+
         var category = await _db.Categories.FindAsync(id);
         if (category is null) return NotFound(new { message = "Category not found." });
 
@@ -121,6 +133,15 @@ public class CategoriesController(AppDbContext db, IUnitOfWork uow) : Controller
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
+    private static bool IsSafeImageUrl(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url)) return true;
+        var trimmed = url.Trim();
+        return trimmed.StartsWith("https://", StringComparison.OrdinalIgnoreCase)
+            || trimmed.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+            || (trimmed.StartsWith('/') && !trimmed.StartsWith("//"));
+    }
+
     private async Task<string> EnsureUniqueSlug(string baseSlug, Guid? excludeId = null)
     {
         var slug      = baseSlug;

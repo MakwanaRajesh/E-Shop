@@ -3,7 +3,7 @@
 import React from 'react'
 import Image from 'next/image'
 import Link from 'next/link'
-import { Heart, ShoppingCart, Star } from 'lucide-react'
+import { Heart, ShoppingCart, Star, Eye, X, ArrowRight } from 'lucide-react'
 import { cn, formatCurrency, getStockStatus, calculateDiscount, optimizeImageUrl } from '@/lib/utils'
 import type { ProductListItem } from '@/types'
 import { Badge } from '@/components/ui/Badge'
@@ -24,6 +24,8 @@ export function ProductCard({ product, className }: ProductCardProps) {
   const [isHovered, setIsHovered] = React.useState(false)
   const [isAddingToCart, setIsAddingToCart] = React.useState(false)
   const [imageLoaded, setImageLoaded] = React.useState(false)
+  const [imageError, setImageError] = React.useState(false)
+  const [quickViewOpen, setQuickViewOpen] = React.useState(false)
   const { isAuthenticated } = useAuthStore()
   const { addItem } = useCartStore()
   const { isInWishlist, addItem: addToWishlist, removeItem: removeFromWishlist } = useWishlistStore()
@@ -84,6 +86,7 @@ export function ProductCard({ product, className }: ProductCardProps) {
   }
 
   return (
+    <>
     <Link
       href={`/products/${product.slug}`}
       className={cn('group block', className)}
@@ -100,7 +103,7 @@ export function ProductCard({ product, className }: ProductCardProps) {
         {/* Image */}
         <div className="relative aspect-square overflow-hidden bg-[#F5F2EB]">
           {/* Shimmer skeleton until image loads */}
-          {!imageLoaded && (
+          {imageUrl && !imageError && !imageLoaded && (
             <div className="absolute inset-0 bg-[#F5F2EB] animate-pulse flex items-center justify-center z-0">
               <div className="w-8 h-8 rounded-full border border-[#C5A059]/30 flex items-center justify-center">
                 <span className="w-2 h-2 rounded-full bg-[#C5A059]/60 animate-ping" />
@@ -108,13 +111,17 @@ export function ProductCard({ product, className }: ProductCardProps) {
             </div>
           )}
 
-          {imageUrl ? (
+          {imageUrl && !imageError ? (
             <Image
               src={optimizeImageUrl(imageUrl, 450, 65)}
               alt={product.name}
               fill
               loading="eager"
               onLoad={() => setImageLoaded(true)}
+              onError={() => {
+                setImageError(true)
+                setImageLoaded(true)
+              }}
               className={cn(
                 'object-cover transition-all duration-500 z-10',
                 imageLoaded ? 'opacity-100 scale-100' : 'opacity-0 scale-95',
@@ -142,24 +149,38 @@ export function ProductCard({ product, className }: ProductCardProps) {
             />
           </div>
 
-          {/* Wishlist button */}
-          <button
-            onClick={handleWishlist}
-            className={cn(
-              'absolute top-3 right-3 w-8 h-8 rounded-full flex items-center justify-center',
-              'bg-white/90 backdrop-blur-sm border border-[#E7E5E4] shadow-sm',
-              'transition-all duration-200 z-20',
-              inWishlist
-                ? 'text-[#991B1B] border-[#FECACA] bg-[#FEF2F2]'
-                : 'text-[#78716C] hover:text-[#991B1B] hover:border-[#FECACA]',
-            )}
-            aria-label={inWishlist ? 'Remove from wishlist' : 'Add to wishlist'}
-          >
-            <Heart
-              className="w-4 h-4"
-              fill={inWishlist ? 'currentColor' : 'none'}
-            />
-          </button>
+          {/* Wishlist & Quick View buttons */}
+          <div className="absolute top-3 right-3 flex flex-col gap-1.5 z-20">
+            <button
+              onClick={handleWishlist}
+              className={cn(
+                'w-8 h-8 rounded-full flex items-center justify-center',
+                'bg-white/90 backdrop-blur-sm border border-[#E7E5E4] shadow-sm',
+                'transition-all duration-200',
+                inWishlist
+                  ? 'text-[#991B1B] border-[#FECACA] bg-[#FEF2F2]'
+                  : 'text-[#78716C] hover:text-[#991B1B] hover:border-[#FECACA]',
+              )}
+              aria-label={inWishlist ? 'Remove from wishlist' : 'Add to wishlist'}
+            >
+              <Heart
+                className="w-4 h-4"
+                fill={inWishlist ? 'currentColor' : 'none'}
+              />
+            </button>
+            <button
+              onClick={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                setQuickViewOpen(true)
+              }}
+              className="w-8 h-8 rounded-full flex items-center justify-center bg-white/90 backdrop-blur-sm border border-[#E7E5E4] shadow-sm text-[#78716C] hover:text-[#C5A059] hover:border-[#C5A059] transition-all duration-200"
+              aria-label={`Quick view ${product.name}`}
+              title="Quick View"
+            >
+              <Eye className="w-4 h-4" />
+            </button>
+          </div>
 
           {/* Add to cart overlay */}
           <div
@@ -242,5 +263,101 @@ export function ProductCard({ product, className }: ProductCardProps) {
         </div>
       </div>
     </Link>
+
+    {/* Quick View Modal */}
+    {quickViewOpen && (
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center p-4"
+        onClick={(e) => {
+          e.preventDefault()
+          e.stopPropagation()
+        }}
+      >
+        <div
+          className="fixed inset-0 bg-black/75 backdrop-blur-sm animate-fade-in"
+          onClick={() => setQuickViewOpen(false)}
+        />
+        <div className="relative bg-white border border-[#E7E5E4] rounded-2xl shadow-2xl max-w-2xl w-full overflow-hidden z-10 animate-slide-up grid grid-cols-1 sm:grid-cols-2">
+          <button
+            onClick={() => setQuickViewOpen(false)}
+            className="absolute top-3 right-3 z-20 w-8 h-8 rounded-full bg-white/90 border border-[#E7E5E4] flex items-center justify-center text-[#57534E] hover:text-[#111111]"
+            aria-label="Close quick view"
+          >
+            <X className="w-4 h-4" />
+          </button>
+
+          <div className="relative aspect-square bg-[#F5F2EB]">
+            {imageUrl && !imageError ? (
+              <Image
+                src={optimizeImageUrl(imageUrl, 600, 80)}
+                alt={product.name}
+                fill
+                className="object-cover"
+                sizes="(max-width: 640px) 100vw, 320px"
+              />
+            ) : (
+              <div className="absolute inset-0 flex items-center justify-center text-[#A8A29E]/40">
+                <ShoppingCart className="w-16 h-16" />
+              </div>
+            )}
+          </div>
+
+          <div className="p-6 flex flex-col justify-between space-y-4">
+            <div className="space-y-2.5">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-[11px] text-[#C5A059] uppercase tracking-wider font-semibold">
+                  {categoryLabel}
+                </span>
+                <StatusBadge status={stockStatus.badgeType} label={stockStatus.label} size="sm" />
+              </div>
+              <h3 className="font-serif text-xl font-bold text-[#111111] leading-snug">
+                {product.name}
+              </h3>
+              <div className="flex items-baseline gap-2.5">
+                <span className="text-2xl font-bold text-[#111111]">
+                  {formatCurrency(product.price)}
+                </span>
+                {product.compareAtPrice && product.compareAtPrice > product.price && (
+                  <span className="text-sm text-[#78716C] line-through">
+                    {formatCurrency(product.compareAtPrice)}
+                  </span>
+                )}
+                {discount > 0 && (
+                  <span className="text-xs font-bold text-[#991B1B]">({discount}% OFF)</span>
+                )}
+              </div>
+              {product.shortDescription && (
+                <p className="text-xs text-[#57534E] leading-relaxed">
+                  {product.shortDescription}
+                </p>
+              )}
+            </div>
+
+            <div className="space-y-2.5 pt-2">
+              <Button
+                variant="primary"
+                size="md"
+                className="w-full bg-[#111111] hover:bg-[#C5A059] text-white hover:text-[#111111]"
+                onClick={handleAddToCart}
+                isLoading={isAddingToCart}
+                disabled={stockCount === 0}
+              >
+                <ShoppingCart className="w-4 h-4" />
+                {stockCount === 0 ? 'Out of Stock' : 'Add to Cart'}
+              </Button>
+              <Link
+                href={`/products/${product.slug}`}
+                onClick={() => setQuickViewOpen(false)}
+                className="w-full inline-flex items-center justify-center gap-1.5 border border-[#E7E5E4] hover:border-[#C5A059] text-[#111111] hover:text-[#C5A059] rounded-xl py-2.5 text-xs font-semibold transition-colors"
+              >
+                <span>View Full Details & Sizing</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </Link>
+            </div>
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   )
 }

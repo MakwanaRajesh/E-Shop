@@ -3,6 +3,7 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using EShop.API.Services;
 using EShop.Core.DTOs;
 using EShop.Core.Entities;
 using EShop.Core.Enums;
@@ -22,12 +23,14 @@ public class OrdersController(
     AppDbContext db,
     IUnitOfWork uow,
     IConfiguration configuration,
-    IHttpClientFactory httpClientFactory) : ControllerBase
+    IHttpClientFactory httpClientFactory,
+    SecurityMonitorService securityMonitor) : ControllerBase
 {
-    private readonly AppDbContext      _db                = db;
-    private readonly IUnitOfWork       _uow               = uow;
-    private readonly IConfiguration    _configuration     = configuration;
-    private readonly IHttpClientFactory _httpClientFactory = httpClientFactory;
+    private readonly AppDbContext           _db                = db;
+    private readonly IUnitOfWork            _uow               = uow;
+    private readonly IConfiguration         _configuration     = configuration;
+    private readonly IHttpClientFactory     _httpClientFactory = httpClientFactory;
+    private readonly SecurityMonitorService _securityMonitor   = securityMonitor;
 
     // ── POST /api/orders ──────────────────────────────────────────────────────
     [HttpPost]
@@ -119,17 +122,26 @@ public class OrdersController(
 
         var orderItems = new List<OrderItem>();
         decimal subTotal = 0;
+        int totalQty = 0;
 
         if (hasCartItems)
         {
             foreach (var ci in cart!.Items)
             {
                 if (ci.Product is null || !ci.Product.IsActive)
-                    continue;
+                    return BadRequest(new { message = "One or more items in your cart are no longer available." });
+
+                if (ci.Quantity < 1 || ci.Quantity > CartController.MaxQuantityPerProduct)
+                    return BadRequest(new { message = $"Quantity for '{ci.Product.Name}' must be between 1 and {CartController.MaxQuantityPerProduct}." });
 
                 var unitPrice = ci.Product.Price + (ci.Variant?.PriceModifier ?? 0);
                 var stock     = ci.Variant is not null ? ci.Variant.Stock : ci.Product.Stock;
-                var qty       = Math.Min(ci.Quantity, Math.Max(1, stock));
+                if (ci.Product.TrackInventory && (stock <= 0 || ci.Quantity > stock))
+                    return BadRequest(new { message = $"Insufficient stock for '{ci.Product.Name}'. Available: {Math.Max(0, stock)}." });
+
+                totalQty += ci.Quantity;
+                if (totalQty > CartController.MaxTotalCartItems)
+                    return BadRequest(new { message = $"Maximum {CartController.MaxTotalCartItems} items allowed per order." });
 
                 var primaryImage = ci.Product.Images
                     .FirstOrDefault(i => i.IsPrimary)?.Url
@@ -142,9 +154,9 @@ public class OrdersController(
                     ProductName     = ci.Product.Name,
                     VariantName     = ci.Variant is not null ? $"{ci.Variant.Name}: {ci.Variant.Value}" : null,
                     ProductImageUrl = primaryImage,
-                    Quantity        = qty,
+                    Quantity        = ci.Quantity,
                     UnitPrice       = unitPrice,
-                    TotalPrice      = unitPrice * qty
+                    TotalPrice      = unitPrice * ci.Quantity
                 };
 
                 orderItems.Add(oi);
@@ -154,24 +166,35 @@ public class OrdersController(
 
         if (orderItems.Count == 0 && hasReqItems)
         {
-            // Fallback: build order directly from request items
             foreach (var ri in req.Items!)
             {
+                if (ri.Quantity < 1 || ri.Quantity > CartController.MaxQuantityPerProduct)
+                    return BadRequest(new { message = $"Item quantity must be between 1 and {CartController.MaxQuantityPerProduct}." });
+
                 var product = await _db.Products
                     .Include(p => p.Images)
                     .Include(p => p.Variants)
                     .FirstOrDefaultAsync(p => p.Id == ri.ProductId);
 
                 if (product is null || !product.IsActive)
-                    continue;
+                    return BadRequest(new { message = "One or more requested products are not available." });
 
                 ProductVariant? variant = null;
                 if (ri.VariantId.HasValue && ri.VariantId.Value != Guid.Empty)
-                    variant = product.Variants.FirstOrDefault(v => v.Id == ri.VariantId.Value);
+                {
+                    variant = product.Variants.FirstOrDefault(v => v.Id == ri.VariantId.Value && v.IsActive);
+                    if (variant is null)
+                        return BadRequest(new { message = $"Selected variant for '{product.Name}' is no longer available." });
+                }
 
                 var unitPrice = product.Price + (variant?.PriceModifier ?? 0);
                 var stock     = variant is not null ? variant.Stock : product.Stock;
-                var qty       = Math.Min(ri.Quantity, Math.Max(1, stock));
+                if (product.TrackInventory && (stock <= 0 || ri.Quantity > stock))
+                    return BadRequest(new { message = $"Insufficient stock for '{product.Name}'. Available: {Math.Max(0, stock)}." });
+
+                totalQty += ri.Quantity;
+                if (totalQty > CartController.MaxTotalCartItems)
+                    return BadRequest(new { message = $"Maximum {CartController.MaxTotalCartItems} items allowed per order." });
 
                 var primaryImage = product.Images
                     .FirstOrDefault(i => i.IsPrimary)?.Url
@@ -184,9 +207,9 @@ public class OrdersController(
                     ProductName     = product.Name,
                     VariantName     = variant is not null ? $"{variant.Name}: {variant.Value}" : null,
                     ProductImageUrl = primaryImage,
-                    Quantity        = qty,
+                    Quantity        = ri.Quantity,
                     UnitPrice       = unitPrice,
-                    TotalPrice      = unitPrice * qty
+                    TotalPrice      = unitPrice * ri.Quantity
                 };
 
                 orderItems.Add(oi);
@@ -195,38 +218,27 @@ public class OrdersController(
         }
 
         if (orderItems.Count == 0)
-        {
-            var fallbackProduct = await _db.Products.Include(p => p.Images).FirstOrDefaultAsync(p => p.IsActive);
-            if (fallbackProduct is not null)
-            {
-                var oi = new OrderItem
-                {
-                    ProductId       = fallbackProduct.Id,
-                    ProductName     = fallbackProduct.Name,
-                    ProductImageUrl = fallbackProduct.Images.FirstOrDefault()?.Url,
-                    Quantity        = 1,
-                    UnitPrice       = fallbackProduct.Price,
-                    TotalPrice      = fallbackProduct.Price
-                };
-                orderItems.Add(oi);
-                subTotal += oi.TotalPrice;
-            }
-            else
-            {
-                return BadRequest(new { message = "No valid products found for this order." });
-            }
-        }
+            return BadRequest(new { message = "No valid products found for this order." });
 
-        // 3. Apply coupon
-        decimal discount = 0;
-        string? couponCode = null;
-        if (!string.IsNullOrWhiteSpace(req.CouponCode) && req.CouponCode.Trim() != "null" && req.CouponCode.Trim() != "undefined")
+        // 3. Apply coupon & persist order atomically inside a transaction
+        var strategy = _db.Database.CreateExecutionStrategy();
+        return await strategy.ExecuteAsync<IActionResult>(async () =>
         {
-            var coupon = await _db.Coupons
-                .FirstOrDefaultAsync(c => c.Code == req.CouponCode.ToUpper() && c.IsActive);
+            await using var tx = await _db.Database.BeginTransactionAsync();
 
-            if (coupon is not null)
+            decimal discount = 0;
+            string? couponCode = null;
+            if (!string.IsNullOrWhiteSpace(req.CouponCode) &&
+                req.CouponCode.Trim() != "null" &&
+                req.CouponCode.Trim() != "undefined")
             {
+                var normalizedCode = req.CouponCode.Trim().ToUpperInvariant();
+                var coupon = await _db.Coupons
+                    .FirstOrDefaultAsync(c => c.Code == normalizedCode && c.IsActive);
+
+                if (coupon is null)
+                    return BadRequest(new { message = "Invalid or inactive coupon code." });
+
                 if (coupon.ExpiresAt.HasValue && coupon.ExpiresAt < DateTime.UtcNow)
                     return BadRequest(new { message = "This coupon has expired." });
 
@@ -234,10 +246,7 @@ public class OrdersController(
                     return BadRequest(new { message = "This coupon has reached its usage limit." });
 
                 if (coupon.MinOrderValue.HasValue && subTotal < coupon.MinOrderValue)
-                    return BadRequest(new
-                    {
-                        message = $"Minimum order value for this coupon is ₹{coupon.MinOrderValue}."
-                    });
+                    return BadRequest(new { message = $"Minimum order value for this coupon is ₹{coupon.MinOrderValue}." });
 
                 discount = coupon.DiscountType == DiscountType.Percentage
                     ? Math.Round(subTotal * coupon.DiscountValue / 100, 2)
@@ -246,73 +255,81 @@ public class OrdersController(
                 if (coupon.MaxDiscountAmount.HasValue)
                     discount = Math.Min(discount, coupon.MaxDiscountAmount.Value);
 
-                coupon.UsedCount++;
-                _db.Coupons.Update(coupon);
+                discount = Math.Min(discount, subTotal);
+
+                // Atomic conditional increment to prevent concurrent coupon over-redemption
+                var couponRows = await _db.Database.ExecuteSqlInterpolatedAsync(
+                    $@"UPDATE ""Coupons"" SET ""UsedCount"" = ""UsedCount"" + 1 WHERE ""Id"" = {coupon.Id} AND (""UsageLimit"" IS NULL OR ""UsedCount"" < ""UsageLimit"")");
+                if (couponRows == 0)
+                    return BadRequest(new { message = "This coupon has reached its usage limit." });
+
                 couponCode = coupon.Code;
             }
-        }
 
-        var shippingCost = subTotal > 5000 ? 0 : 99; // complimentary white-glove above ₹5,000
-        var totalAmount  = subTotal - discount + shippingCost;
-
-        var order = new Order
-        {
-            OrderNumber         = OrderNumberService.Generate(),
-            UserId              = userId,
-            Status              = OrderStatus.Confirmed,
-            PaymentStatus       = req.PaymentMethod == PaymentMethod.CashOnDelivery ? PaymentStatus.Pending : PaymentStatus.Completed,
-            PaymentMethod       = req.PaymentMethod,
-            SubTotal            = subTotal,
-            Discount            = discount,
-            ShippingCost        = shippingCost,
-            Tax                 = 0,
-            TotalAmount         = totalAmount,
-            CouponCode          = couponCode,
-            ShippingName        = address.FullName,
-            ShippingPhone       = address.PhoneNumber,
-            ShippingAddressLine1 = address.AddressLine1,
-            ShippingAddressLine2 = address.AddressLine2,
-            ShippingCity        = address.City,
-            ShippingState       = address.State,
-            ShippingPinCode     = address.PinCode,
-            ShippingCountry     = address.Country,
-            Items               = orderItems
-        };
-
-        // 4. Deduct stock
-        foreach (var oi in orderItems)
-        {
-            if (oi.VariantId.HasValue)
+            // 4. Atomic stock deduction (prevents overselling under concurrent checkouts)
+            foreach (var oi in orderItems)
             {
-                var variant = await _db.ProductVariants.FindAsync(oi.VariantId.Value);
-                if (variant is not null)
+                if (oi.VariantId.HasValue)
                 {
-                    variant.Stock = Math.Max(0, variant.Stock - oi.Quantity);
-                    _db.ProductVariants.Update(variant);
+                    var rows = await _db.Database.ExecuteSqlInterpolatedAsync(
+                        $@"UPDATE ""ProductVariants"" SET ""Stock"" = ""Stock"" - {oi.Quantity} WHERE ""Id"" = {oi.VariantId.Value} AND ""Stock"" >= {oi.Quantity}");
+                    if (rows == 0)
+                    {
+                        await tx.RollbackAsync();
+                        return BadRequest(new { message = $"Insufficient stock for '{oi.ProductName}' ({oi.VariantName})." });
+                    }
+                }
+                else
+                {
+                    var rows = await _db.Database.ExecuteSqlInterpolatedAsync(
+                        $@"UPDATE ""Products"" SET ""Stock"" = ""Stock"" - {oi.Quantity} WHERE ""Id"" = {oi.ProductId} AND (""TrackInventory"" = false OR ""Stock"" >= {oi.Quantity})");
+                    if (rows == 0)
+                    {
+                        await tx.RollbackAsync();
+                        return BadRequest(new { message = $"Insufficient stock for '{oi.ProductName}'." });
+                    }
                 }
             }
-            else
+
+            var shippingCost = subTotal > 5000 ? 0 : 99;
+            var totalAmount  = Math.Max(0, subTotal - discount + shippingCost);
+            var isCod        = req.PaymentMethod == PaymentMethod.CashOnDelivery;
+
+            var order = new Order
             {
-                var product = await _db.Products.FindAsync(oi.ProductId);
-                if (product is not null)
-                {
-                    product.Stock = Math.Max(0, product.Stock - oi.Quantity);
-                    _db.Products.Update(product);
-                }
+                OrderNumber          = OrderNumberService.Generate(),
+                UserId               = userId,
+                Status               = isCod ? OrderStatus.Confirmed : OrderStatus.PaymentPending,
+                PaymentStatus        = PaymentStatus.Pending, // Online orders stay Pending until verified via HMAC
+                PaymentMethod        = req.PaymentMethod,
+                SubTotal             = subTotal,
+                Discount             = discount,
+                ShippingCost         = shippingCost,
+                Tax                  = 0,
+                TotalAmount          = totalAmount,
+                CouponCode           = couponCode,
+                ShippingName         = address.FullName,
+                ShippingPhone        = address.PhoneNumber,
+                ShippingAddressLine1 = address.AddressLine1,
+                ShippingAddressLine2 = address.AddressLine2,
+                ShippingCity         = address.City,
+                ShippingState        = address.State,
+                ShippingPinCode      = address.PinCode,
+                ShippingCountry      = address.Country,
+                Items                = orderItems
+            };
+
+            if (cart is not null && cart.Items.Any())
+            {
+                _db.CartItems.RemoveRange(cart.Items);
             }
-        }
 
-        // 5. Clear cart if exists
-        if (cart is not null && cart.Items.Any())
-        {
-            _db.CartItems.RemoveRange(cart.Items);
-        }
+            await _db.Orders.AddAsync(order);
+            await _uow.SaveChangesAsync();
+            await tx.CommitAsync();
 
-        await _db.Orders.AddAsync(order);
-        await _uow.SaveChangesAsync();
-
-        return CreatedAtAction(nameof(GetOrder), new { id = order.Id },
-            MapOrderDto(order));
+            return CreatedAtAction(nameof(GetOrder), new { id = order.Id }, MapOrderDto(order));
+        });
     }
 
     // ── POST /api/orders/{id}/cancel ──────────────────────────────────────────
@@ -320,7 +337,9 @@ public class OrdersController(
     public async Task<IActionResult> CancelOrder(Guid id)
     {
         var userId = GetCurrentUserId();
-        var order = await _db.Orders.FirstOrDefaultAsync(o => o.Id == id && o.UserId == userId);
+        var order = await _db.Orders
+            .Include(o => o.Items)
+            .FirstOrDefaultAsync(o => o.Id == id && o.UserId == userId);
         if (order is null) return NotFound(new { message = "Order not found." });
 
         if (order.Status != OrderStatus.Pending && order.Status != OrderStatus.Confirmed && order.Status != OrderStatus.PaymentPending)
@@ -328,6 +347,29 @@ public class OrdersController(
 
         order.Status = OrderStatus.Cancelled;
         order.UpdatedAt = DateTime.UtcNow;
+
+        foreach (var item in order.Items)
+        {
+            if (item.VariantId.HasValue)
+            {
+                var variant = await _db.ProductVariants.FindAsync(item.VariantId.Value);
+                if (variant is not null)
+                {
+                    variant.Stock += item.Quantity;
+                    _db.ProductVariants.Update(variant);
+                }
+            }
+            else
+            {
+                var product = await _db.Products.FindAsync(item.ProductId);
+                if (product is not null)
+                {
+                    product.Stock += item.Quantity;
+                    _db.Products.Update(product);
+                }
+            }
+        }
+
         _db.Orders.Update(order);
         await _uow.SaveChangesAsync();
 
@@ -391,8 +433,11 @@ public class OrdersController(
         if (order.PaymentStatus == PaymentStatus.Completed)
             return BadRequest(new { message = "Order is already paid." });
 
-        var keyId     = _configuration["Razorpay:KeyId"] ?? "";
-        var keySecret = _configuration["Razorpay:KeySecret"] ?? "";
+        var keyId     = _configuration["Razorpay:KeyId"];
+        var keySecret = _configuration["Razorpay:KeySecret"];
+        if (string.IsNullOrWhiteSpace(keyId) || string.IsNullOrWhiteSpace(keySecret))
+            return StatusCode(StatusCodes.Status503ServiceUnavailable,
+                new { message = "Online payment gateway is not configured." });
 
         // Amount in paise (INR smallest unit)
         var amountPaise = (long)(order.TotalAmount * 100);
@@ -447,15 +492,47 @@ public class OrdersController(
 
         if (order is null) return NotFound(new { message = "Order not found." });
 
-        // Validate HMAC-SHA256 signature
-        var keySecret = _configuration["Razorpay:KeySecret"] ?? "";
+        // Validate HMAC-SHA256 signature using constant-time comparison
+        var keySecret = _configuration["Razorpay:KeySecret"];
+        if (string.IsNullOrWhiteSpace(keySecret))
+            return StatusCode(StatusCodes.Status503ServiceUnavailable,
+                new { message = "Online payment gateway is not configured." });
+
+        if (string.IsNullOrWhiteSpace(req.RazorpayOrderId) ||
+            !string.Equals(order.RazorpayOrderId, req.RazorpayOrderId, StringComparison.Ordinal))
+        {
+            var ip = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+            _securityMonitor.RecordEvent("High", "Payment Tampering Attempt",
+                $"Razorpay Order ID Mismatch on Order #{order.OrderNumber}",
+                $"User {userId} submitted mismatched RazorpayOrderId during payment verification.",
+                ip, order.OrderNumber);
+            return BadRequest(new { message = "Razorpay order mismatch." });
+        }
+
         var payload   = $"{req.RazorpayOrderId}|{req.RazorpayPaymentId}";
         using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(keySecret));
-        var hash        = hmac.ComputeHash(Encoding.UTF8.GetBytes(payload));
-        var expectedSig = BitConverter.ToString(hash).Replace("-", "").ToLower();
+        var expectedHash = hmac.ComputeHash(Encoding.UTF8.GetBytes(payload));
 
-        if (!string.Equals(expectedSig, req.RazorpaySignature, StringComparison.OrdinalIgnoreCase))
+        byte[] providedHash;
+        try
+        {
+            providedHash = Convert.FromHexString(req.RazorpaySignature ?? string.Empty);
+        }
+        catch (FormatException)
+        {
             return BadRequest(new { message = "Payment signature verification failed." });
+        }
+
+        if (providedHash.Length != expectedHash.Length ||
+            !CryptographicOperations.FixedTimeEquals(expectedHash, providedHash))
+        {
+            var ip = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+            _securityMonitor.RecordEvent("Critical", "Payment Signature Tampering",
+                $"Invalid HMAC Signature on Order #{order.OrderNumber}",
+                $"Invalid Razorpay signature submitted by user {userId}.",
+                ip, order.OrderNumber);
+            return BadRequest(new { message = "Payment signature verification failed." });
+        }
 
         order.PaymentId     = req.RazorpayPaymentId;
         order.PaymentStatus = PaymentStatus.Completed;

@@ -1,22 +1,20 @@
-using System.Collections.Concurrent;
+using EShop.API.Services;
 using Microsoft.Extensions.Caching.Memory;
 
 namespace EShop.API.Middleware;
 
 /// <summary>
 /// IP-based rate limiting middleware using MemoryCache.
-/// Rules:
-///   • Auth endpoints (/api/auth): 5 requests / minute
-///   • All other endpoints:       100 requests / minute
-///   • Hard block: >500 requests / 10 minutes → IP blocked for 1 hour
+/// Relies on ForwardedHeaders middleware populating RemoteIpAddress rather than raw client headers.
 /// </summary>
-public class RateLimitingMiddleware(RequestDelegate next, IMemoryCache cache)
+public class RateLimitingMiddleware(RequestDelegate next, IMemoryCache cache, SecurityMonitorService securityMonitor)
 {
-    private readonly RequestDelegate _next  = next;
-    private readonly IMemoryCache    _cache = cache;
+    private readonly RequestDelegate        _next            = next;
+    private readonly IMemoryCache           _cache           = cache;
+    private readonly SecurityMonitorService _securityMonitor = securityMonitor;
 
     // Rate-limit windows
-    private const int AuthLimit          = 5;
+    private const int AuthLimit          = 20;
     private const int DefaultLimit       = 100;
     private static readonly TimeSpan Window        = TimeSpan.FromMinutes(1);
 
@@ -35,11 +33,8 @@ public class RateLimitingMiddleware(RequestDelegate next, IMemoryCache cache)
             return;
         }
 
-        // Extract real client IP (Cloudflare / Reverse Proxy support)
-        var ip = context.Request.Headers["CF-Connecting-IP"].FirstOrDefault()
-                 ?? context.Request.Headers["X-Forwarded-For"].FirstOrDefault()?.Split(',')[0].Trim()
-                 ?? context.Connection.RemoteIpAddress?.ToString()
-                 ?? "unknown";
+        // Use RemoteIpAddress resolved by UseForwardedHeaders (prevents header spoofing)
+        var ip = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
 
         // Check if IP is currently hard-blocked
         if (_cache.TryGetValue($"block:{ip}", out _))
@@ -70,6 +65,16 @@ public class RateLimitingMiddleware(RequestDelegate next, IMemoryCache cache)
 
         if (count > limit)
         {
+            if (count == limit + 1)
+            {
+                _securityMonitor.RecordEvent(
+                    severity: isAuthPath ? "High" : "Warning",
+                    category: "Rate Limit Violation",
+                    title: $"Rate Limit Exceeded on {path}",
+                    description: $"IP {ip} exceeded {limit} requests/minute on {path}.",
+                    ipAddress: ip,
+                    referenceId: $"RL-{ip}");
+            }
             if (!context.Response.HasStarted)
             {
                 context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
@@ -91,6 +96,13 @@ public class RateLimitingMiddleware(RequestDelegate next, IMemoryCache cache)
         if (blockCount > BlockThreshold)
         {
             _cache.Set($"block:{ip}", true, BlockDuration);
+            _securityMonitor.RecordEvent(
+                severity: "Critical",
+                category: "Automated Abuse / IP Block",
+                title: $"IP {ip} Auto-Blocked for 1 Hour",
+                description: $"IP {ip} exceeded {BlockThreshold} requests within 10 minutes and was temporarily blocked.",
+                ipAddress: ip,
+                referenceId: $"BLK-{ip}");
             if (!context.Response.HasStarted)
             {
                 context.Response.StatusCode = StatusCodes.Status429TooManyRequests;

@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace EShop.Core.DTOs;
 
 public record CartDto(
@@ -7,7 +9,9 @@ public record CartDto(
     int TotalItems
 )
 {
+    [JsonIgnore]
     public decimal Subtotal => SubTotal;
+    [JsonIgnore]
     public int ItemCount => TotalItems;
 }
 

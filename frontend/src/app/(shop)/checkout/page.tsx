@@ -283,8 +283,29 @@ export default function CheckoutPage() {
                   <Input
                     label="PIN Code"
                     placeholder="400001"
+                    maxLength={6}
                     value={newAddress.pinCode}
-                    onChange={(e) => setNewAddress({ ...newAddress, pinCode: e.target.value })}
+                    onChange={async (e) => {
+                      const val = e.target.value.replace(/\D/g, '').slice(0, 6)
+                      setNewAddress((prev) => ({ ...prev, pinCode: val }))
+                      if (val.length === 6) {
+                        try {
+                          const res = await fetch(`https://api.postalpincode.in/pincode/${val}`)
+                          const data = await res.json()
+                          const postOffice = data?.[0]?.PostOffice?.[0]
+                          if (postOffice) {
+                            setNewAddress((prev) => ({
+                              ...prev,
+                              pinCode: val,
+                              city: postOffice.District || prev.city,
+                              state: postOffice.State || prev.state,
+                            }))
+                          }
+                        } catch {
+                          // Silently ignore if offline
+                        }
+                      }
+                    }}
                     required
                   />
                 </div>

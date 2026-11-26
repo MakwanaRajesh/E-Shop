@@ -1,3 +1,4 @@
+using EShop.API.Services;
 using EShop.Core.DTOs;
 using EShop.Core.Enums;
 using EShop.Infrastructure.Data;
@@ -10,9 +11,10 @@ namespace EShop.API.Controllers;
 [ApiController]
 [Route("api/admin")]
 [Authorize(Roles = "Admin")]
-public class AdminController(AppDbContext db) : ControllerBase
+public class AdminController(AppDbContext db, SecurityMonitorService securityMonitor) : ControllerBase
 {
-    private readonly AppDbContext _db = db;
+    private readonly AppDbContext           _db              = db;
+    private readonly SecurityMonitorService _securityMonitor = securityMonitor;
 
     // ── GET /api/admin/dashboard ──────────────────────────────────────────────
     [HttpGet("dashboard")]
@@ -138,27 +140,70 @@ public class AdminController(AppDbContext db) : ControllerBase
     [HttpPatch("orders/{id:guid}/status")]
     public async Task<IActionResult> UpdateOrderStatus(Guid id, [FromBody] UpdateOrderStatusRequest req)
     {
-        var order = await _db.Orders.FindAsync(id);
+        var order = await _db.Orders
+            .Include(o => o.Items)
+            .FirstOrDefaultAsync(o => o.Id == id);
         if (order is null) return NotFound(new { message = "Order not found." });
 
         if (!Enum.TryParse<OrderStatus>(req.Status, true, out var newStatus))
             return BadRequest(new { message = $"Invalid status '{req.Status}'." });
 
+        var previousStatus = order.Status;
         order.Status = newStatus;
 
-        // Auto-set timestamps
+        // Auto-set timestamps & payment status for COD fulfillment
         if (newStatus == OrderStatus.Shipped && order.ShippedAt is null)
             order.ShippedAt = DateTime.UtcNow;
-        if (newStatus == OrderStatus.Delivered && order.DeliveredAt is null)
-            order.DeliveredAt = DateTime.UtcNow;
+        if (newStatus == OrderStatus.Delivered)
+        {
+            order.DeliveredAt ??= DateTime.UtcNow;
+            if (order.PaymentMethod == PaymentMethod.CashOnDelivery && order.PaymentStatus != PaymentStatus.Completed)
+            {
+                order.PaymentStatus = PaymentStatus.Completed;
+                order.PaidAt ??= DateTime.UtcNow;
+            }
+        }
+        if (newStatus == OrderStatus.Refunded)
+            order.PaymentStatus = PaymentStatus.Refunded;
+
+        // Restore inventory if transitioning to Cancelled from a non-cancelled status
+        if (newStatus == OrderStatus.Cancelled && previousStatus != OrderStatus.Cancelled)
+        {
+            foreach (var item in order.Items)
+            {
+                if (item.VariantId.HasValue)
+                {
+                    var variant = await _db.ProductVariants.FindAsync(item.VariantId.Value);
+                    if (variant is not null)
+                    {
+                        variant.Stock += item.Quantity;
+                        _db.ProductVariants.Update(variant);
+                    }
+                }
+                else
+                {
+                    var product = await _db.Products.FindAsync(item.ProductId);
+                    if (product is not null)
+                    {
+                        product.Stock += item.Quantity;
+                        _db.Products.Update(product);
+                    }
+                }
+            }
+        }
 
         if (!string.IsNullOrWhiteSpace(req.TrackingNumber))
-            order.TrackingNumber = req.TrackingNumber;
+            order.TrackingNumber = req.TrackingNumber.Trim();
 
         _db.Orders.Update(order);
         await _db.SaveChangesAsync();
 
-        return Ok(new { message = "Order status updated.", status = newStatus.ToString() });
+        return Ok(new
+        {
+            message       = "Order status updated.",
+            status        = newStatus.ToString(),
+            paymentStatus = order.PaymentStatus.ToString()
+        });
     }
 
     // ── GET /api/admin/products ───────────────────────────────────────────────
@@ -197,6 +242,8 @@ public class AdminController(AppDbContext db) : ControllerBase
             p.Name,
             p.Slug,
             p.SKU,
+            p.ShortDescription,
+            p.Description,
             p.Price,
             p.CompareAtPrice,
             p.Stock,
@@ -296,16 +343,34 @@ public class AdminController(AppDbContext db) : ControllerBase
         return Ok(new { Items = dtos, TotalCount = total, Page = page, PageSize = pageSize });
     }
 
-    // ── Static in-memory resolved alerts ledger ──────────────────────────────
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (bool IsResolved, string ActionTaken, DateTime ResolvedAt)> _resolvedAlerts = new();
-
     // ── GET /api/admin/security/alerts ────────────────────────────────────────
     [HttpGet("security/alerts")]
     public async Task<IActionResult> GetSecurityAlerts()
     {
         var alerts = new List<object>();
+        int unreadCount = 0;
 
-        // 1. High value order checks (Orders >= 50,000 INR)
+        // 1. Live runtime security events (brute-force lockouts, rate-limit violations, payment tampering)
+        foreach (var evt in _securityMonitor.GetRecentEvents())
+        {
+            var resolved = _securityMonitor.IsResolved(evt.Id, out var actionTaken);
+            if (!resolved) unreadCount++;
+            alerts.Add(new
+            {
+                evt.Id,
+                evt.Severity,
+                evt.Category,
+                evt.Title,
+                evt.Description,
+                evt.Timestamp,
+                evt.IpAddress,
+                evt.ReferenceId,
+                IsResolved  = resolved,
+                ActionTaken = actionTaken
+            });
+        }
+
+        // 2. High value order checks (Orders >= 50,000 INR)
         var highValueOrders = await _db.Orders
             .AsNoTracking()
             .Include(o => o.User)
@@ -317,7 +382,8 @@ public class AdminController(AppDbContext db) : ControllerBase
         foreach (var ord in highValueOrders)
         {
             var alertId = $"SEC-HV-{ord.OrderNumber}";
-            var resolved = _resolvedAlerts.TryGetValue(alertId, out var resInfo) && resInfo.IsResolved;
+            var resolved = _securityMonitor.IsResolved(alertId, out var actionTaken);
+            if (!resolved) unreadCount++;
 
             alerts.Add(new
             {
@@ -327,14 +393,14 @@ public class AdminController(AppDbContext db) : ControllerBase
                 Title       = $"Large Order #{ord.OrderNumber} (₹{ord.TotalAmount:N0})",
                 Description = $"Order by {ord.User.FirstName} {ord.User.LastName} ({ord.User.Email}) exceeds high-value threshold (₹50,000). Recommended verification before fulfillment.",
                 Timestamp   = ord.CreatedAt,
-                IpAddress   = "152.58.12.98",
+                IpAddress   = "ORDER-AUDIT",
                 ReferenceId = ord.OrderNumber,
                 IsResolved  = resolved,
-                ActionTaken = resolved ? resInfo.ActionTaken : null
+                ActionTaken = actionTaken
             });
         }
 
-        // 2. High order velocity / pending orders check
+        // 3. High order velocity / pending orders check
         var pendingOrdersCount = await _db.Orders
             .Where(o => o.Status == OrderStatus.Pending || o.Status == OrderStatus.PaymentPending)
             .CountAsync();
@@ -342,71 +408,35 @@ public class AdminController(AppDbContext db) : ControllerBase
         if (pendingOrdersCount >= 3)
         {
             var alertId = "SEC-VELOCITY-01";
-            var resolved = _resolvedAlerts.TryGetValue(alertId, out var resInfo) && resInfo.IsResolved;
+            var resolved = _securityMonitor.IsResolved(alertId, out var actionTaken);
+            if (!resolved) unreadCount++;
             alerts.Add(new
             {
                 Id          = alertId,
                 Severity    = "Medium",
                 Category    = "Order Velocity Spike",
                 Title       = $"{pendingOrdersCount} Unconfirmed Orders Awaiting Processing",
-                Description = "A sudden cluster of pending checkouts has been detected within the last billing cycle. Ensure inventory locks are consistent.",
-                Timestamp   = DateTime.UtcNow.AddMinutes(-25),
-                IpAddress   = "103.21.244.0/24",
+                Description = "Multiple pending checkouts detected awaiting confirmation or payment verification.",
+                Timestamp   = DateTime.UtcNow,
+                IpAddress   = "INTERNAL-SYSTEM",
                 ReferenceId = "CLUSTER-VELOCITY",
                 IsResolved  = resolved,
-                ActionTaken = resolved ? resInfo.ActionTaken : null
+                ActionTaken = actionTaken
             });
         }
 
-        // 3. Automated brute-force / auth probe detection
-        {
-            var alertId = "SEC-AUTH-PROBE-88";
-            var resolved = _resolvedAlerts.TryGetValue(alertId, out var resInfo) && resInfo.IsResolved;
-            alerts.Add(new
-            {
-                Id          = alertId,
-                Severity    = "Critical",
-                Category    = "Suspicious Access Attempt",
-                Title       = "Repeated Failed Administrative Login Attempts",
-                Description = "6 failed authentication attempts from untrusted IP 185.220.101.45 targeting admin endpoint. Automatic rate limit applied.",
-                Timestamp   = DateTime.UtcNow.AddHours(-1),
-                IpAddress   = "185.220.101.45 (Tor Exit Node / VPN)",
-                ReferenceId = "IP-185.220.101.45",
-                IsResolved  = resolved,
-                ActionTaken = resolved ? resInfo.ActionTaken : null
-            });
-        }
-
-        // 4. Cart Limit & Hoarding Violation Attempt
-        {
-            var alertId = "SEC-CART-LIMIT-09";
-            var resolved = _resolvedAlerts.TryGetValue(alertId, out var resInfo) && resInfo.IsResolved;
-            alerts.Add(new
-            {
-                Id          = alertId,
-                Severity    = "Warning",
-                Category    = "Cart Rule Anomaly",
-                Title       = "Attempted Cart Hoarding (Exceeded 10 Units Limit)",
-                Description = "Guest session attempted to add 15 units of Supima Cotton Tee in a single payload. Request was intercepted and clamped to 10.",
-                Timestamp   = DateTime.UtcNow.AddHours(-3),
-                IpAddress   = "49.36.128.14",
-                ReferenceId = "CART-SURGE-4936",
-                IsResolved  = resolved,
-                ActionTaken = resolved ? resInfo.ActionTaken : null
-            });
-        }
-
-        // 5. Critical inventory depletion watch
+        // 4. Critical inventory depletion watch
         var criticallyLow = await _db.Products
             .AsNoTracking()
             .Where(p => p.IsActive && p.TrackInventory && p.Stock <= 2)
-            .Take(3)
+            .Take(5)
             .ToListAsync();
 
         foreach (var p in criticallyLow)
         {
             var alertId = $"SEC-STOCK-{p.Id}";
-            var resolved = _resolvedAlerts.TryGetValue(alertId, out var resInfo) && resInfo.IsResolved;
+            var resolved = _securityMonitor.IsResolved(alertId, out var actionTaken);
+            if (!resolved) unreadCount++;
             alerts.Add(new
             {
                 Id          = alertId,
@@ -418,11 +448,9 @@ public class AdminController(AppDbContext db) : ControllerBase
                 IpAddress   = "INTERNAL-SYSTEM",
                 ReferenceId = p.Slug,
                 IsResolved  = resolved,
-                ActionTaken = resolved ? resInfo.ActionTaken : null
+                ActionTaken = actionTaken
             });
         }
-
-        var unreadCount = alerts.Count(a => !(bool)((dynamic)a).IsResolved);
 
         return Ok(new
         {
@@ -437,7 +465,7 @@ public class AdminController(AppDbContext db) : ControllerBase
     public IActionResult ResolveSecurityAlert(string id, [FromBody] ResolveAlertRequest? req)
     {
         var action = req?.Action ?? "Marked as Resolved by Administrator";
-        _resolvedAlerts[id] = (true, action, DateTime.UtcNow);
+        _securityMonitor.Resolve(id, action);
         return Ok(new { message = $"Alert {id} marked as resolved.", actionTaken = action });
     }
 
@@ -448,7 +476,15 @@ public class AdminController(AppDbContext db) : ControllerBase
         var user = await _db.Users.FindAsync(id);
         if (user is null) return NotFound(new { message = "User not found." });
 
+        if (user.Role == UserRole.Admin)
+            return BadRequest(new { message = "Administrator accounts cannot be suspended via this endpoint." });
+
         user.IsActive = !user.IsActive;
+        if (!user.IsActive)
+        {
+            user.RefreshToken = null;
+            user.RefreshTokenExpiry = null;
+        }
         _db.Users.Update(user);
         await _db.SaveChangesAsync();
 

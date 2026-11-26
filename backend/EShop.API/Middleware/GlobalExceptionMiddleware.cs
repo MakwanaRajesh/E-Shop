@@ -9,9 +9,10 @@ namespace EShop.API.Middleware;
 /// Catches all unhandled exceptions in the pipeline and returns a structured
 /// ProblemDetails JSON response instead of leaking stack traces.
 /// </summary>
-public class GlobalExceptionMiddleware(RequestDelegate next)
+public class GlobalExceptionMiddleware(RequestDelegate next, IHostEnvironment env)
 {
-    private readonly RequestDelegate _next = next;
+    private readonly RequestDelegate  _next = next;
+    private readonly IHostEnvironment _env  = env;
 
     public async Task InvokeAsync(HttpContext context)
     {
@@ -21,21 +22,21 @@ public class GlobalExceptionMiddleware(RequestDelegate next)
         }
         catch (Exception ex)
         {
-            await HandleExceptionAsync(context, ex);
+            await HandleExceptionAsync(context, ex, _env.IsDevelopment());
         }
     }
 
-    private static async Task HandleExceptionAsync(HttpContext context, Exception exception)
+    private static async Task HandleExceptionAsync(HttpContext context, Exception exception, bool isDevelopment)
     {
         if (context.Response.HasStarted) return;
 
         var (statusCode, title) = exception switch
         {
-            FluentValidation.ValidationException => (HttpStatusCode.BadRequest,       "Validation failed"),
-            UnauthorizedAccessException          => (HttpStatusCode.Unauthorized,     "Unauthorised"),
-            KeyNotFoundException                 => (HttpStatusCode.NotFound,         "Resource not found"),
-            InvalidOperationException            => (HttpStatusCode.BadRequest,       "Invalid operation"),
-            ArgumentException                    => (HttpStatusCode.BadRequest,       "Invalid argument"),
+            FluentValidation.ValidationException => (HttpStatusCode.BadRequest,          "Validation failed"),
+            UnauthorizedAccessException          => (HttpStatusCode.Unauthorized,        "Unauthorised"),
+            KeyNotFoundException                 => (HttpStatusCode.NotFound,            "Resource not found"),
+            InvalidOperationException            => (HttpStatusCode.BadRequest,          "Invalid operation"),
+            ArgumentException                    => (HttpStatusCode.BadRequest,          "Invalid argument"),
             _                                    => (HttpStatusCode.InternalServerError, "An unexpected error occurred")
         };
 
@@ -53,11 +54,15 @@ public class GlobalExceptionMiddleware(RequestDelegate next)
         if (exception is FluentValidation.ValidationException validationEx)
             errors = validationEx.Errors.Select(e => e.ErrorMessage).ToList();
 
+        var safeDetail = isDevelopment || statusCode != HttpStatusCode.InternalServerError
+            ? (statusCode == HttpStatusCode.InternalServerError ? exception.Message : title)
+            : "An internal server error occurred. Please contact support if the issue persists.";
+
         var problem = new ProblemDetails
         {
             Status   = (int)statusCode,
             Title    = title,
-            Detail   = exception.Message,
+            Detail   = safeDetail,
             Instance = context.Request.Path
         };
 

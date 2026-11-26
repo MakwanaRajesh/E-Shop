@@ -45,16 +45,20 @@ import {
   Filter,
 } from 'lucide-react'
 import { useAuthStore } from '@/store/auth'
+import { useAuthModalStore } from '@/store/authModal'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Input } from '@/components/ui/Input'
 import api from '@/lib/api'
-import toast from 'react-hot-toast'
+import toast, { Toaster } from 'react-hot-toast'
+import { AuthModal } from '@/components/auth/AuthModal'
 import type { DashboardStats, Order, ProductListItem, Category } from '@/types'
 import { formatCurrency, formatDate } from '@/lib/utils'
 
 const safeStr = (s?: string | null) => (s ?? '').toLowerCase().trim()
+const isValidImageUrl = (url?: string | null) =>
+  !!url && (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('/'))
 
 interface CustomerDto {
   id: string
@@ -77,7 +81,8 @@ interface CouponDto {
   minOrderValue?: number
   maxDiscountAmount?: number
   usageLimit?: number
-  timesUsed: number
+  timesUsed?: number
+  usedCount?: number
   isActive: boolean
   expiresAt?: string
 }
@@ -109,7 +114,9 @@ interface BulkProductRow {
 
 function AdminContent() {
   const { user, isAuthenticated, logout } = useAuthStore()
+  const { open: openAuthModal } = useAuthModalStore()
   const [mounted, setMounted] = React.useState(false)
+  const [portalError, setPortalError] = React.useState<string | null>(null)
 
   React.useEffect(() => {
     setMounted(true)
@@ -208,9 +215,21 @@ function AdminContent() {
   })
   const [isSubmittingProd, setIsSubmittingProd] = React.useState(false)
 
-  // Quick edit form state
-  const [editPrice, setEditPrice] = React.useState('')
-  const [editStock, setEditStock] = React.useState('')
+  // Full edit product form state
+  const [editForm, setEditForm] = React.useState({
+    name: '',
+    categoryId: '',
+    price: '',
+    compareAtPrice: '',
+    stock: '',
+    sku: '',
+    tags: '',
+    shortDescription: '',
+    description: '',
+    imageUrl: '',
+    isFeatured: false,
+    isActive: true,
+  })
   const [isUpdatingProd, setIsUpdatingProd] = React.useState(false)
 
   // Order status update state
@@ -246,16 +265,33 @@ function AdminContent() {
   const fetchAllData = React.useCallback(async () => {
     if (!isAuthenticated || !isAdmin) return
     setLoading(true)
+    setPortalError(null)
     try {
+      const failedEndpoints: string[] = []
       const [dashRes, ordRes, prodRes, catRes, coupRes, custRes, alertRes] = await Promise.all([
-        api.get<DashboardStats>('/api/admin/dashboard').catch(() => null),
-        api.get<any>('/api/admin/orders?pageSize=100').catch(() => null),
-        api.get<any>('/api/admin/products?pageSize=100').catch(() => null),
+        api.get<DashboardStats>('/api/admin/dashboard').catch((e) => {
+          failedEndpoints.push(`dashboard (${e?.statusCode || 'network'})`)
+          return null
+        }),
+        api.get<any>('/api/admin/orders?pageSize=100').catch((e) => {
+          failedEndpoints.push(`orders (${e?.statusCode || 'network'})`)
+          return null
+        }),
+        api.get<any>('/api/admin/products?pageSize=100').catch((e) => {
+          failedEndpoints.push(`products (${e?.statusCode || 'network'})`)
+          return null
+        }),
         api.get<Category[]>('/api/categories').catch(() => null),
         api.get<CouponDto[]>('/api/coupons').catch(() => null),
         api.get<any>('/api/admin/customers?pageSize=100').catch(() => null),
         api.get<any>('/api/admin/security/alerts').catch(() => null),
       ])
+
+      if (failedEndpoints.length > 0) {
+        setPortalError(
+          `Could not load ${failedEndpoints.join(', ')}. Ensure the backend API (http://localhost:5000) is running and your Admin session is active.`
+        )
+      }
 
       if (dashRes?.data) setStats(dashRes.data)
 
@@ -268,14 +304,9 @@ function AdminContent() {
       if (catRes?.data) {
         setCategories(catRes.data)
         if (catRes.data.length > 0) {
-          if (!newProd.categoryId) {
-            setNewProd((p) => ({ ...p, categoryId: catRes.data[0].id }))
-          }
-          if (!bulkTargetCategoryId) {
-            // Pick first child category or first category
-            const firstChild = catRes.data[0].children?.[0]?.id ?? catRes.data[0].id
-            setBulkTargetCategoryId(firstChild)
-          }
+          setNewProd((p) => (p.categoryId ? p : { ...p, categoryId: catRes.data[0].id }))
+          const firstChild = catRes.data[0].children?.[0]?.id ?? catRes.data[0].id
+          setBulkTargetCategoryId((prev) => prev || firstChild)
         }
       }
 
@@ -289,11 +320,12 @@ function AdminContent() {
         setUnreadAlerts(alertRes.data.unreadCount ?? alertRes.data.UnreadCount ?? 0)
       }
     } catch {
+      setPortalError('Failed to load portal data. Please check your connection and sign in again.')
       toast.error('Failed to load portal data')
     } finally {
       setLoading(false)
     }
-  }, [isAuthenticated, isAdmin, newProd.categoryId, bulkTargetCategoryId])
+  }, [isAuthenticated, isAdmin])
 
   React.useEffect(() => {
     fetchAllData()
@@ -580,30 +612,61 @@ function AdminContent() {
     }
   }
 
-  // Quick Edit Product
+  // Open Full Edit Product Modal
   const handleOpenEditProduct = (prod: ProductListItem) => {
     setSelectedProductToEdit(prod)
-    setEditPrice(String(prod.price))
-    setEditStock(String(prod.stock ?? prod.stockQuantity ?? 0))
+    setEditForm({
+      name: prod.name ?? '',
+      categoryId: prod.categoryId ?? prod.category?.id ?? categories[0]?.id ?? '',
+      price: String(prod.price ?? ''),
+      compareAtPrice: prod.compareAtPrice ? String(prod.compareAtPrice) : '',
+      stock: String(prod.stock ?? prod.stockQuantity ?? 0),
+      sku: prod.sku ?? '',
+      tags: typeof prod.tags === 'string' ? prod.tags : Array.isArray(prod.tags) ? prod.tags.join(', ') : '',
+      shortDescription: prod.shortDescription ?? '',
+      description: (prod as any).description ?? prod.shortDescription ?? prod.name ?? '',
+      imageUrl: prod.primaryImageUrl ?? prod.primaryImage ?? '',
+      isFeatured: !!prod.isFeatured,
+      isActive: prod.isActive !== false,
+    })
     setShowEditProductModal(true)
   }
 
   const handleSaveQuickEdit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!selectedProductToEdit) return
+    if (!editForm.name.trim() || !editForm.price || !editForm.categoryId) {
+      toast.error('Title, category, and price are required')
+      return
+    }
     setIsUpdatingProd(true)
     try {
       await api.put(`/api/products/${selectedProductToEdit.id}`, {
-        name: selectedProductToEdit.name,
-        description: selectedProductToEdit.shortDescription || selectedProductToEdit.name,
-        price: parseFloat(editPrice),
-        stock: parseInt(editStock, 10),
-        categoryId: selectedProductToEdit.category?.id ?? categories[0]?.id,
-        isActive: selectedProductToEdit.isActive !== false,
-        isFeatured: selectedProductToEdit.isFeatured,
+        name: editForm.name.trim(),
+        description: editForm.description.trim() || editForm.shortDescription.trim() || editForm.name.trim(),
+        shortDescription: editForm.shortDescription.trim() || null,
+        price: parseFloat(editForm.price),
+        compareAtPrice: editForm.compareAtPrice ? parseFloat(editForm.compareAtPrice) : null,
+        sku: editForm.sku.trim() || null,
+        tags: editForm.tags.trim() || null,
+        stock: parseInt(editForm.stock || '0', 10),
+        categoryId: editForm.categoryId,
+        isActive: editForm.isActive,
+        isFeatured: editForm.isFeatured,
         trackInventory: true,
       })
-      toast.success('Inventory updated!')
+
+      const originalImg = selectedProductToEdit.primaryImageUrl ?? selectedProductToEdit.primaryImage ?? ''
+      if (editForm.imageUrl.trim() && editForm.imageUrl.trim() !== originalImg && isValidImageUrl(editForm.imageUrl.trim())) {
+        await api.post(`/api/products/${selectedProductToEdit.id}/images`, {
+          url: editForm.imageUrl.trim(),
+          altText: editForm.name.trim(),
+          isPrimary: true,
+          sortOrder: 0,
+        })
+      }
+
+      toast.success('Product updated successfully!')
       setShowEditProductModal(false)
       fetchAllData()
     } catch {
@@ -641,7 +704,7 @@ function AdminContent() {
   // Inspect & Update Order
   const handleOpenInspectOrder = (order: Order) => {
     setInspectOrder(order)
-    setOrderStatusUpdate(order.status)
+    setOrderStatusUpdate((order.status ?? 'pending').toString().toLowerCase())
     setOrderTrackingUpdate(order.trackingNumber ?? '')
   }
 
@@ -649,23 +712,39 @@ function AdminContent() {
     if (!inspectOrder) return
     setIsUpdatingOrder(true)
     try {
-      await api.patch(`/api/admin/orders/${inspectOrder.id}/status`, {
-        status: orderStatusUpdate,
-        trackingNumber: orderTrackingUpdate.trim() || null,
-      })
+      const res = await api.patch<{ status: string; paymentStatus?: string }>(
+        `/api/admin/orders/${inspectOrder.id}/status`,
+        {
+          status: orderStatusUpdate,
+          trackingNumber: orderTrackingUpdate.trim() || null,
+        }
+      )
       toast.success(`Order marked as ${orderStatusUpdate}!`)
+      const nextStatus = (res.data?.status ?? orderStatusUpdate) as any
+      const nextPaymentStatus = (res.data?.paymentStatus ?? inspectOrder.paymentStatus) as any
       setOrders((prev) =>
         prev.map((o) =>
           o.id === inspectOrder.id
-            ? { ...o, status: orderStatusUpdate as any, trackingNumber: orderTrackingUpdate.trim() || undefined }
+            ? {
+                ...o,
+                status: nextStatus,
+                paymentStatus: nextPaymentStatus,
+                trackingNumber: orderTrackingUpdate.trim() || undefined,
+              }
             : o
         )
       )
       setInspectOrder((prev) =>
         prev
-          ? { ...prev, status: orderStatusUpdate as any, trackingNumber: orderTrackingUpdate.trim() || undefined }
+          ? {
+              ...prev,
+              status: nextStatus,
+              paymentStatus: nextPaymentStatus,
+              trackingNumber: orderTrackingUpdate.trim() || undefined,
+            }
           : null
       )
+      fetchAllData()
     } catch {
       toast.error('Failed to update order')
     } finally {
@@ -787,6 +866,31 @@ function AdminContent() {
       toast.error(err?.response?.data?.message ?? 'Failed to create coupon')
     } finally {
       setIsSubmittingCoupon(false)
+    }
+  }
+
+  const handleToggleCoupon = async (coupon: CouponDto) => {
+    try {
+      const isPct =
+        Number(coupon.discountType) === 0 ||
+        String(coupon.discountType).toLowerCase() === 'percentage'
+      await api.put(`/api/coupons/${coupon.id}`, {
+        code: coupon.code,
+        description: coupon.description ?? null,
+        discountType: isPct ? 0 : 1,
+        discountValue: coupon.discountValue,
+        minOrderValue: coupon.minOrderValue ?? null,
+        maxDiscountAmount: coupon.maxDiscountAmount ?? null,
+        usageLimit: coupon.usageLimit ?? null,
+        isActive: !coupon.isActive,
+        expiresAt: coupon.expiresAt ?? null,
+      })
+      setCoupons((prev) =>
+        prev.map((c) => (c.id === coupon.id ? { ...c, isActive: !c.isActive } : c))
+      )
+      toast.success(`Coupon ${coupon.code} is now ${!coupon.isActive ? 'Active' : 'Paused'}`)
+    } catch {
+      toast.error('Failed to update coupon')
     }
   }
 
@@ -968,15 +1072,23 @@ function AdminContent() {
             You must be signed in with an administrative account to access the control panel.
           </p>
           <div className="bg-surface-2 p-3.5 rounded-xl text-xs text-beige-muted text-left border border-border">
-            <span className="text-gold font-mono font-semibold">Demo Administrator Account:</span>
+            <span className="text-gold font-mono font-semibold">Protected Access:</span>
             <br />
-            Email: <span className="text-beige font-mono">admin@nexus.com</span>
-            <br />
-            Password: <span className="text-beige font-mono">Admin@123456</span>
+            Sign in with an authorized administrator account to manage inventory, orders, and security alerts.
           </div>
-          <Button variant="primary" size="md" className="w-full" asChild>
-            <Link href="/">Return to Storefront</Link>
-          </Button>
+          <div className="flex flex-col sm:flex-row gap-2.5">
+            <Button
+              variant="primary"
+              size="md"
+              className="w-full"
+              onClick={() => openAuthModal('login', '/admin')}
+            >
+              Sign In as Admin
+            </Button>
+            <Button variant="outline" size="md" className="w-full" asChild>
+              <Link href="/">Return to Storefront</Link>
+            </Button>
+          </div>
         </div>
       </div>
     )
@@ -1025,12 +1137,12 @@ function AdminContent() {
                     isActive
                       ? 'bg-gold text-background font-semibold shadow-md shadow-gold/10'
                       : isThreat
-                      ? 'text-rose-400 bg-rose-500/10 border border-rose-500/20 hover:bg-rose-500/15'
+                      ? 'text-rose-700 bg-rose-50 border border-rose-200 hover:bg-rose-100'
                       : 'text-beige-muted hover:text-beige hover:bg-surface-2'
                   }`}
                 >
                   <div className="flex items-center gap-3">
-                    <Icon className={`w-4 h-4 ${isThreat && !isActive ? 'text-rose-400 animate-pulse' : ''}`} />
+                    <Icon className={`w-4 h-4 ${isThreat && !isActive ? 'text-rose-600 animate-pulse' : ''}`} />
                     <span>{label}</span>
                   </div>
                   {count !== undefined && count > 0 && (
@@ -1039,7 +1151,7 @@ function AdminContent() {
                         isActive
                           ? 'bg-background/20 text-background font-bold'
                           : isThreat
-                          ? 'bg-rose-500 text-white font-bold animate-pulse'
+                          ? 'bg-rose-600 text-white font-bold'
                           : 'bg-surface-2 text-beige-muted'
                       }`}
                     >
@@ -1099,14 +1211,14 @@ function AdminContent() {
               onClick={() => setActiveTab('security')}
               className={`relative p-2 rounded-xl border transition-all flex items-center gap-1.5 text-xs ${
                 unreadAlerts > 0
-                  ? 'bg-rose-500/15 border-rose-500/40 text-rose-300 hover:bg-rose-500/25'
+                  ? 'bg-rose-50 border-rose-200 text-rose-700 hover:bg-rose-100'
                   : 'bg-surface-2 border-border text-beige-muted hover:text-beige hover:border-gold/40'
               }`}
               title="Security Threats & Suspicious Notifications"
             >
-              <Bell className="w-4 h-4 text-gold" />
+              <Bell className={`w-4 h-4 ${unreadAlerts > 0 ? 'text-rose-600' : 'text-gold'}`} />
               {unreadAlerts > 0 ? (
-                <span className="font-bold text-rose-300 font-mono flex items-center gap-1">
+                <span className="font-bold text-rose-700 font-mono flex items-center gap-1">
                   <span>{unreadAlerts}</span>
                   <span className="hidden sm:inline">Threats</span>
                 </span>
@@ -1147,6 +1259,28 @@ function AdminContent() {
         </div>
 
         <main className="flex-1 p-6 sm:p-10 max-w-7xl w-full mx-auto space-y-8">
+          {portalError && (
+            <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-rose-800">
+              <div className="flex items-start gap-2.5 text-xs">
+                <AlertCircle className="w-4 h-4 text-rose-600 flex-shrink-0 mt-0.5" />
+                <span>{portalError}</span>
+              </div>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <Button variant="outline" size="sm" onClick={fetchAllData} className="text-xs">
+                  Retry
+                </Button>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={() => openAuthModal('login', '/admin')}
+                  className="text-xs"
+                >
+                  Re-authenticate
+                </Button>
+              </div>
+            </div>
+          )}
+
           {/* ─── TAB 1: OVERVIEW ──────────────────────────────────────────────── */}
           {activeTab === 'overview' && (
             <div className="space-y-10">
@@ -1234,6 +1368,96 @@ function AdminContent() {
                 </div>
               </div>
 
+              {/* Secondary Performance Strip */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="bg-surface border border-border rounded-2xl p-5 flex items-center justify-between shadow-sm">
+                  <div>
+                    <p className="text-xs uppercase tracking-wider font-mono text-beige-muted">Revenue Today</p>
+                    <p className="font-serif text-2xl font-bold text-beige mt-1">
+                      {formatCurrency(stats?.revenueToday ?? 0)}
+                    </p>
+                  </div>
+                  <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                    Live
+                  </span>
+                </div>
+                <div className="bg-surface border border-border rounded-2xl p-5 flex items-center justify-between shadow-sm">
+                  <div>
+                    <p className="text-xs uppercase tracking-wider font-mono text-beige-muted">This Month</p>
+                    <p className="font-serif text-2xl font-bold text-gold mt-1">
+                      {formatCurrency(stats?.revenueThisMonth ?? 0)}
+                    </p>
+                  </div>
+                  <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-gold/15 text-gold-dark border border-gold/30">
+                    MTD
+                  </span>
+                </div>
+                <div className="bg-surface border border-border rounded-2xl p-5 flex items-center justify-between shadow-sm">
+                  <div>
+                    <p className="text-xs uppercase tracking-wider font-mono text-beige-muted">Total Orders</p>
+                    <p className="font-serif text-2xl font-bold text-beige mt-1">
+                      {stats?.totalOrders ?? orders.length}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setActiveTab('orders')}
+                    className="text-xs font-semibold text-gold hover:underline"
+                  >
+                    Manage →
+                  </button>
+                </div>
+              </div>
+
+              {/* Low Stock & Restock Action Panel */}
+              {(() => {
+                const lowStockItems = products.filter((p) => (p.stock ?? p.stockQuantity ?? 0) <= 5)
+                if (lowStockItems.length === 0) return null
+                return (
+                  <div className="bg-surface border border-amber-200 rounded-2xl p-6 shadow-sm space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <AlertTriangle className="w-5 h-5 text-amber-600" />
+                        <h3 className="font-serif text-lg font-bold text-beige">
+                          Low Stock Alerts ({lowStockItems.length})
+                        </h3>
+                      </div>
+                      <button
+                        onClick={() => setActiveTab('products')}
+                        className="text-xs font-semibold text-gold hover:underline"
+                      >
+                        Open Inventory →
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                      {lowStockItems.slice(0, 6).map((p) => {
+                        const qty = p.stock ?? p.stockQuantity ?? 0
+                        return (
+                          <div
+                            key={p.id}
+                            className="flex items-center justify-between gap-3 p-3 rounded-xl bg-surface-2/60 border border-border"
+                          >
+                            <div className="min-w-0">
+                              <p className="text-xs font-semibold text-beige truncate">{p.name}</p>
+                              <p className={`text-[11px] font-mono font-bold ${qty === 0 ? 'text-rose-700' : 'text-amber-700'}`}>
+                                {qty === 0 ? 'Out of stock' : `${qty} units remaining`}
+                              </p>
+                            </div>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleOpenEditProduct(p)}
+                              className="text-xs py-1 px-2.5 flex-shrink-0"
+                            >
+                              Restock
+                            </Button>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )
+              })()}
+
               {/* Recent Orders Overview */}
               <div className="bg-surface border border-border rounded-2xl p-6 sm:p-8 shadow-xl">
                 <div className="flex items-center justify-between mb-6">
@@ -1261,9 +1485,9 @@ function AdminContent() {
                           key={ord.id}
                           className={`transition-colors ${
                             ord.status?.toString().toLowerCase() === 'cancelled'
-                              ? 'bg-rose-950/10 hover:bg-rose-950/20'
+                              ? 'bg-rose-50/70 hover:bg-rose-50'
                               : ord.status?.toString().toLowerCase() === 'delivered'
-                              ? 'bg-emerald-950/10 hover:bg-emerald-950/20'
+                              ? 'bg-emerald-50/60 hover:bg-emerald-50'
                               : 'hover:bg-surface-2/50'
                           }`}
                         >
@@ -2096,9 +2320,9 @@ function AdminContent() {
                             key={ord.id}
                             className={`transition-colors ${
                               isCanc
-                                ? 'bg-rose-950/15 hover:bg-rose-950/25 border-l-2 border-l-rose-500'
+                                ? 'bg-rose-50/70 hover:bg-rose-50 border-l-2 border-l-rose-500'
                                 : isDeliv
-                                ? 'bg-emerald-950/10 hover:bg-emerald-950/20 border-l-2 border-l-emerald-500'
+                                ? 'bg-emerald-50/60 hover:bg-emerald-50 border-l-2 border-l-emerald-500'
                                 : 'hover:bg-surface-2/40'
                             }`}
                           >
@@ -2157,45 +2381,82 @@ function AdminContent() {
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-                {coupons.map((coupon) => (
-                  <div
-                    key={coupon.id}
-                    className="bg-surface border border-gold/30 rounded-2xl p-6 flex flex-col justify-between shadow-xl"
-                  >
-                    <div>
-                      <div className="flex items-center justify-between mb-3">
-                        <Ticket className="w-6 h-6 text-gold" />
-                        <button
-                          onClick={() => handleDeleteCoupon(coupon.id)}
-                          className="text-beige-muted hover:text-error transition-colors"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                {coupons.map((coupon) => {
+                  const isPct =
+                    Number(coupon.discountType) === 0 ||
+                    String(coupon.discountType).toLowerCase() === 'percentage'
+                  const redeemed = coupon.usedCount ?? coupon.timesUsed ?? 0
+                  return (
+                    <div
+                      key={coupon.id}
+                      className={`bg-surface border rounded-2xl p-6 flex flex-col justify-between shadow-xl transition-opacity ${
+                        coupon.isActive ? 'border-gold/30' : 'border-border opacity-70'
+                      }`}
+                    >
+                      <div>
+                        <div className="flex items-center justify-between mb-3">
+                          <div className="flex items-center gap-2">
+                            <Ticket className="w-6 h-6 text-gold" />
+                            <StatusBadge
+                              status={coupon.isActive ? 'active' : 'inactive'}
+                              label={coupon.isActive ? 'Active' : 'Paused'}
+                              size="sm"
+                            />
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => handleToggleCoupon(coupon)}
+                              className="text-xs px-2 py-1 rounded-lg border border-border text-beige-muted hover:text-beige hover:border-gold transition-colors"
+                            >
+                              {coupon.isActive ? 'Pause' : 'Activate'}
+                            </button>
+                            <button
+                              onClick={() => handleDeleteCoupon(coupon.id)}
+                              className="text-beige-muted hover:text-error transition-colors"
+                              aria-label={`Delete coupon ${coupon.code}`}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                        <span className="font-mono text-xl font-bold text-gold tracking-widest bg-gold/10 px-3 py-1 rounded-lg border border-gold/20 inline-block">
+                          {coupon.code}
+                        </span>
+                        <p className="text-sm font-semibold text-beige mt-3">
+                          {isPct ? `${coupon.discountValue}% OFF` : `${formatCurrency(coupon.discountValue)} FLAT OFF`}
+                        </p>
+                        {coupon.description && (
+                          <p className="text-xs text-beige-muted mt-1">{coupon.description}</p>
+                        )}
                       </div>
-                      <span className="font-mono text-xl font-bold text-gold tracking-widest bg-gold/10 px-3 py-1 rounded-lg border border-gold/20 inline-block">
-                        {coupon.code}
-                      </span>
-                      <p className="text-sm font-semibold text-beige mt-3">
-                        {coupon.discountValue}
-                        {Number(coupon.discountType) === 0 ? '% OFF' : ' FLAT OFF'}
-                      </p>
-                      {coupon.description && (
-                        <p className="text-xs text-beige-muted mt-1">{coupon.description}</p>
-                      )}
-                    </div>
 
-                    <div className="border-t border-border pt-4 mt-6 text-xs text-beige-muted space-y-1">
-                      <div className="flex justify-between">
-                        <span>Min Order:</span>
-                        <span className="text-beige">{formatCurrency(coupon.minOrderValue ?? 0)}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span>Times Redeemed:</span>
-                        <span className="text-gold font-bold">{coupon.timesUsed ?? 0}</span>
+                      <div className="border-t border-border pt-4 mt-6 text-xs text-beige-muted space-y-1">
+                        <div className="flex justify-between">
+                          <span>Min Order:</span>
+                          <span className="text-beige">{formatCurrency(coupon.minOrderValue ?? 0)}</span>
+                        </div>
+                        {coupon.maxDiscountAmount ? (
+                          <div className="flex justify-between">
+                            <span>Max Discount:</span>
+                            <span className="text-beige">{formatCurrency(coupon.maxDiscountAmount)}</span>
+                          </div>
+                        ) : null}
+                        <div className="flex justify-between">
+                          <span>Times Redeemed:</span>
+                          <span className="text-gold font-bold">
+                            {redeemed}{coupon.usageLimit ? ` / ${coupon.usageLimit}` : ''}
+                          </span>
+                        </div>
+                        {coupon.expiresAt && (
+                          <div className="flex justify-between">
+                            <span>Expires:</span>
+                            <span className="text-beige">{formatDate(coupon.expiresAt)}</span>
+                          </div>
+                        )}
                       </div>
                     </div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             </div>
           )}
@@ -2227,9 +2488,11 @@ function AdminContent() {
                         <th className="py-3.5 px-4">Client Name</th>
                         <th className="py-3.5 px-4">Email</th>
                         <th className="py-3.5 px-4">Phone</th>
-                        <th className="py-3.5 px-4">Orders Placed</th>
+                        <th className="py-3.5 px-4 text-center">Orders Placed</th>
                         <th className="py-3.5 px-4">Lifetime Spend</th>
+                        <th className="py-3.5 px-4">Status</th>
                         <th className="py-3.5 px-4">Joined Date</th>
+                        <th className="py-3.5 px-4 text-right">Actions</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border">
@@ -2242,7 +2505,28 @@ function AdminContent() {
                           <td className="py-3.5 px-4 font-mono text-xs text-gold">{c.phoneNumber ?? '—'}</td>
                           <td className="py-3.5 px-4 text-center font-bold text-beige">{c.totalOrders}</td>
                           <td className="py-3.5 px-4 font-serif font-bold text-gold">{formatCurrency(c.totalSpent)}</td>
+                          <td className="py-3.5 px-4">
+                            <StatusBadge
+                              status={c.isActive !== false ? 'active' : 'inactive'}
+                              label={c.isActive !== false ? 'Active' : 'Suspended'}
+                              size="sm"
+                            />
+                          </td>
                           <td className="py-3.5 px-4 text-xs text-beige-muted">{formatDate(c.createdAt)}</td>
+                          <td className="py-3.5 px-4 text-right">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleToggleUserSecurity(c.id)}
+                              className={`text-xs py-1 px-2.5 ${
+                                c.isActive !== false
+                                  ? 'text-rose-700 border-rose-200 hover:bg-rose-50'
+                                  : 'text-emerald-700 border-emerald-200 hover:bg-emerald-50'
+                              }`}
+                            >
+                              {c.isActive !== false ? 'Suspend' : 'Activate'}
+                            </Button>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -2284,13 +2568,13 @@ function AdminContent() {
 
               {/* Threat KPI Cards */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-                <div className="bg-surface border border-rose-500/30 rounded-2xl p-5 shadow-xl relative overflow-hidden">
+                <div className="bg-surface border border-rose-200 rounded-2xl p-5 shadow-xl relative overflow-hidden">
                   <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs uppercase font-semibold text-rose-400">Active Unresolved</span>
-                    <ShieldAlert className="w-5 h-5 text-rose-500" />
+                    <span className="text-xs uppercase font-semibold text-rose-700">Active Unresolved</span>
+                    <ShieldAlert className="w-5 h-5 text-rose-600" />
                   </div>
-                  <p className="font-serif text-3xl font-bold text-rose-200">{unreadAlerts}</p>
-                  <p className="text-xs text-rose-400/80 mt-1">Requires administrative review</p>
+                  <p className="font-serif text-3xl font-bold text-rose-800">{unreadAlerts}</p>
+                  <p className="text-xs text-rose-600 mt-1">Requires administrative review</p>
                 </div>
 
                 <div className="bg-surface border border-border rounded-2xl p-5 shadow-xl">
@@ -2307,7 +2591,7 @@ function AdminContent() {
                 <div className="bg-surface border border-border rounded-2xl p-5 shadow-xl">
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-xs uppercase font-semibold text-beige-muted">Depleted Stock Alerts</span>
-                    <Package className="w-5 h-5 text-amber-400" />
+                    <Package className="w-5 h-5 text-amber-600" />
                   </div>
                   <p className="font-serif text-3xl font-bold text-beige">
                     {products.filter((p) => (p.stock ?? p.stockQuantity ?? 0) <= 2).length}
@@ -2318,10 +2602,10 @@ function AdminContent() {
                 <div className="bg-surface border border-border rounded-2xl p-5 shadow-xl">
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-xs uppercase font-semibold text-beige-muted">Hoarding / Probes</span>
-                    <AlertTriangle className="w-5 h-5 text-sky-400" />
+                    <AlertTriangle className="w-5 h-5 text-sky-600" />
                   </div>
                   <p className="font-serif text-3xl font-bold text-beige">
-                    {alerts.filter((a) => a.category.includes('Hoarding') || a.category.includes('Velocity') || a.category.includes('Brute')).length}
+                    {alerts.filter((a) => /hoarding|velocity|brute|suspicious|cart/i.test(a.category)).length}
                   </p>
                   <p className="text-xs text-beige-muted mt-1">Blocked limit violations</p>
                 </div>
@@ -2366,11 +2650,11 @@ function AdminContent() {
                     const borderCol = alert.isResolved
                       ? 'border-border/60 bg-surface/60 opacity-80'
                       : isCrit
-                      ? 'border-rose-500/50 bg-rose-950/15'
+                      ? 'border-rose-300 bg-rose-50/70'
                       : isHigh
-                      ? 'border-amber-500/50 bg-amber-950/15'
+                      ? 'border-amber-300 bg-amber-50/70'
                       : isWarn
-                      ? 'border-yellow-500/40 bg-yellow-950/10'
+                      ? 'border-yellow-300 bg-yellow-50/60'
                       : 'border-border bg-surface'
 
                     return (
@@ -2383,12 +2667,12 @@ function AdminContent() {
                             <span
                               className={`px-2.5 py-0.5 rounded-full text-[11px] font-mono font-bold uppercase tracking-wider ${
                                 isCrit
-                                  ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                                  ? 'bg-rose-100 text-rose-700 border border-rose-300'
                                   : isHigh
-                                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                                  ? 'bg-amber-100 text-amber-800 border border-amber-300'
                                   : isWarn
-                                  ? 'bg-yellow-500/20 text-yellow-300 border border-yellow-500/30'
-                                  : 'bg-sky-500/20 text-sky-300 border border-sky-500/30'
+                                  ? 'bg-yellow-100 text-yellow-800 border border-yellow-300'
+                                  : 'bg-sky-100 text-sky-700 border border-sky-300'
                               }`}
                             >
                               {alert.severity}
@@ -2401,11 +2685,11 @@ function AdminContent() {
                           <div className="flex items-center gap-3 text-xs text-beige-muted">
                             <span className="font-mono">{formatDate(alert.timestamp)}</span>
                             {alert.isResolved ? (
-                              <span className="flex items-center gap-1 text-emerald-400 font-semibold bg-emerald-950/30 px-2 py-0.5 rounded border border-emerald-500/30">
+                              <span className="flex items-center gap-1 text-emerald-700 font-semibold bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
                                 <CheckCircle2 className="w-3.5 h-3.5" /> Resolved
                               </span>
                             ) : (
-                              <span className="flex items-center gap-1 text-rose-400 font-semibold bg-rose-950/30 px-2 py-0.5 rounded border border-rose-500/30 animate-pulse">
+                              <span className="flex items-center gap-1 text-rose-700 font-semibold bg-rose-50 px-2 py-0.5 rounded border border-rose-200">
                                 <AlertTriangle className="w-3.5 h-3.5" /> Action Required
                               </span>
                             )}
@@ -2439,11 +2723,11 @@ function AdminContent() {
 
                         {/* Resolution & Actions */}
                         {alert.isResolved ? (
-                          <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-300 flex items-center justify-between">
+                          <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-800 flex items-center justify-between">
                             <span>
                               <strong>Resolution Notes:</strong> {alert.actionTaken ?? 'Reviewed and verified safe.'}
                             </span>
-                            <span className="text-[11px] text-emerald-400 font-mono">Archived in Security Audit Log</span>
+                            <span className="text-[11px] text-emerald-700 font-mono">Archived in Security Audit Log</span>
                           </div>
                         ) : (
                           <div className="flex flex-wrap items-center justify-end gap-2.5 pt-1">
@@ -2452,7 +2736,7 @@ function AdminContent() {
                                 variant="outline"
                                 size="sm"
                                 onClick={() => handleToggleUserSecurity(alert.referenceId!.replace('USER-', ''))}
-                                className="text-xs border-rose-500/40 text-rose-400 hover:bg-rose-500/10"
+                                className="text-xs border-rose-200 text-rose-700 hover:bg-rose-50"
                               >
                                 Suspend / Block Account
                               </Button>
@@ -2461,7 +2745,7 @@ function AdminContent() {
                               variant="outline"
                               size="sm"
                               onClick={() => handleResolveAlert(alert.id, 'Investigated and cleared by admin')}
-                              className="text-xs text-emerald-400 border-emerald-500/40 hover:bg-emerald-500/10 flex items-center gap-1.5"
+                              className="text-xs text-emerald-700 border-emerald-200 hover:bg-emerald-50 flex items-center gap-1.5"
                             >
                               <CheckCircle2 className="w-3.5 h-3.5" /> Mark Safe & Resolve
                             </Button>
@@ -2472,7 +2756,7 @@ function AdminContent() {
                   })}
                 {alerts.length === 0 && (
                   <div className="text-center py-12 bg-surface border border-border rounded-2xl">
-                    <Shield className="w-12 h-12 text-emerald-400 mx-auto mb-3" />
+                    <Shield className="w-12 h-12 text-emerald-600 mx-auto mb-3" />
                     <h3 className="font-serif text-lg font-bold text-beige">Zero Security Threats Detected</h3>
                     <p className="text-xs text-beige-muted mt-1">All gateway transactions and inventory are running smoothly.</p>
                   </div>
@@ -2683,7 +2967,7 @@ function AdminContent() {
                 onChange={(e) => setNewProd({ ...newProd, imageUrl: e.target.value })}
               />
 
-              {newProd.imageUrl && (
+              {isValidImageUrl(newProd.imageUrl) && (
                 <div className="flex items-center gap-3 p-3 bg-surface-2 rounded-xl border border-border">
                   <div className="relative w-14 h-14 rounded-lg overflow-hidden flex-shrink-0 bg-surface">
                     <Image src={newProd.imageUrl} alt="Preview" fill className="object-cover" />
@@ -2953,7 +3237,7 @@ function AdminContent() {
                                 }}
                                 className="w-full bg-surface-2 border border-border rounded-lg px-2.5 py-1.5 text-xs text-beige focus:outline-none focus:border-gold truncate"
                               />
-                              {row.imageUrl && (
+                              {isValidImageUrl(row.imageUrl) && (
                                 <div className="relative w-7 h-7 rounded overflow-hidden flex-shrink-0 border border-border">
                                   <Image src={row.imageUrl} alt="" fill className="object-cover" />
                                 </div>
@@ -3066,13 +3350,13 @@ Nexus Linen Shirt | 3499 | 4999 | 15 | NX-M-02 | https://images.unsplash.com/...
         </div>
       )}
 
-      {/* ─── MODAL: QUICK EDIT PRODUCT ──────────────────────────────────────── */}
+      {/* ─── MODAL: FULL EDIT PRODUCT ───────────────────────────────────────── */}
       {showEditProductModal && selectedProductToEdit && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-surface border border-gold/40 rounded-2xl max-w-md w-full p-6 space-y-5 shadow-2xl animate-slide-up">
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-surface border border-gold/40 rounded-2xl max-w-2xl w-full p-6 sm:p-8 space-y-5 shadow-2xl animate-slide-up my-8">
             <div className="flex items-center justify-between border-b border-border pb-3">
-              <h3 className="font-serif text-lg font-bold text-beige truncate">
-                Edit: {selectedProductToEdit.name}
+              <h3 className="font-serif text-xl font-bold text-beige truncate">
+                Edit Product: {selectedProductToEdit.name}
               </h3>
               <button
                 onClick={() => setShowEditProductModal(false)}
@@ -3083,28 +3367,139 @@ Nexus Linen Shirt | 3499 | 4999 | 15 | NX-M-02 | https://images.unsplash.com/...
             </div>
 
             <form onSubmit={handleSaveQuickEdit} className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <Input
+                  label="Product Title"
+                  value={editForm.name}
+                  onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                  required
+                />
+                <div>
+                  <label className="block text-xs font-medium text-beige mb-1.5 uppercase tracking-wider">
+                    Collection / Subcategory
+                  </label>
+                  <select
+                    value={editForm.categoryId}
+                    onChange={(e) => setEditForm({ ...editForm, categoryId: e.target.value })}
+                    className="w-full bg-surface-2 border border-border text-beige text-sm rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-gold cursor-pointer"
+                    required
+                  >
+                    {categories.map((c) => (
+                      <optgroup key={c.id} label={c.name} className="bg-surface font-semibold text-gold">
+                        <option value={c.id} className="text-beige font-normal">
+                          {c.name} (Entire Department)
+                        </option>
+                        {c.children &&
+                          c.children.map((sub) => (
+                            <option key={sub.id} value={sub.id} className="text-beige font-normal">
+                              &nbsp;&nbsp;&nbsp;↳ {sub.name}
+                            </option>
+                          ))}
+                      </optgroup>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <Input
+                  label="Price (₹)"
+                  type="number"
+                  step="0.01"
+                  value={editForm.price}
+                  onChange={(e) => setEditForm({ ...editForm, price: e.target.value })}
+                  required
+                />
+                <Input
+                  label="Compare At Price (₹)"
+                  type="number"
+                  step="0.01"
+                  value={editForm.compareAtPrice}
+                  onChange={(e) => setEditForm({ ...editForm, compareAtPrice: e.target.value })}
+                />
+                <Input
+                  label="Stock Inventory"
+                  type="number"
+                  value={editForm.stock}
+                  onChange={(e) => setEditForm({ ...editForm, stock: e.target.value })}
+                  required
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <Input
+                  label="SKU Code"
+                  value={editForm.sku}
+                  onChange={(e) => setEditForm({ ...editForm, sku: e.target.value })}
+                />
+                <Input
+                  label="Tags (comma-separated)"
+                  value={editForm.tags}
+                  onChange={(e) => setEditForm({ ...editForm, tags: e.target.value })}
+                />
+              </div>
+
               <Input
-                label="Price (₹)"
-                type="number"
-                step="0.01"
-                value={editPrice}
-                onChange={(e) => setEditPrice(e.target.value)}
-                required
+                label="Primary Image URL"
+                placeholder="https://images.unsplash.com/..."
+                value={editForm.imageUrl}
+                onChange={(e) => setEditForm({ ...editForm, imageUrl: e.target.value })}
               />
+
+              {isValidImageUrl(editForm.imageUrl) && (
+                <div className="flex items-center gap-3 p-3 bg-surface-2 rounded-xl border border-border">
+                  <div className="relative w-14 h-14 rounded-lg overflow-hidden flex-shrink-0 bg-surface">
+                    <Image src={editForm.imageUrl} alt="Preview" fill className="object-cover" />
+                  </div>
+                  <span className="text-xs text-success font-medium">Primary image preview</span>
+                </div>
+              )}
+
               <Input
-                label="Stock Inventory"
-                type="number"
-                value={editStock}
-                onChange={(e) => setEditStock(e.target.value)}
-                required
+                label="Short Tagline"
+                value={editForm.shortDescription}
+                onChange={(e) => setEditForm({ ...editForm, shortDescription: e.target.value })}
               />
+
+              <div>
+                <label className="block text-xs font-medium text-beige mb-1.5 uppercase tracking-wider">
+                  Full Description
+                </label>
+                <textarea
+                  rows={3}
+                  value={editForm.description}
+                  onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
+                  className="w-full bg-surface-2 border border-border rounded-xl p-3 text-sm text-beige placeholder:text-beige-muted/50 focus:outline-none focus:border-gold"
+                />
+              </div>
+
+              <div className="flex flex-wrap items-center gap-6 pt-1">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={editForm.isFeatured}
+                    onChange={(e) => setEditForm({ ...editForm, isFeatured: e.target.checked })}
+                    className="accent-gold w-4 h-4"
+                  />
+                  <span className="text-sm text-beige">Featured on Homepage</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={editForm.isActive}
+                    onChange={(e) => setEditForm({ ...editForm, isActive: e.target.checked })}
+                    className="accent-gold w-4 h-4"
+                  />
+                  <span className="text-sm text-beige">Active in Storefront</span>
+                </label>
+              </div>
 
               <div className="flex justify-end gap-3 pt-3 border-t border-border">
                 <Button type="button" variant="outline" size="sm" onClick={() => setShowEditProductModal(false)}>
                   Cancel
                 </Button>
                 <Button type="submit" variant="primary" size="sm" isLoading={isUpdatingProd}>
-                  Update Inventory
+                  Save Changes
                 </Button>
               </div>
             </form>
@@ -3647,6 +4042,13 @@ Nexus Linen Shirt | 3499 | 4999 | 15 | NX-M-02 | https://images.unsplash.com/...
                 required
               />
 
+              <Input
+                label="Description (Optional)"
+                placeholder="e.g. Festive 20% privilege discount"
+                value={newCoupon.description}
+                onChange={(e) => setNewCoupon({ ...newCoupon, description: e.target.value })}
+              />
+
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-beige mb-1.5 uppercase">Type</label>
@@ -3669,12 +4071,18 @@ Nexus Linen Shirt | 3499 | 4999 | 15 | NX-M-02 | https://images.unsplash.com/...
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-3 gap-3">
                 <Input
                   label="Min Order (₹)"
                   type="number"
                   value={newCoupon.minOrderValue}
                   onChange={(e) => setNewCoupon({ ...newCoupon, minOrderValue: e.target.value })}
+                />
+                <Input
+                  label="Max Discount (₹)"
+                  type="number"
+                  value={newCoupon.maxDiscountAmount}
+                  onChange={(e) => setNewCoupon({ ...newCoupon, maxDiscountAmount: e.target.value })}
                 />
                 <Input
                   label="Usage Limit"
@@ -3683,6 +4091,13 @@ Nexus Linen Shirt | 3499 | 4999 | 15 | NX-M-02 | https://images.unsplash.com/...
                   onChange={(e) => setNewCoupon({ ...newCoupon, usageLimit: e.target.value })}
                 />
               </div>
+
+              <Input
+                label="Valid For (Days)"
+                type="number"
+                value={newCoupon.expiresInDays}
+                onChange={(e) => setNewCoupon({ ...newCoupon, expiresInDays: e.target.value })}
+              />
 
               <div className="flex justify-end gap-3 pt-3 border-t border-border">
                 <Button type="button" variant="outline" size="sm" onClick={() => setShowAddCouponModal(false)}>
@@ -3721,20 +4136,20 @@ Nexus Linen Shirt | 3499 | 4999 | 15 | NX-M-02 | https://images.unsplash.com/...
 
             {/* Status Feedback Banner */}
             {inspectOrder.status?.toString().toLowerCase() === 'cancelled' && (
-              <div className="p-4 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 flex items-center gap-3">
-                <XCircle className="w-5 h-5 text-rose-400 flex-shrink-0" />
+              <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 flex items-center gap-3">
+                <XCircle className="w-5 h-5 text-rose-600 flex-shrink-0" />
                 <div className="text-xs">
-                  <p className="font-bold text-rose-200">Order Cancelled</p>
-                  <p className="text-rose-300/80 mt-0.5">This order has been cancelled. No shipment or fulfillment action is required.</p>
+                  <p className="font-bold text-rose-900">Order Cancelled</p>
+                  <p className="text-rose-700 mt-0.5">This order has been cancelled. No shipment or fulfillment action is required.</p>
                 </div>
               </div>
             )}
             {inspectOrder.status?.toString().toLowerCase() === 'delivered' && (
-              <div className="p-4 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 flex items-center gap-3">
-                <CheckCircle2 className="w-5 h-5 text-emerald-400 flex-shrink-0" />
+              <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 flex items-center gap-3">
+                <CheckCircle2 className="w-5 h-5 text-emerald-600 flex-shrink-0" />
                 <div className="text-xs">
-                  <p className="font-bold text-emerald-200">Order Completed & Delivered</p>
-                  <p className="text-emerald-300/80 mt-0.5">Customer has received package. Transaction is marked complete.</p>
+                  <p className="font-bold text-emerald-900">Order Completed & Delivered</p>
+                  <p className="text-emerald-700 mt-0.5">Customer has received package. Transaction is marked complete.</p>
                 </div>
               </div>
             )}
@@ -3754,9 +4169,11 @@ Nexus Linen Shirt | 3499 | 4999 | 15 | NX-M-02 | https://images.unsplash.com/...
                   >
                     <option value="pending">Pending</option>
                     <option value="confirmed">Confirmed</option>
+                    <option value="processing">Processing</option>
                     <option value="shipped">Shipped</option>
                     <option value="delivered">Delivered</option>
                     <option value="cancelled">Cancelled</option>
+                    <option value="refunded">Refunded</option>
                   </select>
                 </div>
                 <div>
@@ -3949,7 +4366,7 @@ Nexus Linen Shirt | 3499 | 4999 | 15 | NX-M-02 | https://images.unsplash.com/...
                   </div>
                   <div className="flex justify-between">
                     <span className="text-beige-muted print:text-gray-600">Payment Status:</span>
-                    <span className="font-bold text-emerald-400 print:text-black uppercase">{inspectOrder.paymentStatus}</span>
+                    <span className="font-bold text-emerald-700 print:text-black uppercase">{inspectOrder.paymentStatus}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-beige-muted print:text-gray-600">Courier Tracking:</span>
@@ -4030,7 +4447,7 @@ Nexus Linen Shirt | 3499 | 4999 | 15 | NX-M-02 | https://images.unsplash.com/...
                   </div>
                   <div className="flex justify-between text-beige-muted print:text-gray-600">
                     <span>White-Glove Courier Delivery:</span>
-                    <span className="font-semibold text-emerald-400 print:text-black uppercase">Complimentary</span>
+                    <span className="font-semibold text-emerald-700 print:text-black uppercase">Complimentary</span>
                   </div>
                   <div className="flex justify-between border-t border-border pt-2 text-sm font-bold text-gold print:text-black print:border-gray-400">
                     <span>Total Invoice Value:</span>
@@ -4060,8 +4477,12 @@ Nexus Linen Shirt | 3499 | 4999 | 15 | NX-M-02 | https://images.unsplash.com/...
 
 export default function AdminPage() {
   return (
-    <Suspense fallback={<div className="min-h-screen bg-background flex items-center justify-center text-beige-muted">Loading Control Center...</div>}>
-      <AdminContent />
-    </Suspense>
+    <>
+      <Suspense fallback={<div className="min-h-screen bg-background flex items-center justify-center text-beige-muted">Loading Control Center...</div>}>
+        <AdminContent />
+      </Suspense>
+      <AuthModal />
+      <Toaster position="top-right" />
+    </>
   )
 }
