@@ -8,6 +8,7 @@ import { ProductCardSkeleton } from '@/components/ui/Skeleton'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import api from '@/lib/api'
+import { buildCatalogKey, fetchWithCatalogCache, peekCatalogCache, prefetchCatalogEndpoint } from '@/lib/catalogCache'
 import type { ProductListItem, PagedResult, ProductFilters } from '@/types'
 import { cn, normalizeCategorySlug } from '@/lib/utils'
 
@@ -55,7 +56,7 @@ const CATEGORY_TREE = [
     slug: 'men',
     subcategories: [
       { name: "T-Shirts & Polos", slug: 'men-t-shirts' },
-      { name: "Co-ord Sets", slug: 'men-co-ord-sets' },
+      { name: "Co-ord Sets", slug: 'mens-co-ord-sets' },
       { name: "Shirts", slug: 'men-shirts' },
       { name: "Denim & Jeans", slug: 'men-denim' },
       { name: "Footwear & Sneakers", slug: 'men-footwear' },
@@ -117,6 +118,7 @@ function ProductsContent() {
   const router = useRouter()
   const [result, setResult] = React.useState<PagedResult<ProductListItem> | null>(null)
   const [isLoading, setIsLoading] = React.useState(true)
+  const [isFetching, setIsFetching] = React.useState(false)
   const [fetchError, setFetchError] = React.useState<string | null>(null)
   const [retryTick, setRetryTick] = React.useState(0)
   const [sidebarOpen, setSidebarOpen] = React.useState(false)
@@ -133,6 +135,8 @@ function ProductsContent() {
   const minDiscount = searchParams.get('minDiscount') ? Number(searchParams.get('minDiscount')) : undefined
   const sortBy = (searchParams.get('sort') ?? 'relevant') as ProductFilters['sortBy']
   const page = Number(searchParams.get('page') ?? '1')
+  const rawPageSize = Number(searchParams.get('pageSize') ?? '24')
+  const pageSize = [24, 48, 200].includes(rawPageSize) ? rawPageSize : 24
   const minPrice = searchParams.get('minPrice') ? Number(searchParams.get('minPrice')) : undefined
   const maxPrice = searchParams.get('maxPrice') ? Number(searchParams.get('maxPrice')) : undefined
   const inStock = searchParams.get('inStock') === 'true'
@@ -156,7 +160,9 @@ function ProductsContent() {
         params.delete(key)
       }
     })
-    params.delete('page')
+    if (!('page' in updates)) {
+      params.delete('page')
+    }
     router.push(`/products?${params.toString()}`)
   }
 
@@ -234,37 +240,85 @@ function ProductsContent() {
   }, [])
 
   React.useEffect(() => {
+    let active = true
+    const queryParams = {
+      search: search || undefined,
+      category: category || undefined,
+      subCategory: subCategory || undefined,
+      gender: gender || undefined,
+      size: size || undefined,
+      minDiscount,
+      sortBy,
+      page,
+      pageSize,
+      minPrice,
+      maxPrice,
+      inStock: inStock || undefined,
+      minRating,
+    }
+    const cacheKey = buildCatalogKey('/api/products', queryParams)
+
     const fetchProducts = async () => {
-      setIsLoading(true)
       setFetchError(null)
-      try {
-        const { data } = await api.get<PagedResult<ProductListItem>>('/api/products', {
-          params: {
-            search: search || undefined,
-            category: category || undefined,
-            subCategory: subCategory || undefined,
-            gender: gender || undefined,
-            size: size || undefined,
-            minDiscount,
-            sortBy,
-            page,
-            pageSize: 16,
-            minPrice,
-            maxPrice,
-            inStock: inStock || undefined,
-            minRating,
-          },
-        })
-        setResult(data)
-      } catch (err: any) {
-        setResult(null)
-        setFetchError(err?.message ?? 'Unable to connect to the catalog server. Please ensure the backend API is running.')
-      } finally {
+      const hit = retryTick === 0 ? peekCatalogCache<PagedResult<ProductListItem>>(cacheKey) : null
+      if (hit?.data && active) {
+        setResult(hit.data)
         setIsLoading(false)
+        setIsFetching(!hit.isFresh)
+        if (hit.isFresh) {
+          if (hit.data.totalPages > page) {
+            prefetchCatalogEndpoint('/api/products', { ...queryParams, page: page + 1 })
+          }
+          return
+        }
+      } else {
+        setIsFetching(true)
+        setResult((prev) => {
+          if (!prev) setIsLoading(true)
+          return prev
+        })
+      }
+
+      try {
+        const data = await fetchWithCatalogCache<PagedResult<ProductListItem>>(
+          cacheKey,
+          async () => {
+            const res = await api.get<PagedResult<ProductListItem>>('/api/products', {
+              params: queryParams,
+            })
+            return res.data
+          },
+          { force: retryTick > 0 },
+        )
+        if (!active) return
+        setResult(data)
+
+        if (data.totalPages > page) {
+          prefetchCatalogEndpoint('/api/products', { ...queryParams, page: page + 1 })
+        }
+        const total = data.totalCount ?? 0
+        const itemCount = data.items?.length ?? 0
+        if (page === 1 && pageSize !== 200 && total > itemCount && total <= 200) {
+          prefetchCatalogEndpoint('/api/products', { ...queryParams, page: 1, pageSize: 200 })
+        }
+      } catch (err: any) {
+        if (!active) return
+        if (!hit?.data) {
+          setResult(null)
+          setFetchError(err?.message ?? 'Unable to connect to the catalog server. Please ensure the backend API is running.')
+        }
+      } finally {
+        if (active) {
+          setIsLoading(false)
+          setIsFetching(false)
+        }
       }
     }
     fetchProducts()
-  }, [search, category, subCategory, gender, size, minDiscount, sortBy, page, minPrice, maxPrice, inStock, minRating, retryTick])
+    return () => {
+      active = false
+    }
+  }, [search, category, subCategory, gender, size, minDiscount, sortBy, page, pageSize, minPrice, maxPrice, inStock, minRating, retryTick])
 
   const hasFilters = !!(
     search ||
@@ -974,8 +1028,35 @@ function ProductsContent() {
           {hasFilters && <span className="w-2 h-2 rounded-full bg-gold" />}
         </button>
 
-        {/* Custom Luxury Sort Dropdown */}
-        <div className="relative ml-auto" ref={sortDropdownRef}>
+        {/* Display Density & Luxury Sort Dropdown */}
+        <div className="flex items-center gap-3 ml-auto flex-wrap justify-end">
+          <div className="flex items-center gap-1 bg-surface border border-border rounded-xl p-1">
+            <span className="text-[11px] text-beige-muted px-2 hidden sm:inline">Show:</span>
+            {[
+              { label: '24', value: 24 },
+              { label: '48', value: 48 },
+              { label: 'All', value: 200 },
+            ].map((opt) => {
+              const active = pageSize === opt.value
+              return (
+                <button
+                  key={opt.label}
+                  type="button"
+                  onClick={() => updateParam('pageSize', opt.value === 24 ? undefined : String(opt.value))}
+                  className={cn(
+                    'px-2.5 py-1 rounded-lg text-xs font-mono font-medium transition-colors cursor-pointer',
+                    active
+                      ? 'bg-gold text-background font-semibold shadow-sm'
+                      : 'text-beige-muted hover:text-beige hover:bg-surface-2',
+                  )}
+                >
+                  {opt.label}
+                </button>
+              )
+            })}
+          </div>
+
+          <div className="relative" ref={sortDropdownRef}>
           <div className="flex items-center gap-2">
             <span className="text-xs text-beige-muted hidden sm:block">Sort By:</span>
             <button
@@ -1025,6 +1106,7 @@ function ProductsContent() {
               </div>
             </div>
           )}
+          </div>
         </div>
       </div>
 
@@ -1039,6 +1121,11 @@ function ProductsContent() {
 
         {/* Product Grid */}
         <div className="lg:col-span-3">
+          {isFetching && !isLoading && (
+            <div className="h-0.5 w-full bg-surface-2 rounded-full overflow-hidden mb-4">
+              <div className="h-full w-1/2 bg-gold animate-pulse rounded-full" />
+            </div>
+          )}
           {isLoading ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6">
               {Array.from({ length: 6 }).map((_, i) => (
@@ -1047,34 +1134,52 @@ function ProductsContent() {
             </div>
           ) : result && result.items && result.items.length > 0 ? (
             <>
-              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6">
-                {result.items.map((product) => (
-                  <ProductCard key={product.id} product={product} />
+              <div
+                className={cn(
+                  'grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6 transition-opacity duration-150',
+                  isFetching && 'opacity-70',
+                )}
+              >
+                {result.items.map((product, idx) => (
+                  <ProductCard key={product.id} product={product} priority={idx < 6} />
                 ))}
               </div>
 
               {/* Pagination */}
-              {result.totalPages > 1 && (
-                <div className="flex items-center justify-center gap-2 mt-12">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={page <= 1}
-                    onClick={() => updateParam('page', String(page - 1))}
-                  >
-                    Previous
-                  </Button>
-                  <span className="text-xs text-beige-muted px-3">
-                    Page {result.page} of {result.totalPages}
-                  </span>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={page >= result.totalPages}
-                    onClick={() => updateParam('page', String(page + 1))}
-                  >
-                    Next
-                  </Button>
+              {(result.totalPages > 1 || ((result.totalCount ?? 0) > result.items.length && pageSize !== 200)) && (
+                <div className="flex flex-wrap items-center justify-center gap-3 mt-12">
+                  {result.totalPages > 1 && (
+                    <>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={page <= 1}
+                        onClick={() => updateParam('page', String(page - 1))}
+                      >
+                        Previous
+                      </Button>
+                      <span className="text-xs text-beige-muted px-3">
+                        Page {result.page} of {result.totalPages} ({result.totalCount ?? result.items.length} items)
+                      </span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={page >= result.totalPages}
+                        onClick={() => updateParam('page', String(page + 1))}
+                      >
+                        Next
+                      </Button>
+                    </>
+                  )}
+                  {(result.totalCount ?? 0) > result.items.length && pageSize !== 200 && (
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      onClick={() => updateParam('pageSize', '200')}
+                    >
+                      View All ({result.totalCount ?? result.items.length})
+                    </Button>
+                  )}
                 </div>
               )}
             </>

@@ -1,4 +1,6 @@
+using System.Globalization;
 using System.Security.Claims;
+using EShop.API.Services;
 using EShop.Core.DTOs;
 using EShop.Core.Entities;
 using EShop.Core.Interfaces;
@@ -12,10 +14,11 @@ namespace EShop.API.Controllers;
 
 [ApiController]
 [Route("api/products")]
-public class ProductsController(AppDbContext db, IUnitOfWork uow) : ControllerBase
+public class ProductsController(AppDbContext db, IUnitOfWork uow, CatalogCacheService catalogCache) : ControllerBase
 {
-    private readonly AppDbContext _db  = db;
-    private readonly IUnitOfWork  _uow = uow;
+    private readonly AppDbContext        _db           = db;
+    private readonly IUnitOfWork         _uow          = uow;
+    private readonly CatalogCacheService _catalogCache = catalogCache;
 
     // Helper to normalize category queries (man, female, etc.)
     private static string NormalizeCategoryTerm(string? term)
@@ -42,12 +45,43 @@ public class ProductsController(AppDbContext db, IUnitOfWork uow) : ControllerBa
     [HttpGet]
     public async Task<IActionResult> GetAll([FromQuery] ProductQueryParams q)
     {
-        var query = _db.Products
+        var pageSize = Math.Clamp(q.PageSize, 1, 200);
+        var page     = Math.Max(q.Page, 1);
+        var cacheKey = BuildListCacheKey(q, page, pageSize);
+
+        Response.Headers.CacheControl = "public, max-age=20, stale-while-revalidate=120";
+        var result = await _catalogCache.GetOrCreateProductAsync(
+            cacheKey,
+            () => QueryProductListAsync(_db, q, page, pageSize));
+
+        return Ok(result);
+    }
+
+    internal static string BuildListCacheKey(ProductQueryParams q, int page, int pageSize) => string.Join('|',
+        q.Search?.Trim().ToLowerInvariant() ?? "",
+        q.CategoryId?.ToString() ?? "",
+        q.Category?.Trim().ToLowerInvariant() ?? "",
+        q.SubCategory?.Trim().ToLowerInvariant() ?? "",
+        q.Gender?.Trim().ToLowerInvariant() ?? "",
+        q.MinPrice?.ToString(CultureInfo.InvariantCulture) ?? "",
+        q.MaxPrice?.ToString(CultureInfo.InvariantCulture) ?? "",
+        q.MinDiscount?.ToString() ?? "",
+        q.Size?.Trim().ToLowerInvariant() ?? "",
+        q.MinRating?.ToString(CultureInfo.InvariantCulture) ?? "",
+        q.InStock?.ToString() ?? "",
+        q.Featured?.ToString() ?? "",
+        q.SortBy?.Trim().ToLowerInvariant() ?? "newest",
+        page,
+        pageSize);
+
+    internal static async Task<PagedResult<ProductListResponse>> QueryProductListAsync(
+        AppDbContext db,
+        ProductQueryParams q,
+        int page,
+        int pageSize)
+    {
+        var query = db.Products
             .AsNoTracking()
-            .Include(p => p.Category)
-                .ThenInclude(c => c.Parent)
-            .Include(p => p.Images)
-            .Include(p => p.Reviews)
             .Where(p => p.IsActive);
 
         // Intelligent Search (tokens across Title, Tags, Description, Category Name)
@@ -255,20 +289,51 @@ public class ProductsController(AppDbContext db, IUnitOfWork uow) : ControllerBa
             _                        => query.OrderByDescending(p => p.CreatedAt) // newest / latest
         };
 
-        var totalCount = await query.CountAsync();
-        var pageSize   = Math.Clamp(q.PageSize, 1, 100);
-        var page       = Math.Max(q.Page, 1);
-        var totalPages = (int)Math.Ceiling(totalCount / (double)pageSize);
-
-        var items = await query
+        var rows = await query
             .Skip((page - 1) * pageSize)
-            .Take(pageSize)
+            .Take(pageSize + 1)
+            .Select(p => new ProductListRow(
+                p.Id,
+                p.Name,
+                p.Slug,
+                p.ShortDescription,
+                p.Price,
+                p.CompareAtPrice,
+                p.Stock,
+                p.IsFeatured,
+                p.Images
+                    .Where(i => i.IsPrimary)
+                    .OrderBy(i => i.SortOrder)
+                    .Select(i => i.Url)
+                    .FirstOrDefault()
+                    ?? p.Images
+                        .OrderBy(i => i.SortOrder)
+                        .Select(i => i.Url)
+                        .FirstOrDefault(),
+                p.Category.Name,
+                p.Reviews.Average(r => (double?)r.Rating) ?? 0.0,
+                p.Reviews.Count()))
             .ToListAsync();
 
-        var dtos = items.Select(MapToListResponse).ToList();
+        int totalCount;
+        if (rows.Count > pageSize)
+        {
+            rows.RemoveAt(pageSize);
+            totalCount = await query.CountAsync();
+        }
+        else if (page > 1 && rows.Count == 0)
+        {
+            totalCount = await query.CountAsync();
+        }
+        else
+        {
+            totalCount = rows.Count == 0 ? 0 : (page - 1) * pageSize + rows.Count;
+        }
 
-        return Ok(new PagedResult<ProductListResponse>(
-            dtos, totalCount, page, pageSize, totalPages));
+        var totalPages = (int)Math.Ceiling(totalCount / (double)pageSize);
+        var dtos = rows.Select(MapRowToListResponse).ToList();
+
+        return new PagedResult<ProductListResponse>(dtos, totalCount, page, pageSize, totalPages);
     }
 
     // ── GET /api/products/search-suggestions ──────────────────────────────────
@@ -279,129 +344,221 @@ public class ProductsController(AppDbContext db, IUnitOfWork uow) : ControllerBa
             return Ok(new { products = Array.Empty<object>(), categories = Array.Empty<object>() });
 
         var term = q.Trim().ToLowerInvariant();
-        var normalizedCat = NormalizeCategoryTerm(term);
+        Response.Headers.CacheControl = "public, max-age=30, stale-while-revalidate=120";
 
-        var catQuery = _db.Categories
-            .AsNoTracking()
-            .Where(c => c.IsActive);
-
-        if (normalizedCat == "men")
-        {
-            catQuery = catQuery.Where(c => c.Slug == "men" || (c.Parent != null && c.Parent.Slug == "men"));
-        }
-        else if (normalizedCat == "women")
-        {
-            catQuery = catQuery.Where(c => c.Slug == "women" || (c.Parent != null && c.Parent.Slug == "women"));
-        }
-        else if (normalizedCat == "kids")
-        {
-            catQuery = catQuery.Where(c => c.Slug == "kids" || (c.Parent != null && c.Parent.Slug == "kids"));
-        }
-        else
-        {
-            var pattern = $"%{term}%";
-            catQuery = catQuery.Where(c => EF.Functions.ILike(c.Name, pattern) || c.Slug == normalizedCat);
-        }
-
-        var matchingCategories = await catQuery
-            .OrderBy(c => c.SortOrder)
-            .Take(4)
-            .Select(c => new { c.Id, c.Name, c.Slug })
-            .ToListAsync();
-
-        var prodQuery = _db.Products
-            .AsNoTracking()
-            .Include(p => p.Images)
-            .Include(p => p.Category)
-                .ThenInclude(c => c.Parent)
-            .Where(p => p.IsActive);
-
-        if (normalizedCat == "men")
-        {
-            prodQuery = prodQuery.Where(p =>
-                (p.Category.Slug == "men" || (p.Category.Parent != null && p.Category.Parent.Slug == "men")) &&
-                p.Category.Slug != "women" &&
-                (p.Category.Parent == null || p.Category.Parent.Slug != "women")
-            );
-        }
-        else if (normalizedCat == "women")
-        {
-            prodQuery = prodQuery.Where(p =>
-                (p.Category.Slug == "women" || (p.Category.Parent != null && p.Category.Parent.Slug == "women")) &&
-                p.Category.Slug != "men" &&
-                (p.Category.Parent == null || p.Category.Parent.Slug != "men")
-            );
-        }
-        else if (normalizedCat == "kids")
-        {
-            prodQuery = prodQuery.Where(p =>
-                p.Category.Slug == "kids" ||
-                (p.Category.Parent != null && p.Category.Parent.Slug == "kids")
-            );
-        }
-        else
-        {
-            var pattern = $"%{term}%";
-            prodQuery = prodQuery.Where(p =>
-                EF.Functions.ILike(p.Name, pattern) ||
-                (p.Tags != null && EF.Functions.ILike(p.Tags, pattern)) ||
-                EF.Functions.ILike(p.Category.Name, pattern)
-            );
-        }
-
-        var matchingProducts = await prodQuery
-            .OrderByDescending(p => p.IsFeatured)
-            .ThenByDescending(p => p.CreatedAt)
-            .Take(6)
-            .Select(p => new
+        var payload = await _catalogCache.GetOrCreateProductAsync(
+            $"suggest:{term}",
+            async () =>
             {
-                p.Id,
-                p.Name,
-                p.Slug,
-                p.Price,
-                CategoryName = p.Category.Name,
-                PrimaryImageUrl = p.Images.Where(i => i.IsPrimary).Select(i => i.Url).FirstOrDefault() ??
-                                  p.Images.OrderBy(i => i.SortOrder).Select(i => i.Url).FirstOrDefault()
-            })
-            .ToListAsync();
+                var normalizedCat = NormalizeCategoryTerm(term);
 
-        return Ok(new { products = matchingProducts, categories = matchingCategories });
+                var catQuery = _db.Categories
+                    .AsNoTracking()
+                    .Where(c => c.IsActive);
+
+                if (normalizedCat == "men")
+                {
+                    catQuery = catQuery.Where(c => c.Slug == "men" || (c.Parent != null && c.Parent.Slug == "men"));
+                }
+                else if (normalizedCat == "women")
+                {
+                    catQuery = catQuery.Where(c => c.Slug == "women" || (c.Parent != null && c.Parent.Slug == "women"));
+                }
+                else if (normalizedCat == "kids")
+                {
+                    catQuery = catQuery.Where(c => c.Slug == "kids" || (c.Parent != null && c.Parent.Slug == "kids"));
+                }
+                else
+                {
+                    var pattern = $"%{term}%";
+                    catQuery = catQuery.Where(c => EF.Functions.ILike(c.Name, pattern) || c.Slug == normalizedCat);
+                }
+
+                var matchingCategories = await catQuery
+                    .OrderBy(c => c.SortOrder)
+                    .Take(4)
+                    .Select(c => new { c.Id, c.Name, c.Slug })
+                    .ToListAsync();
+
+                var prodQuery = _db.Products
+                    .AsNoTracking()
+                    .Where(p => p.IsActive);
+
+                if (normalizedCat == "men")
+                {
+                    prodQuery = prodQuery.Where(p =>
+                        (p.Category.Slug == "men" || (p.Category.Parent != null && p.Category.Parent.Slug == "men")) &&
+                        p.Category.Slug != "women" &&
+                        (p.Category.Parent == null || p.Category.Parent.Slug != "women"));
+                }
+                else if (normalizedCat == "women")
+                {
+                    prodQuery = prodQuery.Where(p =>
+                        (p.Category.Slug == "women" || (p.Category.Parent != null && p.Category.Parent.Slug == "women")) &&
+                        p.Category.Slug != "men" &&
+                        (p.Category.Parent == null || p.Category.Parent.Slug != "men"));
+                }
+                else if (normalizedCat == "kids")
+                {
+                    prodQuery = prodQuery.Where(p =>
+                        p.Category.Slug == "kids" ||
+                        (p.Category.Parent != null && p.Category.Parent.Slug == "kids"));
+                }
+                else
+                {
+                    var pattern = $"%{term}%";
+                    prodQuery = prodQuery.Where(p =>
+                        EF.Functions.ILike(p.Name, pattern) ||
+                        (p.Tags != null && EF.Functions.ILike(p.Tags, pattern)) ||
+                        EF.Functions.ILike(p.Category.Name, pattern));
+                }
+
+                var matchingProducts = await prodQuery
+                    .OrderByDescending(p => p.IsFeatured)
+                    .ThenByDescending(p => p.CreatedAt)
+                    .Take(6)
+                    .Select(p => new
+                    {
+                        p.Id,
+                        p.Name,
+                        p.Slug,
+                        p.Price,
+                        CategoryName = p.Category.Name,
+                        PrimaryImageUrl = p.Images
+                            .Where(i => i.IsPrimary)
+                            .OrderBy(i => i.SortOrder)
+                            .Select(i => i.Url)
+                            .FirstOrDefault()
+                            ?? p.Images
+                                .OrderBy(i => i.SortOrder)
+                                .Select(i => i.Url)
+                                .FirstOrDefault()
+                    })
+                    .ToListAsync();
+
+                return new { products = matchingProducts, categories = matchingCategories };
+            },
+            TimeSpan.FromMinutes(3));
+
+        return Ok(payload);
     }
 
     // ── GET /api/products/featured ────────────────────────────────────────────
     [HttpGet("featured")]
     public async Task<IActionResult> GetFeatured()
     {
-        var products = await _db.Products
+        Response.Headers.CacheControl = "public, max-age=30, stale-while-revalidate=120";
+        var featured = await _catalogCache.GetOrCreateProductAsync(
+            "featured",
+            () => LoadFeaturedAsync(_db));
+
+        return Ok(featured);
+    }
+
+    internal static async Task<List<ProductListResponse>> LoadFeaturedAsync(AppDbContext db)
+    {
+        var rows = await db.Products
             .AsNoTracking()
-            .Include(p => p.Category)
-            .Include(p => p.Images)
-            .Include(p => p.Reviews)
             .Where(p => p.IsActive && p.IsFeatured)
             .OrderByDescending(p => p.CreatedAt)
             .Take(8)
+            .Select(p => new ProductListRow(
+                p.Id,
+                p.Name,
+                p.Slug,
+                p.ShortDescription,
+                p.Price,
+                p.CompareAtPrice,
+                p.Stock,
+                p.IsFeatured,
+                p.Images
+                    .Where(i => i.IsPrimary)
+                    .OrderBy(i => i.SortOrder)
+                    .Select(i => i.Url)
+                    .FirstOrDefault()
+                    ?? p.Images
+                        .OrderBy(i => i.SortOrder)
+                        .Select(i => i.Url)
+                        .FirstOrDefault(),
+                p.Category.Name,
+                p.Reviews.Average(r => (double?)r.Rating) ?? 0.0,
+                p.Reviews.Count()))
             .ToListAsync();
 
-        return Ok(products.Select(MapToListResponse));
+        return rows.Select(MapRowToListResponse).ToList();
     }
 
     // ── GET /api/products/{slug} ──────────────────────────────────────────────
     [HttpGet("{slug}")]
     public async Task<IActionResult> GetBySlug(string slug)
     {
-        var product = await _db.Products
-            .AsNoTracking()
-            .Include(p => p.Category)
-            .Include(p => p.Images.OrderBy(i => i.SortOrder))
-            .Include(p => p.Variants.Where(v => v.IsActive))
-            .Include(p => p.Reviews.Where(r => r.IsApproved))
-                .ThenInclude(r => r.User)
-            .FirstOrDefaultAsync(p => p.Slug == slug && p.IsActive);
+        var key = $"slug:{slug.Trim().ToLowerInvariant()}";
+        Response.Headers.CacheControl = "public, max-age=20, stale-while-revalidate=120";
 
-        if (product is null)
+        if (_catalogCache.TryGetProduct<ProductDetailResponse>(key, out var cached) && cached is not null)
+            return Ok(cached);
+
+        var row = await _db.Products
+            .AsNoTracking()
+            .Where(p => p.Slug == slug && p.IsActive)
+            .Select(p => new
+            {
+                p.Id,
+                p.Name,
+                p.Slug,
+                p.Description,
+                p.ShortDescription,
+                p.Price,
+                p.CompareAtPrice,
+                p.SKU,
+                p.Stock,
+                p.IsFeatured,
+                p.TrackInventory,
+                p.Tags,
+                CategoryName = p.Category.Name,
+                p.CategoryId,
+                p.MetaTitle,
+                p.MetaDescription,
+                Images = p.Images
+                    .OrderBy(i => i.SortOrder)
+                    .Select(i => new ProductImageDto(i.Id, i.Url, i.AltText, i.IsPrimary, i.SortOrder))
+                    .ToList(),
+                Variants = p.Variants
+                    .Where(v => v.IsActive)
+                    .Select(v => new ProductVariantDto(v.Id, v.Name, v.Value, v.PriceModifier, v.Stock, v.SKU))
+                    .ToList(),
+                AverageRating = p.Reviews.Where(r => r.IsApproved).Average(r => (double?)r.Rating) ?? 0.0,
+                ReviewCount = p.Reviews.Count(r => r.IsApproved)
+            })
+            .FirstOrDefaultAsync();
+
+        if (row is null)
             return NotFound(new { message = "Product not found." });
 
-        return Ok(MapToDetailResponse(product));
+        var dto = new ProductDetailResponse(
+            Id:               row.Id,
+            Name:             row.Name,
+            Slug:             row.Slug,
+            Description:      row.Description,
+            ShortDescription: row.ShortDescription,
+            Price:            row.Price,
+            CompareAtPrice:   row.CompareAtPrice,
+            SKU:              row.SKU,
+            Stock:            row.Stock,
+            IsFeatured:       row.IsFeatured,
+            TrackInventory:   row.TrackInventory,
+            Tags:             row.Tags,
+            CategoryName:     row.CategoryName,
+            CategoryId:       row.CategoryId,
+            MetaTitle:        row.MetaTitle,
+            MetaDescription:  row.MetaDescription,
+            Images:           row.Images,
+            Variants:         row.Variants,
+            AverageRating:    Math.Round(row.AverageRating, 1),
+            ReviewCount:      row.ReviewCount);
+
+        _catalogCache.SetProduct(key, dto);
+        return Ok(dto);
     }
 
     // ── POST /api/products ─────────────────────────────────────────────────── (Admin)
@@ -455,6 +612,7 @@ public class ProductsController(AppDbContext db, IUnitOfWork uow) : ControllerBa
         }
 
         await _uow.SaveChangesAsync();
+        _catalogCache.InvalidateAll();
 
         return CreatedAtAction(nameof(GetBySlug), new { slug = product.Slug }, new { id = product.Id, slug = product.Slug });
     }
@@ -518,6 +676,7 @@ public class ProductsController(AppDbContext db, IUnitOfWork uow) : ControllerBa
         }
 
         await _uow.SaveChangesAsync();
+        _catalogCache.InvalidateAll();
 
         return Ok(new
         {
@@ -561,6 +720,7 @@ public class ProductsController(AppDbContext db, IUnitOfWork uow) : ControllerBa
 
         _db.Products.Update(product);
         await _uow.SaveChangesAsync();
+        _catalogCache.InvalidateAll();
 
         return NoContent();
     }
@@ -576,6 +736,7 @@ public class ProductsController(AppDbContext db, IUnitOfWork uow) : ControllerBa
         product.IsActive = false; // soft delete
         _db.Products.Update(product);
         await _uow.SaveChangesAsync();
+        _catalogCache.InvalidateAll();
 
         return NoContent();
     }
@@ -611,6 +772,7 @@ public class ProductsController(AppDbContext db, IUnitOfWork uow) : ControllerBa
 
         await _db.ProductImages.AddAsync(image);
         await _uow.SaveChangesAsync();
+        _catalogCache.InvalidateProducts();
 
         return Ok(new { id = image.Id, url = image.Url });
     }
@@ -625,6 +787,7 @@ public class ProductsController(AppDbContext db, IUnitOfWork uow) : ControllerBa
 
         _db.ProductImages.Remove(image);
         await _uow.SaveChangesAsync();
+        _catalogCache.InvalidateProducts();
 
         return NoContent();
     }
@@ -654,52 +817,33 @@ public class ProductsController(AppDbContext db, IUnitOfWork uow) : ControllerBa
         return candidate;
     }
 
-    private static ProductListResponse MapToListResponse(Product p) => new(
-        Id:              p.Id,
-        Name:            p.Name,
-        Slug:            p.Slug,
-        ShortDescription: p.ShortDescription,
-        Price:           p.Price,
-        CompareAtPrice:  p.CompareAtPrice,
-        Stock:           p.Stock,
-        IsFeatured:      p.IsFeatured,
-        PrimaryImageUrl: p.Images.FirstOrDefault(i => i.IsPrimary)?.Url
-                         ?? p.Images.OrderBy(i => i.SortOrder).FirstOrDefault()?.Url,
-        CategoryName:    p.Category.Name,
-        AverageRating:   p.Reviews.Count > 0
-                            ? Math.Round(p.Reviews.Average(r => r.Rating), 1)
-                            : 0,
-        ReviewCount:     p.Reviews.Count
-    );
+    private sealed record ProductListRow(
+        Guid Id,
+        string Name,
+        string Slug,
+        string? ShortDescription,
+        decimal Price,
+        decimal? CompareAtPrice,
+        int Stock,
+        bool IsFeatured,
+        string? PrimaryImageUrl,
+        string CategoryName,
+        double AverageRating,
+        int ReviewCount);
 
-    private static ProductDetailResponse MapToDetailResponse(Product p) => new(
-        Id:              p.Id,
-        Name:            p.Name,
-        Slug:            p.Slug,
-        Description:     p.Description,
-        ShortDescription: p.ShortDescription,
-        Price:           p.Price,
-        CompareAtPrice:  p.CompareAtPrice,
-        SKU:             p.SKU,
-        Stock:           p.Stock,
-        IsFeatured:      p.IsFeatured,
-        TrackInventory:  p.TrackInventory,
-        Tags:            p.Tags,
-        CategoryName:    p.Category.Name,
-        CategoryId:      p.CategoryId,
-        MetaTitle:       p.MetaTitle,
-        MetaDescription: p.MetaDescription,
-        Images:          p.Images
-                          .OrderBy(i => i.SortOrder)
-                          .Select(i => new ProductImageDto(i.Id, i.Url, i.AltText, i.IsPrimary, i.SortOrder))
-                          .ToList(),
-        Variants:        p.Variants
-                          .Select(v => new ProductVariantDto(v.Id, v.Name, v.Value, v.PriceModifier, v.Stock, v.SKU))
-                          .ToList(),
-        AverageRating:   p.Reviews.Count > 0
-                            ? Math.Round(p.Reviews.Average(r => r.Rating), 1)
-                            : 0,
-        ReviewCount:     p.Reviews.Count
+    private static ProductListResponse MapRowToListResponse(ProductListRow r) => new(
+        Id:               r.Id,
+        Name:             r.Name,
+        Slug:             r.Slug,
+        ShortDescription: r.ShortDescription,
+        Price:            r.Price,
+        CompareAtPrice:   r.CompareAtPrice,
+        Stock:            r.Stock,
+        IsFeatured:       r.IsFeatured,
+        PrimaryImageUrl:  r.PrimaryImageUrl,
+        CategoryName:     r.CategoryName,
+        AverageRating:    Math.Round(r.AverageRating, 1),
+        ReviewCount:      r.ReviewCount
     );
 }
 

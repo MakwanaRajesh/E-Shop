@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using EShop.API.Services;
 using EShop.Core.DTOs;
 using EShop.Core.Entities;
 using EShop.Core.Interfaces;
@@ -11,10 +12,11 @@ namespace EShop.API.Controllers;
 
 [ApiController]
 [Route("api/reviews")]
-public class ReviewsController(AppDbContext db, IUnitOfWork uow) : ControllerBase
+public class ReviewsController(AppDbContext db, IUnitOfWork uow, CatalogCacheService catalogCache) : ControllerBase
 {
-    private readonly AppDbContext _db  = db;
-    private readonly IUnitOfWork  _uow = uow;
+    private readonly AppDbContext        _db           = db;
+    private readonly IUnitOfWork         _uow          = uow;
+    private readonly CatalogCacheService _catalogCache = catalogCache;
 
     // ── GET /api/reviews/product/{productId} ──────────────────────────────────
     [HttpGet("product/{productId:guid}")]
@@ -67,6 +69,7 @@ public class ReviewsController(AppDbContext db, IUnitOfWork uow) : ControllerBas
 
         await _db.Reviews.AddAsync(review);
         await _uow.SaveChangesAsync();
+        _catalogCache.InvalidateProducts();
 
         // Reload with user for response mapping
         var created = await _db.Reviews
@@ -92,6 +95,7 @@ public class ReviewsController(AppDbContext db, IUnitOfWork uow) : ControllerBas
 
         _db.Reviews.Remove(review);
         await _uow.SaveChangesAsync();
+        _catalogCache.InvalidateProducts();
 
         return NoContent();
     }

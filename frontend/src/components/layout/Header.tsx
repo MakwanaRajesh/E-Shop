@@ -28,6 +28,7 @@ import { useWishlistStore } from '@/store/wishlist'
 import { useAuthModalStore } from '@/store/authModal'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import api from '@/lib/api'
+import { prefetchCatalogEndpoint } from '@/lib/catalogCache'
 
 // Mega-Menu Category Definitions (SHEIN / AJIO / Flipkart style)
 export const MEGA_MENU_CATEGORIES = [
@@ -47,7 +48,7 @@ export const MEGA_MENU_CATEGORIES = [
         title: 'Topwear',
         items: [
           { label: "T-Shirts & Polos", href: '/products?category=men&subCategory=men-t-shirts' },
-          { label: 'Co-ord Sets', href: '/products?category=men&subCategory=men-co-ord-sets' },
+          { label: 'Co-ord Sets', href: '/products?category=men&subCategory=mens-co-ord-sets' },
           { label: 'Casual Shirts', href: '/products?category=men&subCategory=men-shirts' },
           { label: 'Formal Shirts', href: '/products?category=men&search=formal+shirt' },
           { label: 'Hoodies & Sweatshirts', href: '/products?category=men&search=hoodie' },
@@ -298,6 +299,10 @@ export function Header() {
       hoverTimeoutRef.current = null
     }
     setActiveMegaMenu(catName)
+    const slug = MEGA_MENU_CATEGORIES.find((c) => c.name === catName)?.slug
+    if (slug && slug !== 'sale') {
+      prefetchCatalogEndpoint('/api/products', { category: slug, page: 1, pageSize: 24, sortBy: 'relevant' })
+    }
   }
 
   const handleMouseLeave = () => {

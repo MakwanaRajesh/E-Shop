@@ -18,14 +18,16 @@ import toast from 'react-hot-toast'
 interface ProductCardProps {
   product: ProductListItem
   className?: string
+  priority?: boolean
 }
 
-export function ProductCard({ product, className }: ProductCardProps) {
+export function ProductCard({ product, className, priority = false }: ProductCardProps) {
   const [isHovered, setIsHovered] = React.useState(false)
   const [isAddingToCart, setIsAddingToCart] = React.useState(false)
   const [imageLoaded, setImageLoaded] = React.useState(false)
   const [imageError, setImageError] = React.useState(false)
   const [quickViewOpen, setQuickViewOpen] = React.useState(false)
+  const imgRef = React.useRef<HTMLImageElement | null>(null)
   const { isAuthenticated } = useAuthStore()
   const { addItem } = useCartStore()
   const { isInWishlist, addItem: addToWishlist, removeItem: removeFromWishlist } = useWishlistStore()
@@ -37,6 +39,16 @@ export function ProductCard({ product, className }: ProductCardProps) {
   const inWishlist = isInWishlist(product.id)
   const imageUrl = product.primaryImageUrl ?? product.primaryImage
   const categoryLabel = product.categoryName ?? product.category?.name ?? 'Collection'
+  const optimizedImageSrc = React.useMemo(() => optimizeImageUrl(imageUrl, 450, 65), [imageUrl])
+
+  React.useEffect(() => {
+    setImageError(false)
+    if (imgRef.current && imgRef.current.complete && imgRef.current.naturalWidth > 0) {
+      setImageLoaded(true)
+    } else {
+      setImageLoaded(false)
+    }
+  }, [optimizedImageSrc])
 
   const handleAddToCart = async (e: React.MouseEvent) => {
     e.preventDefault()
@@ -113,21 +125,25 @@ export function ProductCard({ product, className }: ProductCardProps) {
 
           {imageUrl && !imageError ? (
             <Image
-              src={optimizeImageUrl(imageUrl, 450, 65)}
+              ref={imgRef}
+              src={optimizedImageSrc}
               alt={product.name}
               fill
-              loading="eager"
+              priority={priority}
+              loading={priority ? 'eager' : 'lazy'}
+              fetchPriority={priority ? 'high' : 'auto'}
+              decoding="async"
               onLoad={() => setImageLoaded(true)}
               onError={() => {
                 setImageError(true)
                 setImageLoaded(true)
               }}
               className={cn(
-                'object-cover transition-all duration-500 z-10',
-                imageLoaded ? 'opacity-100 scale-100' : 'opacity-0 scale-95',
-                isHovered && 'scale-105',
+                'object-cover transition-opacity duration-200 z-10',
+                imageLoaded ? 'opacity-100' : 'opacity-0',
+                isHovered && 'scale-105 transition-transform duration-300',
               )}
-              sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
+              sizes="(max-width: 640px) 100vw, (max-width: 1200px) 50vw, 25vw"
             />
           ) : (
             <div className="absolute inset-0 flex items-center justify-center text-[#A8A29E]/40">

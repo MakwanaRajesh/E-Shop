@@ -28,6 +28,7 @@ import { StatusBadge } from '@/components/ui/StatusBadge'
 import { ProductDetailSkeleton } from '@/components/ui/Skeleton'
 import { ProductCard } from '@/components/product/ProductCard'
 import api from '@/lib/api'
+import { buildCatalogKey, fetchWithCatalogCache, invalidateFrontendCatalogCache, peekCatalogCache } from '@/lib/catalogCache'
 import type { Product, ProductListItem, Review } from '@/types'
 import { cn, formatCurrency, getStockStatus, calculateDiscount, formatRelativeDate, optimizeImageUrl } from '@/lib/utils'
 import { useAuthStore } from '@/store/auth'
@@ -74,9 +75,9 @@ function getSimilarProductQuery(product: Product): {
 
   if (/\b(co-ord|coord)\b/.test(text)) {
     return {
-      params: { category: 'men-co-ord-sets', pageSize: 12 },
+      params: { category: 'mens-co-ord-sets', pageSize: 12 },
       label: "More Men's Co-ord Sets",
-      viewAllHref: '/products?category=men&subCategory=men-co-ord-sets',
+      viewAllHref: '/products?category=men&subCategory=mens-co-ord-sets',
     }
   }
   if (/\b(t-shirt|tshirt|tee|tees|polo)\b/.test(text)) {
@@ -231,6 +232,7 @@ export default function ProductDetailPage({ params }: Props) {
         comment: reviewComment.trim(),
       })
       setReviews((prev) => [data, ...prev])
+      invalidateFrontendCatalogCache()
       setReviewTitle('')
       setReviewComment('')
       setReviewRating(5)
@@ -244,118 +246,173 @@ export default function ProductDetailPage({ params }: Props) {
   }
 
   React.useEffect(() => {
-    const fetchProduct = async () => {
-      setIsLoading(true)
-      try {
-        const productRes = await api.get<Product>(`/api/products/${slug}`)
-        setProduct(productRes.data)
-        addRecentlyViewed({
-          id: productRes.data.id,
-          name: productRes.data.name,
-          slug: productRes.data.slug,
-          shortDescription: productRes.data.shortDescription,
-          price: productRes.data.price,
-          compareAtPrice: productRes.data.compareAtPrice,
-          primaryImageUrl: productRes.data.images?.[0]?.url,
-          categoryName: productRes.data.categoryName,
-          averageRating: productRes.data.averageRating ?? 0,
-          reviewCount: productRes.data.reviewCount ?? 0,
-          stock: productRes.data.stock ?? productRes.data.stockQuantity ?? 0,
-          isFeatured: !!productRes.data.isFeatured,
-        })
+    let active = true
 
-        if (productRes.data.variants?.length > 0) {
-          setSelectedVariantId(productRes.data.variants[0].id)
-        }
+    const applyProductState = (p: Product) => {
+      setProduct(p)
+      setSelectedImageIdx(0)
+      setQuantity(1)
+      addRecentlyViewed({
+        id: p.id,
+        name: p.name,
+        slug: p.slug,
+        shortDescription: p.shortDescription,
+        price: p.price,
+        compareAtPrice: p.compareAtPrice,
+        primaryImageUrl: p.images?.[0]?.url,
+        categoryName: p.categoryName,
+        averageRating: p.averageRating ?? 0,
+        reviewCount: p.reviewCount ?? 0,
+        stock: p.stock ?? p.stockQuantity ?? 0,
+        isFeatured: !!p.isFeatured,
+      })
 
-        // Auto-detect default size tab based on category and title
-        const catLower = (productRes.data.categoryName || '').toLowerCase()
-        const nameLower = (productRes.data.name || '').toLowerCase()
-        if (
-          catLower.includes('footwear') ||
-          catLower.includes('shoe') ||
-          nameLower.includes('sneaker') ||
-          nameLower.includes('shoe') ||
-          nameLower.includes('heel') ||
-          nameLower.includes('loafer') ||
-          nameLower.includes('flat')
-        ) {
-          setSizeTab('footwear')
-        } else if (
-          catLower.includes('denim') ||
-          catLower.includes('jean') ||
-          catLower.includes('trouser') ||
-          catLower.includes('pant') ||
-          catLower.includes('short') ||
-          nameLower.includes('denim') ||
-          nameLower.includes('jean') ||
-          nameLower.includes('trouser') ||
-          nameLower.includes('pant') ||
-          nameLower.includes('cargo') ||
-          nameLower.includes('shorts')
-        ) {
-          setSizeTab('bottoms')
-        } else {
-          setSizeTab('tops')
-        }
+      setSelectedVariantId(p.variants?.length > 0 ? p.variants[0].id : undefined)
 
-        // Fetch reviews by product ID
-        try {
-          const reviewsRes = await api.get<Review[]>(`/api/reviews/product/${productRes.data.id}`)
-          setReviews(Array.isArray(reviewsRes.data) ? reviewsRes.data : [])
-        } catch {
-          setReviews([])
-        }
-
-        // Fetch smart similar-type products (e.g. T-shirts across Men/Women, Denim, Footwear) + same category
-        const similarQuery = getSimilarProductQuery(productRes.data)
-        setRelatedMeta({ label: similarQuery.label, viewAllHref: similarQuery.viewAllHref })
-        let relatedIds = new Set<string>([productRes.data.id])
-        try {
-          const [similarRes, catRes] = await Promise.all([
-            api.get<{ data?: ProductListItem[]; items?: ProductListItem[] }>('/api/products', {
-              params: similarQuery.params,
-            }),
-            productRes.data.categoryId
-              ? api.get<{ data?: ProductListItem[]; items?: ProductListItem[] }>('/api/products', {
-                  params: { pageSize: 8, categoryId: productRes.data.categoryId },
-                })
-              : Promise.resolve(null),
-          ])
-          const similarList = similarRes.data.items ?? similarRes.data.data ?? []
-          const catList = catRes?.data?.items ?? catRes?.data?.data ?? []
-          const merged: ProductListItem[] = []
-          for (const item of [...similarList, ...catList]) {
-            if (!relatedIds.has(item.id)) {
-              relatedIds.add(item.id)
-              merged.push(item)
-            }
-          }
-          setRelated(merged.slice(0, 8))
-        } catch {
-          setRelated([])
-        }
-
-        // Fetch initial batch of other catalog products for scroll discovery
-        try {
-          const moreRes = await api.get<{ data?: ProductListItem[]; items?: ProductListItem[]; totalPages?: number }>('/api/products', {
-            params: { page: 1, pageSize: 8, sortBy: 'featured' },
-          })
-          const moreList = (moreRes.data.items ?? moreRes.data.data ?? []).filter((p) => !relatedIds.has(p.id))
-          setMoreProducts(moreList)
-          setMorePage(1)
-          setHasMoreProducts((moreRes.data.totalPages ?? 1) > 1)
-        } catch {
-          setMoreProducts([])
-          setHasMoreProducts(false)
-        }
-      } catch {
-        notFound()
-      } finally {
-        setIsLoading(false)
+      const catLower = (p.categoryName || '').toLowerCase()
+      const nameLower = (p.name || '').toLowerCase()
+      if (
+        catLower.includes('footwear') ||
+        catLower.includes('shoe') ||
+        nameLower.includes('sneaker') ||
+        nameLower.includes('shoe') ||
+        nameLower.includes('heel') ||
+        nameLower.includes('loafer') ||
+        nameLower.includes('flat')
+      ) {
+        setSizeTab('footwear')
+      } else if (
+        catLower.includes('denim') ||
+        catLower.includes('jean') ||
+        catLower.includes('trouser') ||
+        catLower.includes('pant') ||
+        catLower.includes('short') ||
+        nameLower.includes('denim') ||
+        nameLower.includes('jean') ||
+        nameLower.includes('trouser') ||
+        nameLower.includes('pant') ||
+        nameLower.includes('cargo') ||
+        nameLower.includes('shorts')
+      ) {
+        setSizeTab('bottoms')
+      } else {
+        setSizeTab('tops')
       }
     }
+
+    const loadSecondarySections = async (p: Product) => {
+      const similarQuery = getSimilarProductQuery(p)
+      if (active) {
+        setRelatedMeta({ label: similarQuery.label, viewAllHref: similarQuery.viewAllHref })
+      }
+
+      const reviewsKey = `/api/reviews/product/${p.id}`
+      const similarKey = buildCatalogKey('/api/products', similarQuery.params)
+      const catParams = p.categoryId ? { pageSize: 8, categoryId: p.categoryId } : null
+      const catKey = catParams ? buildCatalogKey('/api/products', catParams) : null
+      const moreParams = { page: 1, pageSize: 8, sortBy: 'featured' }
+      const moreKey = buildCatalogKey('/api/products', moreParams)
+
+      const [reviewsSettled, similarSettled, catSettled, moreSettled] = await Promise.allSettled([
+        fetchWithCatalogCache<Review[]>(reviewsKey, async () => {
+          const r = await api.get<Review[]>(reviewsKey)
+          return Array.isArray(r.data) ? r.data : []
+        }),
+        fetchWithCatalogCache<{ data?: ProductListItem[]; items?: ProductListItem[] }>(similarKey, async () => {
+          const r = await api.get<{ data?: ProductListItem[]; items?: ProductListItem[] }>('/api/products', {
+            params: similarQuery.params,
+          })
+          return r.data
+        }),
+        catParams && catKey
+          ? fetchWithCatalogCache<{ data?: ProductListItem[]; items?: ProductListItem[] }>(catKey, async () => {
+              const r = await api.get<{ data?: ProductListItem[]; items?: ProductListItem[] }>('/api/products', {
+                params: catParams,
+              })
+              return r.data
+            })
+          : Promise.resolve(null),
+        fetchWithCatalogCache<{ data?: ProductListItem[]; items?: ProductListItem[]; totalPages?: number }>(
+          moreKey,
+          async () => {
+            const r = await api.get<{ data?: ProductListItem[]; items?: ProductListItem[]; totalPages?: number }>(
+              '/api/products',
+              { params: moreParams },
+            )
+            return r.data
+          },
+        ),
+      ])
+
+      if (!active) return
+
+      setReviews(reviewsSettled.status === 'fulfilled' ? reviewsSettled.value : [])
+
+      const relatedIds = new Set<string>([p.id])
+      const similarList =
+        similarSettled.status === 'fulfilled'
+          ? (similarSettled.value.items ?? similarSettled.value.data ?? [])
+          : []
+      const catList =
+        catSettled.status === 'fulfilled' && catSettled.value
+          ? (catSettled.value.items ?? catSettled.value.data ?? [])
+          : []
+
+      const merged: ProductListItem[] = []
+      for (const item of [...similarList, ...catList]) {
+        if (!relatedIds.has(item.id)) {
+          relatedIds.add(item.id)
+          merged.push(item)
+        }
+      }
+      setRelated(merged.slice(0, 8))
+
+      if (moreSettled.status === 'fulfilled') {
+        const moreList = (moreSettled.value.items ?? moreSettled.value.data ?? []).filter(
+          (item) => !relatedIds.has(item.id),
+        )
+        setMoreProducts(moreList)
+        setMorePage(1)
+        setHasMoreProducts((moreSettled.value.totalPages ?? 1) > 1)
+      } else {
+        setMoreProducts([])
+        setHasMoreProducts(false)
+      }
+    }
+
+    const fetchProduct = async () => {
+      const detailKey = `/api/products/${slug}`
+      const cached = peekCatalogCache<Product>(detailKey)
+
+      if (cached?.data && active) {
+        applyProductState(cached.data)
+        setIsLoading(false)
+        void loadSecondarySections(cached.data)
+        if (cached.isFresh) return
+      } else {
+        setIsLoading(true)
+      }
+
+      try {
+        const productData = await fetchWithCatalogCache<Product>(detailKey, async () => {
+          const res = await api.get<Product>(detailKey)
+          return res.data
+        })
+        if (!active) return
+        applyProductState(productData)
+        setIsLoading(false)
+        void loadSecondarySections(productData)
+      } catch {
+        if (active && !cached?.data) notFound()
+      } finally {
+        if (active) setIsLoading(false)
+      }
+    }
+
     fetchProduct()
+    return () => {
+      active = false
+    }
   }, [slug])
 
   const loadNextMoreProducts = React.useCallback(async () => {
@@ -1221,8 +1278,8 @@ export default function ProductDetailPage({ params }: Props) {
             </Link>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-            {related.map((relProd) => (
-              <ProductCard key={relProd.id} product={relProd} />
+            {related.map((relProd, idx) => (
+              <ProductCard key={relProd.id} product={relProd} priority={idx < 4} />
             ))}
           </div>
         </section>

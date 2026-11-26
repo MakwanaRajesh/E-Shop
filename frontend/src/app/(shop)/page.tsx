@@ -9,6 +9,7 @@ import { ProductCard } from '@/components/product/ProductCard'
 import { ProductCardSkeleton } from '@/components/ui/Skeleton'
 import type { ProductListItem } from '@/types'
 import api from '@/lib/api'
+import { fetchWithCatalogCache, peekCatalogCache, prefetchCatalogEndpoint } from '@/lib/catalogCache'
 import { useRecentlyViewedStore } from '@/store/recentlyViewed'
 import toast from 'react-hot-toast'
 
@@ -55,7 +56,7 @@ const CATEGORY_CIRCLES = [
   },
   {
     name: 'Co-ord Sets',
-    href: '/products?category=men&subCategory=men-co-ord-sets',
+    href: '/products?category=men&subCategory=mens-co-ord-sets',
     imageUrl: 'https://assets.sheinindia.in/medias/shein_sys_master/root1/20260824/fFTs/6a8c56f05d467f347a00859a/shein_dark_olive_shein_men_spread_collar_textured_polo_tshirt_%26_shorts.jpg',
     tag: 'New',
   },
@@ -131,18 +132,37 @@ export default function HomePage() {
   }, [])
 
   React.useEffect(() => {
+    let active = true
+    const cacheKey = '/api/products/featured'
+
     const fetchFeatured = async () => {
-      try {
-        const res = await api.get<any>('/api/products/featured')
-        const items = Array.isArray(res.data) ? res.data : (res.data.items ?? res.data.data ?? [])
-        setFeaturedProducts(items)
-      } catch {
-        setFeaturedProducts([])
-      } finally {
+      const hit = peekCatalogCache<ProductListItem[]>(cacheKey)
+      if (hit?.data && active) {
+        setFeaturedProducts(hit.data)
         setIsLoading(false)
+        if (hit.isFresh) {
+          prefetchCatalogEndpoint('/api/products', { sortBy: 'relevant', page: 1, pageSize: 24 })
+          return
+        }
+      }
+
+      try {
+        const items = await fetchWithCatalogCache<ProductListItem[]>(cacheKey, async () => {
+          const res = await api.get<any>('/api/products/featured')
+          return Array.isArray(res.data) ? res.data : (res.data.items ?? res.data.data ?? [])
+        })
+        if (active) setFeaturedProducts(items)
+      } catch {
+        if (active && !hit?.data) setFeaturedProducts([])
+      } finally {
+        if (active) setIsLoading(false)
+        prefetchCatalogEndpoint('/api/products', { sortBy: 'relevant', page: 1, pageSize: 24 })
       }
     }
     fetchFeatured()
+    return () => {
+      active = false
+    }
   }, [])
 
   const handleNewsletter = async (e: React.FormEvent) => {
@@ -369,8 +389,8 @@ export default function HomePage() {
             </div>
           ) : featuredProducts.length > 0 ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-              {featuredProducts.slice(0, 8).map((product) => (
-                <ProductCard key={product.id} product={product} />
+              {featuredProducts.slice(0, 8).map((product, idx) => (
+                <ProductCard key={product.id} product={product} priority={idx < 4} />
               ))}
             </div>
           ) : (

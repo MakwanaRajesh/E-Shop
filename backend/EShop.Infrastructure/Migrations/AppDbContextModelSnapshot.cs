@@ -193,6 +193,8 @@ namespace EShop.Infrastructure.Migrations
                     b.HasIndex("Slug")
                         .IsUnique();
 
+                    b.HasIndex("IsActive", "ParentId", "SortOrder");
+
                     b.ToTable("Categories");
                 });
 
@@ -499,6 +501,12 @@ namespace EShop.Infrastructure.Migrations
                     b.HasIndex("Slug")
                         .IsUnique();
 
+                    b.HasIndex("IsActive", "CreatedAt");
+
+                    b.HasIndex("IsActive", "CategoryId", "Price");
+
+                    b.HasIndex("IsActive", "IsFeatured", "CreatedAt");
+
                     b.ToTable("Products");
                 });
 
@@ -532,7 +540,7 @@ namespace EShop.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ProductId");
+                    b.HasIndex("ProductId", "IsPrimary", "SortOrder");
 
                     b.ToTable("ProductImages");
                 });

@@ -51,6 +51,7 @@ import { Badge } from '@/components/ui/Badge'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Input } from '@/components/ui/Input'
 import api from '@/lib/api'
+import { invalidateFrontendCatalogCache } from '@/lib/catalogCache'
 import toast, { Toaster } from 'react-hot-toast'
 import { AuthModal } from '@/components/auth/AuthModal'
 import type { DashboardStats, Order, ProductListItem, Category } from '@/types'
@@ -551,6 +552,7 @@ function AdminContent() {
       }
 
       const res = await api.post<any>('/api/products/bulk', payload)
+      invalidateFrontendCatalogCache()
       toast.success(res.data.message ?? `${validRows.length} products added successfully! 🎉`)
       setShowBulkAddModal(false)
       fetchAllData()
@@ -589,6 +591,7 @@ function AdminContent() {
       }
 
       await api.post('/api/products', payload)
+      invalidateFrontendCatalogCache()
       toast.success('Product published to catalog! 🎉')
       setShowAddProductModal(false)
       setNewProd({
@@ -667,6 +670,7 @@ function AdminContent() {
       }
 
       toast.success('Product updated successfully!')
+      invalidateFrontendCatalogCache()
       setShowEditProductModal(false)
       fetchAllData()
     } catch {
@@ -680,6 +684,7 @@ function AdminContent() {
   const handleToggleProduct = async (prodId: string) => {
     try {
       const res = await api.patch<{ isActive: boolean }>(`/api/admin/products/${prodId}/toggle`)
+      invalidateFrontendCatalogCache()
       setProducts((prev) =>
         prev.map((p) => (p.id === prodId ? { ...p, isActive: res.data.isActive } : p))
       )
@@ -694,6 +699,7 @@ function AdminContent() {
     if (!confirm('Are you sure you want to deactivate and remove this piece?')) return
     try {
       await api.delete(`/api/products/${prodId}`)
+      invalidateFrontendCatalogCache()
       setProducts((prev) => prev.filter((p) => p.id !== prodId))
       toast.success('Product deleted')
     } catch {
@@ -766,6 +772,7 @@ function AdminContent() {
         sortOrder: categories.length + 1,
       })
       toast.success('Category created!')
+      invalidateFrontendCatalogCache()
       setShowAddCategoryModal(false)
       setNewCat({ name: '', description: '', imageUrl: '', parentId: '' })
       fetchAllData()
@@ -791,6 +798,7 @@ function AdminContent() {
         isActive: true,
       })
       toast.success('Category updated successfully!')
+      invalidateFrontendCatalogCache()
       setShowEditCategoryModal(false)
       if (selectedCategoryDetail && selectedCategoryDetail.id === editingCategory.id) {
         setSelectedCategoryDetail((prev) =>
@@ -818,6 +826,7 @@ function AdminContent() {
     if (!confirm('Are you sure you want to deactivate / delete this collection category?')) return
     try {
       await api.delete(`/api/categories/${id}`)
+      invalidateFrontendCatalogCache()
       setCategories(categories.filter((c) => c.id !== id))
       if (selectedCategoryDetail?.id === id) {
         setSelectedCategoryDetail(null)

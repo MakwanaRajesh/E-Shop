@@ -24,13 +24,15 @@ public class OrdersController(
     IUnitOfWork uow,
     IConfiguration configuration,
     IHttpClientFactory httpClientFactory,
-    SecurityMonitorService securityMonitor) : ControllerBase
+    SecurityMonitorService securityMonitor,
+    CatalogCacheService catalogCache) : ControllerBase
 {
     private readonly AppDbContext           _db                = db;
     private readonly IUnitOfWork            _uow               = uow;
     private readonly IConfiguration         _configuration     = configuration;
     private readonly IHttpClientFactory     _httpClientFactory = httpClientFactory;
     private readonly SecurityMonitorService _securityMonitor   = securityMonitor;
+    private readonly CatalogCacheService    _catalogCache      = catalogCache;
 
     // ── POST /api/orders ──────────────────────────────────────────────────────
     [HttpPost]
@@ -327,6 +329,7 @@ public class OrdersController(
             await _db.Orders.AddAsync(order);
             await _uow.SaveChangesAsync();
             await tx.CommitAsync();
+            _catalogCache.InvalidateProducts();
 
             return CreatedAtAction(nameof(GetOrder), new { id = order.Id }, MapOrderDto(order));
         });
@@ -372,6 +375,7 @@ public class OrdersController(
 
         _db.Orders.Update(order);
         await _uow.SaveChangesAsync();
+        _catalogCache.InvalidateProducts();
 
         return Ok(new { message = "Order cancelled successfully.", status = "Cancelled" });
     }

@@ -11,10 +11,11 @@ namespace EShop.API.Controllers;
 [ApiController]
 [Route("api/admin")]
 [Authorize(Roles = "Admin")]
-public class AdminController(AppDbContext db, SecurityMonitorService securityMonitor) : ControllerBase
+public class AdminController(AppDbContext db, SecurityMonitorService securityMonitor, CatalogCacheService catalogCache) : ControllerBase
 {
     private readonly AppDbContext           _db              = db;
     private readonly SecurityMonitorService _securityMonitor = securityMonitor;
+    private readonly CatalogCacheService    _catalogCache    = catalogCache;
 
     // ── GET /api/admin/dashboard ──────────────────────────────────────────────
     [HttpGet("dashboard")]
@@ -198,6 +199,9 @@ public class AdminController(AppDbContext db, SecurityMonitorService securityMon
         _db.Orders.Update(order);
         await _db.SaveChangesAsync();
 
+        if (newStatus == OrderStatus.Cancelled && previousStatus != OrderStatus.Cancelled)
+            _catalogCache.InvalidateProducts();
+
         return Ok(new
         {
             message       = "Order status updated.",
@@ -213,53 +217,70 @@ public class AdminController(AppDbContext db, SecurityMonitorService securityMon
         [FromQuery] int pageSize = 20,
         [FromQuery] string? search = null)
     {
-        pageSize = Math.Clamp(pageSize, 1, 100);
+        pageSize = Math.Clamp(pageSize, 1, 200);
         page     = Math.Max(page, 1);
 
         var query = _db.Products
             .AsNoTracking()
-            .Include(p => p.Category)
-                .ThenInclude(c => c.Parent)
-            .Include(p => p.Images)
             .AsQueryable();
 
         if (!string.IsNullOrWhiteSpace(search))
-            query = query.Where(p => p.Name.Contains(search));
+            query = query.Where(p => EF.Functions.ILike(p.Name, $"%{search.Trim()}%"));
 
         query = query.OrderByDescending(p => p.CreatedAt);
 
-        var total      = await query.CountAsync();
-        var totalPages = (int)Math.Ceiling(total / (double)pageSize);
-
-        var products = await query
+        var dtos = await query
             .Skip((page - 1) * pageSize)
-            .Take(pageSize)
+            .Take(pageSize + 1)
+            .Select(p => new
+            {
+                p.Id,
+                p.Name,
+                p.Slug,
+                p.SKU,
+                p.ShortDescription,
+                p.Description,
+                p.Price,
+                p.CompareAtPrice,
+                p.Stock,
+                p.IsActive,
+                p.IsFeatured,
+                CategoryId         = p.CategoryId,
+                CategorySlug       = p.Category.Slug,
+                CategoryName       = p.Category.Name,
+                ParentCategoryId   = p.Category.ParentId,
+                ParentCategoryName = p.Category.Parent != null ? p.Category.Parent.Name : null,
+                ParentCategorySlug = p.Category.Parent != null ? p.Category.Parent.Slug : null,
+                p.Tags,
+                PrimaryImageUrl    = p.Images
+                    .Where(i => i.IsPrimary)
+                    .OrderBy(i => i.SortOrder)
+                    .Select(i => i.Url)
+                    .FirstOrDefault()
+                    ?? p.Images
+                        .OrderBy(i => i.SortOrder)
+                        .Select(i => i.Url)
+                        .FirstOrDefault(),
+                p.CreatedAt
+            })
             .ToListAsync();
 
-        var dtos = products.Select(p => new
+        int total;
+        if (dtos.Count > pageSize)
         {
-            p.Id,
-            p.Name,
-            p.Slug,
-            p.SKU,
-            p.ShortDescription,
-            p.Description,
-            p.Price,
-            p.CompareAtPrice,
-            p.Stock,
-            p.IsActive,
-            p.IsFeatured,
-            CategoryId         = p.CategoryId,
-            CategorySlug       = p.Category.Slug,
-            CategoryName       = p.Category.Name,
-            ParentCategoryId   = p.Category.ParentId,
-            ParentCategoryName = p.Category.Parent != null ? p.Category.Parent.Name : null,
-            ParentCategorySlug = p.Category.Parent != null ? p.Category.Parent.Slug : null,
-            p.Tags,
-            PrimaryImageUrl    = p.Images.FirstOrDefault(i => i.IsPrimary)?.Url
-                                 ?? p.Images.OrderBy(i => i.SortOrder).FirstOrDefault()?.Url,
-            p.CreatedAt
-        });
+            dtos.RemoveAt(pageSize);
+            total = await query.CountAsync();
+        }
+        else if (page > 1 && dtos.Count == 0)
+        {
+            total = await query.CountAsync();
+        }
+        else
+        {
+            total = dtos.Count == 0 ? 0 : (page - 1) * pageSize + dtos.Count;
+        }
+
+        var totalPages = (int)Math.Ceiling(total / (double)pageSize);
 
         return Ok(new { Items = dtos, TotalCount = total, Page = page, PageSize = pageSize, TotalPages = totalPages });
     }
@@ -274,6 +295,7 @@ public class AdminController(AppDbContext db, SecurityMonitorService securityMon
         product.IsActive = !product.IsActive;
         _db.Products.Update(product);
         await _db.SaveChangesAsync();
+        _catalogCache.InvalidateAll();
 
         return Ok(new { message = $"Product is now {(product.IsActive ? "active" : "inactive")}.", isActive = product.IsActive });
     }

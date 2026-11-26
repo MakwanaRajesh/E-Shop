@@ -91,7 +91,7 @@ public static class DbInitializer
             "Tailored chino shorts, utility cargo Bermuda shorts, and quick-dry resort swim trunks.",
             "https://images.unsplash.com/photo-1591195853828-11db59a44f6b?w=800&q=80", 17, menCat.Id);
 
-        var menCoOrdSets = await EnsureCategoryAsync(context, "Men's Co-ord Sets", "men-co-ord-sets",
+        var menCoOrdSets = await EnsureCategoryAsync(context, "Men's Co-ord Sets", "mens-co-ord-sets",
             "Coordinated textured polo, shirt, and streetwear t-shirt & shorts sets for effortless styling.",
             "https://assets.sheinindia.in/medias/shein_sys_master/root1/20260824/fFTs/6a8c56f05d467f347a00859a/shein_dark_olive_shein_men_spread_collar_textured_polo_tshirt_%26_shorts.jpg", 18, menCat.Id);
 

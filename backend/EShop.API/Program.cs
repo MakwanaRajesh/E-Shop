@@ -52,7 +52,14 @@ builder.Services.AddScoped(typeof(IRepository<>), typeof(Repository<>));
 builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
 builder.Services.AddScoped<EShop.Infrastructure.Services.TokenService>();
 builder.Services.AddSingleton<EShop.API.Services.SecurityMonitorService>();
+builder.Services.AddSingleton<EShop.API.Services.CatalogCacheService>();
 builder.Services.AddMemoryCache();
+builder.Services.AddResponseCompression(options =>
+{
+    options.EnableForHttps = true;
+    options.Providers.Add<Microsoft.AspNetCore.ResponseCompression.BrotliCompressionProvider>();
+    options.Providers.Add<Microsoft.AspNetCore.ResponseCompression.GzipCompressionProvider>();
+});
 builder.Services.AddHttpClient();
 
 // ── JWT Authentication ────────────────────────────────────────────────────────
@@ -185,6 +192,57 @@ using (var scope = app.Services.CreateScope())
     Log.Information("Database migrated successfully.");
     await DbInitializer.SeedAsync(db);
     Log.Information("Database seeded successfully.");
+
+    // Pre-warm primary catalog endpoints into MemoryCache using the already-open startup connection
+    try
+    {
+        var cache = scope.ServiceProvider.GetRequiredService<EShop.API.Services.CatalogCacheService>();
+        await cache.GetOrCreateCategoryAsync("tree", () => EShop.API.Controllers.CategoriesController.LoadCategoryTreeAsync(db));
+        await cache.GetOrCreateProductAsync("featured", () => EShop.API.Controllers.ProductsController.LoadFeaturedAsync(db));
+
+        var q24 = new EShop.Core.DTOs.ProductQueryParams { SortBy = "relevant", Page = 1, PageSize = 24 };
+        await cache.GetOrCreateProductAsync(
+            EShop.API.Controllers.ProductsController.BuildListCacheKey(q24, 1, 24),
+            () => EShop.API.Controllers.ProductsController.QueryProductListAsync(db, q24, 1, 24));
+
+        var q16 = new EShop.Core.DTOs.ProductQueryParams { SortBy = "relevant", Page = 1, PageSize = 16 };
+        await cache.GetOrCreateProductAsync(
+            EShop.API.Controllers.ProductsController.BuildListCacheKey(q16, 1, 16),
+            () => EShop.API.Controllers.ProductsController.QueryProductListAsync(db, q16, 1, 16));
+
+        var qAll = new EShop.Core.DTOs.ProductQueryParams { SortBy = "relevant", Page = 1, PageSize = 200 };
+        await cache.GetOrCreateProductAsync(
+            EShop.API.Controllers.ProductsController.BuildListCacheKey(qAll, 1, 200),
+            () => EShop.API.Controllers.ProductsController.QueryProductListAsync(db, qAll, 1, 200));
+
+        // Warm top department & featured queries quietly after startup without blocking Kestrel
+        var scopeFactory = app.Services.GetRequiredService<IServiceScopeFactory>();
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                using var bgScope = scopeFactory.CreateScope();
+                var bgDb = bgScope.ServiceProvider.GetRequiredService<AppDbContext>();
+                foreach (var cat in new[] { "men", "women", "kids", "footwear", "watches", "accessories", "women-dresses", "men-t-shirts", "men-denim", "mens-co-ord-sets" })
+                {
+                    var cq = new EShop.Core.DTOs.ProductQueryParams { Category = cat, SortBy = "relevant", Page = 1, PageSize = 24 };
+                    await cache.GetOrCreateProductAsync(
+                        EShop.API.Controllers.ProductsController.BuildListCacheKey(cq, 1, 24),
+                        () => EShop.API.Controllers.ProductsController.QueryProductListAsync(bgDb, cq, 1, 24));
+                }
+            }
+            catch
+            {
+                /* background warm-up best-effort only */
+            }
+        });
+
+        Log.Information("Catalog memory cache pre-warmed successfully.");
+    }
+    catch (Exception ex)
+    {
+        Log.Warning(ex, "Catalog cache warm-up skipped; endpoints will populate on demand.");
+    }
 }
 
 // ── Middleware pipeline ───────────────────────────────────────────────────────
@@ -226,6 +284,7 @@ if (app.Environment.IsDevelopment() || builder.Configuration.GetValue<bool>("Swa
 
 app.UseMiddleware<EShop.API.Middleware.GlobalExceptionMiddleware>();
 app.UseCors("EShopPolicy");
+app.UseResponseCompression();
 app.UseMiddleware<EShop.API.Middleware.RateLimitingMiddleware>();
 
 app.UseSerilogRequestLogging();

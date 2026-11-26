@@ -1,3 +1,4 @@
+using EShop.API.Services;
 using EShop.Core.DTOs;
 using EShop.Core.Entities;
 using EShop.Core.Interfaces;
@@ -11,31 +12,19 @@ namespace EShop.API.Controllers;
 
 [ApiController]
 [Route("api/categories")]
-public class CategoriesController(AppDbContext db, IUnitOfWork uow) : ControllerBase
+public class CategoriesController(AppDbContext db, IUnitOfWork uow, CatalogCacheService catalogCache) : ControllerBase
 {
-    private readonly AppDbContext _db  = db;
-    private readonly IUnitOfWork  _uow = uow;
+    private readonly AppDbContext        _db           = db;
+    private readonly IUnitOfWork         _uow          = uow;
+    private readonly CatalogCacheService _catalogCache = catalogCache;
 
     // ── GET /api/categories ───────────────────────────────────────────────────
     /// <summary>Returns all active categories as a nested tree.</summary>
     [HttpGet]
     public async Task<IActionResult> GetAll()
     {
-        // Load all active categories with children + product count
-        var all = await _db.Categories
-            .AsNoTracking()
-            .Include(c => c.Children)
-            .Include(c => c.Products)
-            .Where(c => c.IsActive)
-            .OrderBy(c => c.SortOrder)
-            .ToListAsync();
-
-        // Return only root categories; children are already nested via Include
-        var roots = all
-            .Where(c => c.ParentId == null)
-            .Select(c => MapDto(c, all))
-            .ToList();
-
+        Response.Headers.CacheControl = "public, max-age=30, stale-while-revalidate=120";
+        var roots = await _catalogCache.GetOrCreateCategoryAsync("tree", () => LoadCategoryTreeAsync(_db));
         return Ok(roots);
     }
 
@@ -43,19 +32,68 @@ public class CategoriesController(AppDbContext db, IUnitOfWork uow) : Controller
     [HttpGet("{slug}")]
     public async Task<IActionResult> GetBySlug(string slug)
     {
-        var all = await _db.Categories
-            .AsNoTracking()
-            .Include(c => c.Children)
-            .Include(c => c.Products)
-            .Where(c => c.IsActive)
-            .ToListAsync();
-
-        var category = all.FirstOrDefault(c => c.Slug == slug);
+        Response.Headers.CacheControl = "public, max-age=30, stale-while-revalidate=120";
+        var allDtos = await _catalogCache.GetOrCreateCategoryAsync("flat-with-children", () => LoadAllCategoryDtosAsync(_db));
+        var category = allDtos.FirstOrDefault(c => c.Slug == slug);
         if (category is null)
             return NotFound(new { message = "Category not found." });
 
-        return Ok(MapDto(category, all));
+        return Ok(category);
     }
+
+    internal static async Task<List<CategoryDto>> LoadCategoryTreeAsync(AppDbContext db)
+    {
+        var allDtos = await LoadAllCategoryDtosAsync(db);
+        return allDtos.Where(c => c.ParentId is null).ToList();
+    }
+
+    private static async Task<List<CategoryDto>> LoadAllCategoryDtosAsync(AppDbContext db)
+    {
+        var rows = await db.Categories
+            .AsNoTracking()
+            .Where(c => c.IsActive)
+            .OrderBy(c => c.SortOrder)
+            .Select(c => new CategoryFlatRow(
+                c.Id,
+                c.Name,
+                c.Slug,
+                c.Description,
+                c.ImageUrl,
+                c.ParentId,
+                c.SortOrder,
+                c.Products.Count(p => p.IsActive)))
+            .ToListAsync();
+
+        var childrenLookup = rows.Where(r => r.ParentId.HasValue)
+            .GroupBy(r => r.ParentId!.Value)
+            .ToDictionary(g => g.Key, g => g.OrderBy(x => x.SortOrder).ToList());
+
+        CategoryDto BuildDto(CategoryFlatRow row) => new(
+            Id: row.Id,
+            Name: row.Name,
+            Slug: row.Slug,
+            Description: row.Description,
+            ImageUrl: row.ImageUrl,
+            ParentId: row.ParentId,
+            SortOrder: row.SortOrder,
+            ProductCount: row.ProductCount,
+            Children: childrenLookup.TryGetValue(row.Id, out var children)
+                ? children.Select(BuildDto).ToList()
+                : []
+        );
+
+        return rows.Select(BuildDto).ToList();
+    }
+
+    private sealed record CategoryFlatRow(
+        Guid Id,
+        string Name,
+        string Slug,
+        string? Description,
+        string? ImageUrl,
+        Guid? ParentId,
+        int SortOrder,
+        int ProductCount);
 
     // ── POST /api/categories ──────────────────────────────────────────────────(Admin)
     [Authorize(Roles = "Admin")]
@@ -82,6 +120,7 @@ public class CategoriesController(AppDbContext db, IUnitOfWork uow) : Controller
 
         await _db.Categories.AddAsync(category);
         await _uow.SaveChangesAsync();
+        _catalogCache.InvalidateAll();
 
         return CreatedAtAction(nameof(GetBySlug), new { slug = category.Slug },
             new { id = category.Id, slug = category.Slug });
@@ -113,6 +152,7 @@ public class CategoriesController(AppDbContext db, IUnitOfWork uow) : Controller
 
         _db.Categories.Update(category);
         await _uow.SaveChangesAsync();
+        _catalogCache.InvalidateAll();
 
         return NoContent();
     }
@@ -128,6 +168,7 @@ public class CategoriesController(AppDbContext db, IUnitOfWork uow) : Controller
         category.IsActive = false;
         _db.Categories.Update(category);
         await _uow.SaveChangesAsync();
+        _catalogCache.InvalidateAll();
 
         return NoContent();
     }
@@ -156,20 +197,4 @@ public class CategoriesController(AppDbContext db, IUnitOfWork uow) : Controller
 
         return candidate;
     }
-
-    private static CategoryDto MapDto(Category c, List<Category> all) => new(
-        Id:           c.Id,
-        Name:         c.Name,
-        Slug:         c.Slug,
-        Description:  c.Description,
-        ImageUrl:     c.ImageUrl,
-        ParentId:     c.ParentId,
-        SortOrder:    c.SortOrder,
-        ProductCount: c.Products.Count(p => p.IsActive),
-        Children:     all
-                        .Where(child => child.ParentId == c.Id)
-                        .OrderBy(child => child.SortOrder)
-                        .Select(child => MapDto(child, all))
-                        .ToList()
-    );
 }

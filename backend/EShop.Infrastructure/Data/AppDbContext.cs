@@ -41,6 +41,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         {
             e.HasKey(c => c.Id);
             e.HasIndex(c => c.Slug).IsUnique();
+            e.HasIndex(c => new { c.IsActive, c.ParentId, c.SortOrder });
             e.Property(c => c.Name).HasMaxLength(200).IsRequired();
             e.Property(c => c.Slug).HasMaxLength(200).IsRequired();
             e.HasOne(c => c.Parent)
@@ -54,6 +55,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         {
             e.HasKey(p => p.Id);
             e.HasIndex(p => p.Slug).IsUnique();
+            e.HasIndex(p => new { p.IsActive, p.IsFeatured, p.CreatedAt });
+            e.HasIndex(p => new { p.IsActive, p.CategoryId, p.Price });
+            e.HasIndex(p => new { p.IsActive, p.CreatedAt });
             e.Property(p => p.Name).HasMaxLength(500).IsRequired();
             e.Property(p => p.Slug).HasMaxLength(500).IsRequired();
             e.Property(p => p.Price).HasPrecision(18, 2);
@@ -69,6 +73,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         modelBuilder.Entity<ProductImage>(e =>
         {
             e.HasKey(pi => pi.Id);
+            e.HasIndex(pi => new { pi.ProductId, pi.IsPrimary, pi.SortOrder });
             e.HasOne(pi => pi.Product)
              .WithMany(p => p.Images)
              .HasForeignKey(pi => pi.ProductId)
