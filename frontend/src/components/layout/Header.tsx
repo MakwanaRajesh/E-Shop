@@ -47,6 +47,7 @@ export const MEGA_MENU_CATEGORIES = [
         title: 'Topwear',
         items: [
           { label: "T-Shirts & Polos", href: '/products?category=men&subCategory=men-t-shirts' },
+          { label: 'Co-ord Sets', href: '/products?category=men&subCategory=men-co-ord-sets' },
           { label: 'Casual Shirts', href: '/products?category=men&subCategory=men-shirts' },
           { label: 'Formal Shirts', href: '/products?category=men&search=formal+shirt' },
           { label: 'Hoodies & Sweatshirts', href: '/products?category=men&search=hoodie' },

@@ -54,6 +54,12 @@ const CATEGORY_CIRCLES = [
     imageUrl: 'https://images.unsplash.com/photo-1576995853123-5a10305d93c0?auto=format&fit=crop&w=600&q=85',
   },
   {
+    name: 'Co-ord Sets',
+    href: '/products?category=men&subCategory=men-co-ord-sets',
+    imageUrl: 'https://assets.sheinindia.in/medias/shein_sys_master/root1/20260824/fFTs/6a8c56f05d467f347a00859a/shein_dark_olive_shein_men_spread_collar_textured_polo_tshirt_%26_shorts.jpg',
+    tag: 'New',
+  },
+  {
     name: 'Watches',
     href: '/products?category=watches',
     imageUrl: 'https://images.unsplash.com/photo-1522335789203-aabd1fc54bc9?auto=format&fit=crop&w=600&q=85',

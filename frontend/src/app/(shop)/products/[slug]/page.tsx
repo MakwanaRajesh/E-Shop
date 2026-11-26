@@ -72,6 +72,13 @@ function getSimilarProductQuery(product: Product): {
   const tagsStr = Array.isArray(product.tags) ? product.tags.join(' ') : (product.tags ?? '')
   const text = `${product.name} ${product.categoryName ?? ''} ${tagsStr}`.toLowerCase()
 
+  if (/\b(co-ord|coord)\b/.test(text)) {
+    return {
+      params: { category: 'men-co-ord-sets', pageSize: 12 },
+      label: "More Men's Co-ord Sets",
+      viewAllHref: '/products?category=men&subCategory=men-co-ord-sets',
+    }
+  }
   if (/\b(t-shirt|tshirt|tee|tees|polo)\b/.test(text)) {
     return {
       params: { search: 't-shirt', pageSize: 12 },

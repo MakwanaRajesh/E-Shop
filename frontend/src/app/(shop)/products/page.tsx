@@ -55,6 +55,7 @@ const CATEGORY_TREE = [
     slug: 'men',
     subcategories: [
       { name: "T-Shirts & Polos", slug: 'men-t-shirts' },
+      { name: "Co-ord Sets", slug: 'men-co-ord-sets' },
       { name: "Shirts", slug: 'men-shirts' },
       { name: "Denim & Jeans", slug: 'men-denim' },
       { name: "Footwear & Sneakers", slug: 'men-footwear' },
