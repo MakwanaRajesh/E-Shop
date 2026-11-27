@@ -60,7 +60,8 @@ const isAuth = (): boolean => {
 const recalculateCart = (items: CartItem[], coupon?: AppliedCouponInfo | null): Cart => {
   const subTotal = items.reduce((sum, item) => sum + (item.unitPrice || 0) * (item.quantity || 1), 0)
   const totalItems = items.reduce((sum, item) => sum + (item.quantity || 1), 0)
-  const discount = coupon ? coupon.discountAmount : 0
+  const activeCoupon = items.length > 0 && subTotal > 0 ? coupon : null
+  const discount = activeCoupon ? Math.max(0, Math.min(activeCoupon.discountAmount, subTotal)) : 0
   const finalTotal = Math.max(0, subTotal - discount)
   return {
     id: 'guest-cart',
@@ -68,12 +69,40 @@ const recalculateCart = (items: CartItem[], coupon?: AppliedCouponInfo | null): 
     subtotal: subTotal,
     subTotal: subTotal,
     discountAmount: discount,
-    couponCode: coupon?.code,
+    couponCode: activeCoupon?.code,
     total: finalTotal,
     itemCount: totalItems,
     totalItems: totalItems,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
+  }
+}
+
+const normalizeServerCart = (
+  data: any,
+  coupon?: AppliedCouponInfo | null,
+): { cart: Cart; clearCoupon: boolean } => {
+  const items: CartItem[] = data.items ?? []
+  const sub = data.subTotal ?? data.subtotal ?? 0
+  const clearCoupon = items.length === 0 || sub <= 0
+  const activeCoupon = clearCoupon ? null : coupon
+  const discount = activeCoupon ? Math.max(0, Math.min(activeCoupon.discountAmount, sub)) : 0
+  const count = data.totalItems ?? data.itemCount ?? (items.length || 0)
+  return {
+    clearCoupon,
+    cart: {
+      id: data.id,
+      items,
+      subtotal: sub,
+      subTotal: sub,
+      discountAmount: discount,
+      couponCode: activeCoupon?.code,
+      total: Math.max(0, sub - discount),
+      itemCount: count,
+      totalItems: count,
+      createdAt: data.createdAt ?? new Date().toISOString(),
+      updatedAt: data.updatedAt ?? new Date().toISOString(),
+    },
   }
 }
 
@@ -116,23 +145,11 @@ export const useCartStore = create<CartState>()(
         try {
           const { data } = await api.get<any>('/api/cart')
           if (data) {
-            const currentCoupon = get().appliedCoupon
-            const sub = data.subTotal ?? data.subtotal ?? 0
-            const discount = currentCoupon ? currentCoupon.discountAmount : 0
-            const normalized: Cart = {
-              id: data.id,
-              items: data.items ?? [],
-              subtotal: sub,
-              subTotal: sub,
-              discountAmount: discount,
-              couponCode: currentCoupon?.code,
-              total: Math.max(0, sub - discount),
-              itemCount: data.totalItems ?? data.itemCount ?? (data.items?.length || 0),
-              totalItems: data.totalItems ?? data.itemCount ?? (data.items?.length || 0),
-              createdAt: data.createdAt ?? new Date().toISOString(),
-              updatedAt: data.updatedAt ?? new Date().toISOString(),
-            }
-            set({ cart: normalized })
+            const { cart: normalized, clearCoupon } = normalizeServerCart(data, get().appliedCoupon)
+            set({
+              cart: normalized,
+              ...(clearCoupon ? { appliedCoupon: null } : {}),
+            })
           }
         } catch {
           // If server fails, retain existing local cart
@@ -219,23 +236,11 @@ export const useCartStore = create<CartState>()(
               variantId: variantId || null,
             })
             if (data) {
-              const currentCoupon = get().appliedCoupon
-              const sub = data.subTotal ?? data.subtotal ?? 0
-              const discount = currentCoupon ? currentCoupon.discountAmount : 0
-              const serverNormalized: Cart = {
-                id: data.id,
-                items: data.items ?? [],
-                subtotal: sub,
-                subTotal: sub,
-                discountAmount: discount,
-                couponCode: currentCoupon?.code,
-                total: Math.max(0, sub - discount),
-                itemCount: data.totalItems ?? data.itemCount ?? (data.items?.length || 0),
-                totalItems: data.totalItems ?? data.itemCount ?? (data.items?.length || 0),
-                createdAt: data.createdAt ?? new Date().toISOString(),
-                updatedAt: data.updatedAt ?? new Date().toISOString(),
-              }
-              set({ cart: serverNormalized })
+              const { cart: serverNormalized, clearCoupon } = normalizeServerCart(data, get().appliedCoupon)
+              set({
+                cart: serverNormalized,
+                ...(clearCoupon ? { appliedCoupon: null } : {}),
+              })
             }
           } catch {
             // Keep optimistic cart intact on network failure
@@ -275,23 +280,10 @@ export const useCartStore = create<CartState>()(
           try {
             const { data } = await api.put<any>(`/api/cart/items/${cartItemId}`, { quantity: validQty })
             if (data) {
-              const currentCoupon = get().appliedCoupon
-              const sub = data.subTotal ?? data.subtotal ?? 0
-              const discount = currentCoupon ? currentCoupon.discountAmount : 0
+              const { cart: updatedServerCart, clearCoupon } = normalizeServerCart(data, get().appliedCoupon)
               set({
-                cart: {
-                  id: data.id,
-                  items: data.items ?? [],
-                  subtotal: sub,
-                  subTotal: sub,
-                  discountAmount: discount,
-                  couponCode: currentCoupon?.code,
-                  total: Math.max(0, sub - discount),
-                  itemCount: data.totalItems ?? data.itemCount ?? (data.items?.length || 0),
-                  totalItems: data.totalItems ?? data.itemCount ?? (data.items?.length || 0),
-                  createdAt: data.createdAt ?? new Date().toISOString(),
-                  updatedAt: data.updatedAt ?? new Date().toISOString(),
-                },
+                cart: updatedServerCart,
+                ...(clearCoupon ? { appliedCoupon: null } : {}),
               })
             }
           } catch {
@@ -303,7 +295,11 @@ export const useCartStore = create<CartState>()(
       removeItem: async (cartItemId: string) => {
         const currentItems = get().cart?.items ? [...get().cart!.items] : []
         const filtered = currentItems.filter((i) => i.id !== cartItemId)
-        set({ cart: recalculateCart(filtered, get().appliedCoupon) })
+        const nextCoupon = filtered.length === 0 ? null : get().appliedCoupon
+        set({
+          appliedCoupon: nextCoupon,
+          cart: recalculateCart(filtered, nextCoupon),
+        })
 
         if (isAuth() && !cartItemId.startsWith('item-')) {
           try {

@@ -21,10 +21,10 @@ interface AvailableCoupon {
 const FALLBACK_COUPONS: AvailableCoupon[] = [
   {
     code: 'NEXUS10',
-    description: 'Exclusive 10% welcome discount on luxury order',
+    description: 'Exclusive 10% welcome discount on luxury orders above ₹5,000',
     discountType: 0,
     discountValue: 10,
-    minOrderValue: 1000,
+    minOrderValue: 5000,
     maxDiscountAmount: 10000,
   },
   {
@@ -85,10 +85,62 @@ export function CouponSection({ compact = false, className = '' }: CouponSection
     }
   }, [])
 
+  // Automatically re-validate applied coupon when cart subtotal changes
+  React.useEffect(() => {
+    if (!appliedCoupon) return
+    if (subtotal <= 0) {
+      removeCoupon()
+      return
+    }
+
+    let cancelled = false
+    const timer = setTimeout(async () => {
+      try {
+        const { data } = await api.post<{
+          isValid: boolean
+          message: string
+          discountAmount: number
+          couponCode?: string
+        }>('/api/coupons/validate', {
+          code: appliedCoupon.code,
+          cartTotal: subtotal,
+        })
+
+        if (cancelled || !useCartStore.getState().appliedCoupon) return
+
+        if (!data?.isValid) {
+          removeCoupon()
+          toast.error(data?.message || `Coupon ${appliedCoupon.code} is no longer applicable`, {
+            id: `coupon-reval-${appliedCoupon.code}`,
+          })
+        } else if (Math.abs((data.discountAmount || 0) - appliedCoupon.discountAmount) > 0.01) {
+          applyCoupon(data.couponCode || appliedCoupon.code, data.discountAmount, data.message)
+        }
+      } catch {
+        // Keep current client state if API temporarily unreachable; checkout validates server-side
+      }
+    }, 150)
+
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+  }, [subtotal, appliedCoupon?.code])
+
   const handleApply = async (codeToApply?: string) => {
     const targetCode = (codeToApply ?? inputCode).trim().toUpperCase()
     if (!targetCode) {
       toast.error('Please enter a coupon code')
+      return
+    }
+
+    if (!/^[A-Z0-9_-]{2,32}$/.test(targetCode)) {
+      toast.error("Invalid coupon format. Use 2-32 letters, numbers, '-' or '_'.")
+      return
+    }
+
+    if (subtotal <= 0) {
+      toast.error('Add items to your bag before applying a coupon')
       return
     }
 
@@ -105,10 +157,11 @@ export function CouponSection({ compact = false, className = '' }: CouponSection
       })
 
       if (data && data.isValid) {
-        applyCoupon(targetCode, data.discountAmount, data.message)
+        const normalized = data.couponCode ?? targetCode
+        applyCoupon(normalized, data.discountAmount, data.message)
         setInputCode('')
         setShowOffers(false)
-        toast.success(`🎉 ${targetCode} applied! Saved ${formatCurrency(data.discountAmount)}`, {
+        toast.success(`🎉 ${normalized} applied! Saved ${formatCurrency(data.discountAmount)}`, {
           icon: '🏷️',
           duration: 4000,
         })
@@ -240,7 +293,7 @@ export function CouponSection({ compact = false, className = '' }: CouponSection
                       <button
                         type="button"
                         onClick={() => handleApply(c.code)}
-                        disabled={loading}
+                        disabled={loading || !meetsMin}
                         className={`text-xs font-bold uppercase px-2.5 py-1 rounded transition-all flex-shrink-0 ${
                           meetsMin
                             ? 'bg-gold/20 text-gold hover:bg-gold hover:text-background border border-gold/40'

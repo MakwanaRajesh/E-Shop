@@ -3,6 +3,7 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using EShop.API.Extensions;
 using EShop.API.Services;
 using EShop.Core.DTOs;
 using EShop.Core.Entities;
@@ -43,7 +44,7 @@ public class OrdersController(
     [HttpGet("pricing-preview")]
     public async Task<IActionResult> GetPricingPreview([FromQuery] decimal subTotal = 0m, [FromQuery] decimal discount = 0m)
     {
-        var userId = GetCurrentUserId();
+        var userId = User.GetUserId();
         var isFirstOrder = userId != Guid.Empty && !await _db.Orders
             .AsNoTracking()
             .AnyAsync(o => o.UserId == userId && o.Status != OrderStatus.Cancelled);
@@ -71,7 +72,8 @@ public class OrdersController(
     [HttpPost]
     public async Task<IActionResult> CreateOrder([FromBody] CreateOrderRequest req)
     {
-        var userId = GetCurrentUserId();
+        var userId = User.GetUserId();
+        if (userId == Guid.Empty) return Unauthorized();
 
         // 1. Resolve Address
         Address? address = null;
@@ -267,38 +269,34 @@ public class OrdersController(
                 req.CouponCode.Trim() != "null" &&
                 req.CouponCode.Trim() != "undefined")
             {
-                var normalizedCode = req.CouponCode.Trim().ToUpperInvariant();
+                var normalizedCode = CouponService.NormalizeCode(req.CouponCode);
+                if (normalizedCode is null)
+                {
+                    await tx.RollbackAsync();
+                    return BadRequest(new { message = "Invalid coupon code format." });
+                }
+
                 var coupon = await _db.Coupons
                     .FirstOrDefaultAsync(c => c.Code == normalizedCode && c.IsActive);
 
-                if (coupon is null)
-                    return BadRequest(new { message = "Invalid or inactive coupon code." });
-
-                if (coupon.ExpiresAt.HasValue && coupon.ExpiresAt < DateTime.UtcNow)
-                    return BadRequest(new { message = "This coupon has expired." });
-
-                if (coupon.UsageLimit.HasValue && coupon.UsedCount >= coupon.UsageLimit)
-                    return BadRequest(new { message = "This coupon has reached its usage limit." });
-
-                if (coupon.MinOrderValue.HasValue && subTotal < coupon.MinOrderValue)
-                    return BadRequest(new { message = $"Minimum order value for this coupon is ₹{coupon.MinOrderValue}." });
-
-                discount = coupon.DiscountType == DiscountType.Percentage
-                    ? Math.Round(subTotal * coupon.DiscountValue / 100, 2)
-                    : coupon.DiscountValue;
-
-                if (coupon.MaxDiscountAmount.HasValue)
-                    discount = Math.Min(discount, coupon.MaxDiscountAmount.Value);
-
-                discount = Math.Min(discount, subTotal);
+                var eval = CouponService.Evaluate(coupon, subTotal);
+                if (!eval.IsValid)
+                {
+                    await tx.RollbackAsync();
+                    return BadRequest(new { message = eval.Message });
+                }
 
                 // Atomic conditional increment to prevent concurrent coupon over-redemption
                 var couponRows = await _db.Database.ExecuteSqlInterpolatedAsync(
-                    $@"UPDATE ""Coupons"" SET ""UsedCount"" = ""UsedCount"" + 1 WHERE ""Id"" = {coupon.Id} AND (""UsageLimit"" IS NULL OR ""UsedCount"" < ""UsageLimit"")");
+                    $@"UPDATE ""Coupons"" SET ""UsedCount"" = ""UsedCount"" + 1 WHERE ""Id"" = {coupon!.Id} AND (""UsageLimit"" IS NULL OR ""UsedCount"" < ""UsageLimit"")");
                 if (couponRows == 0)
+                {
+                    await tx.RollbackAsync();
                     return BadRequest(new { message = "This coupon has reached its usage limit." });
+                }
 
-                couponCode = coupon.Code;
+                discount   = eval.DiscountAmount;
+                couponCode = eval.NormalizedCode;
             }
 
             // 4. Atomic stock deduction (prevents overselling under concurrent checkouts)
@@ -378,7 +376,8 @@ public class OrdersController(
     [HttpPost("{id:guid}/cancel")]
     public async Task<IActionResult> CancelOrder(Guid id)
     {
-        var userId = GetCurrentUserId();
+        var userId = User.GetUserId();
+        if (userId == Guid.Empty) return Unauthorized();
         var order = await _db.Orders
             .Include(o => o.Items)
             .FirstOrDefaultAsync(o => o.Id == id && o.UserId == userId);
@@ -414,6 +413,13 @@ public class OrdersController(
 
         _db.Orders.Update(order);
         await _uow.SaveChangesAsync();
+
+        if (!string.IsNullOrWhiteSpace(order.CouponCode))
+        {
+            await _db.Database.ExecuteSqlInterpolatedAsync(
+                $@"UPDATE ""Coupons"" SET ""UsedCount"" = GREATEST(0, ""UsedCount"" - 1) WHERE ""Code"" = {order.CouponCode}");
+        }
+
         _catalogCache.InvalidateProducts();
 
         return Ok(new { message = "Order cancelled successfully.", status = "Cancelled" });
@@ -423,13 +429,15 @@ public class OrdersController(
     [HttpGet]
     public async Task<IActionResult> GetMyOrders([FromQuery] int page = 1, [FromQuery] int pageSize = 10)
     {
-        var userId = GetCurrentUserId();
+        var userId = User.GetUserId();
+        if (userId == Guid.Empty) return Unauthorized();
         pageSize   = Math.Clamp(pageSize, 1, 50);
         page       = Math.Max(page, 1);
 
         var query = _db.Orders
             .AsNoTracking()
             .Include(o => o.Items)
+                .ThenInclude(i => i.Product)
             .Where(o => o.UserId == userId)
             .OrderByDescending(o => o.CreatedAt);
 
@@ -450,11 +458,13 @@ public class OrdersController(
     [HttpGet("{id:guid}")]
     public async Task<IActionResult> GetOrder(Guid id)
     {
-        var userId = GetCurrentUserId();
+        var userId = User.GetUserId();
+        if (userId == Guid.Empty) return Unauthorized();
 
         var order = await _db.Orders
             .AsNoTracking()
             .Include(o => o.Items)
+                .ThenInclude(i => i.Product)
             .FirstOrDefaultAsync(o => o.Id == id && o.UserId == userId);
 
         if (order is null) return NotFound(new { message = "Order not found." });
@@ -466,7 +476,8 @@ public class OrdersController(
     [HttpPost("{id:guid}/payment/razorpay")]
     public async Task<IActionResult> CreateRazorpayOrder(Guid id)
     {
-        var userId = GetCurrentUserId();
+        var userId = User.GetUserId();
+        if (userId == Guid.Empty) return Unauthorized();
 
         var order = await _db.Orders.FirstOrDefaultAsync(
             o => o.Id == id && o.UserId == userId);
@@ -528,7 +539,8 @@ public class OrdersController(
     [HttpPost("payment/verify")]
     public async Task<IActionResult> VerifyPayment([FromBody] VerifyPaymentRequest req)
     {
-        var userId = GetCurrentUserId();
+        var userId = User.GetUserId();
+        if (userId == Guid.Empty) return Unauthorized();
 
         var order = await _db.Orders.FirstOrDefaultAsync(
             o => o.Id == req.OrderId && o.UserId == userId);
@@ -597,15 +609,6 @@ public class OrdersController(
         return (StandardDeliveryFee, null);
     }
 
-    private Guid GetCurrentUserId()
-    {
-        var raw = User.FindFirst(ClaimTypes.NameIdentifier)?.Value
-            ?? User.FindFirst("sub")?.Value
-            ?? User.FindFirst("id")?.Value
-            ?? User.Claims.FirstOrDefault(c => c.Type.EndsWith("nameidentifier"))?.Value;
-        return Guid.TryParse(raw, out var id) ? id : Guid.Empty;
-    }
-
     private static OrderDto MapOrderDto(Order o) => new(
         Id:                   o.Id,
         OrderNumber:          o.OrderNumber,
@@ -639,7 +642,8 @@ public class OrdersController(
             VariantName:     i.VariantName,
             Quantity:        i.Quantity,
             UnitPrice:       i.UnitPrice,
-            TotalPrice:      i.TotalPrice
+            TotalPrice:      i.TotalPrice,
+            ProductSlug:     i.Product?.Slug
         )).ToList()
     );
 }

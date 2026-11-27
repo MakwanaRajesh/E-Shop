@@ -86,6 +86,7 @@ public class TokenService(IConfiguration configuration)
             ValidIssuer             = _configuration["Jwt:Issuer"],
             ValidateAudience        = true,
             ValidAudience           = _configuration["Jwt:Audience"],
+            ValidAlgorithms         = new[] { SecurityAlgorithms.HmacSha256 },
             ValidateLifetime        = false, // allow expired tokens for refresh
             ClockSkew               = TimeSpan.Zero
         };

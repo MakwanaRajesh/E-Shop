@@ -1,4 +1,4 @@
-using System.Security.Claims;
+using EShop.API.Extensions;
 using EShop.Core.DTOs;
 using EShop.Core.Entities;
 using EShop.Core.Interfaces;
@@ -21,7 +21,8 @@ public class AddressController(AppDbContext db, IUnitOfWork uow) : ControllerBas
     [HttpGet]
     public async Task<IActionResult> GetAll()
     {
-        var userId    = GetCurrentUserId();
+        var userId    = User.GetUserId();
+        if (userId == Guid.Empty) return Unauthorized();
         var addresses = await _db.Addresses
             .AsNoTracking()
             .Where(a => a.UserId == userId)
@@ -36,7 +37,8 @@ public class AddressController(AppDbContext db, IUnitOfWork uow) : ControllerBas
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] CreateAddressRequest req)
     {
-        var userId = GetCurrentUserId();
+        var userId = User.GetUserId();
+        if (userId == Guid.Empty) return Unauthorized();
 
         if (req.IsDefault)
             await UnsetDefaultsAsync(userId);
@@ -67,7 +69,8 @@ public class AddressController(AppDbContext db, IUnitOfWork uow) : ControllerBas
     [HttpPut("{id:guid}")]
     public async Task<IActionResult> Update(Guid id, [FromBody] CreateAddressRequest req)
     {
-        var userId  = GetCurrentUserId();
+        var userId  = User.GetUserId();
+        if (userId == Guid.Empty) return Unauthorized();
         var address = await _db.Addresses
             .FirstOrDefaultAsync(a => a.Id == id && a.UserId == userId);
 
@@ -98,7 +101,8 @@ public class AddressController(AppDbContext db, IUnitOfWork uow) : ControllerBas
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id)
     {
-        var userId  = GetCurrentUserId();
+        var userId  = User.GetUserId();
+        if (userId == Guid.Empty) return Unauthorized();
         var address = await _db.Addresses
             .FirstOrDefaultAsync(a => a.Id == id && a.UserId == userId);
 
@@ -114,7 +118,8 @@ public class AddressController(AppDbContext db, IUnitOfWork uow) : ControllerBas
     [HttpPatch("{id:guid}/default")]
     public async Task<IActionResult> SetDefault(Guid id)
     {
-        var userId  = GetCurrentUserId();
+        var userId  = User.GetUserId();
+        if (userId == Guid.Empty) return Unauthorized();
         var address = await _db.Addresses
             .FirstOrDefaultAsync(a => a.Id == id && a.UserId == userId);
 
@@ -129,12 +134,6 @@ public class AddressController(AppDbContext db, IUnitOfWork uow) : ControllerBas
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
-    private Guid GetCurrentUserId()
-    {
-        var raw = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-        return Guid.TryParse(raw, out var id) ? id : Guid.Empty;
-    }
-
     private async Task UnsetDefaultsAsync(Guid userId)
     {
         var defaults = await _db.Addresses

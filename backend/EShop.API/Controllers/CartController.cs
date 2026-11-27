@@ -1,4 +1,4 @@
-using System.Security.Claims;
+using EShop.API.Extensions;
 using EShop.Core.DTOs;
 using EShop.Core.Entities;
 using EShop.Core.Interfaces;
@@ -24,7 +24,8 @@ public class CartController(AppDbContext db, IUnitOfWork uow) : ControllerBase
     [HttpGet]
     public async Task<IActionResult> GetCart()
     {
-        var userId = GetCurrentUserId();
+        var userId = User.GetUserId();
+        if (userId == Guid.Empty) return Unauthorized();
         var cart   = await GetOrCreateCartAsync(userId);
         return Ok(MapCartDto(cart));
     }
@@ -39,7 +40,8 @@ public class CartController(AppDbContext db, IUnitOfWork uow) : ControllerBase
         if (req.Quantity > MaxQuantityPerProduct)
             return BadRequest(new { message = $"Maximum {MaxQuantityPerProduct} units allowed for a single product." });
 
-        var userId  = GetCurrentUserId();
+        var userId  = User.GetUserId();
+        if (userId == Guid.Empty) return Unauthorized();
         var product = await _db.Products.AsNoTracking()
                                .FirstOrDefaultAsync(p => p.Id == req.ProductId && p.IsActive);
 
@@ -51,9 +53,9 @@ public class CartController(AppDbContext db, IUnitOfWork uow) : ControllerBase
         if (req.VariantId.HasValue)
         {
             var variant = await _db.ProductVariants.AsNoTracking()
-                                   .FirstOrDefaultAsync(v => v.Id == req.VariantId && v.IsActive);
+                                   .FirstOrDefaultAsync(v => v.Id == req.VariantId && v.ProductId == req.ProductId && v.IsActive);
             if (variant is null)
-                return NotFound(new { message = "Product variant not found." });
+                return NotFound(new { message = "Product variant not found for this product." });
             availableStock = variant.Stock;
         }
 
@@ -111,7 +113,8 @@ public class CartController(AppDbContext db, IUnitOfWork uow) : ControllerBase
         if (req.Quantity > MaxQuantityPerProduct)
             return BadRequest(new { message = $"Maximum {MaxQuantityPerProduct} units allowed per product." });
 
-        var userId = GetCurrentUserId();
+        var userId = User.GetUserId();
+        if (userId == Guid.Empty) return Unauthorized();
         var cart   = await GetCartWithItemsAsync(userId);
         if (cart is null) return NotFound(new { message = "Cart not found." });
 
@@ -148,7 +151,8 @@ public class CartController(AppDbContext db, IUnitOfWork uow) : ControllerBase
     [HttpDelete("items/{cartItemId:guid}")]
     public async Task<IActionResult> RemoveItem(Guid cartItemId)
     {
-        var userId = GetCurrentUserId();
+        var userId = User.GetUserId();
+        if (userId == Guid.Empty) return Unauthorized();
         var cart   = await GetCartWithItemsAsync(userId);
         if (cart is null) return NotFound(new { message = "Cart not found." });
 
@@ -166,7 +170,8 @@ public class CartController(AppDbContext db, IUnitOfWork uow) : ControllerBase
     [HttpDelete]
     public async Task<IActionResult> ClearCart()
     {
-        var userId = GetCurrentUserId();
+        var userId = User.GetUserId();
+        if (userId == Guid.Empty) return Unauthorized();
         var cart   = await GetCartWithItemsAsync(userId);
         if (cart is not null)
         {
@@ -178,12 +183,6 @@ public class CartController(AppDbContext db, IUnitOfWork uow) : ControllerBase
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
-    private Guid GetCurrentUserId()
-    {
-        var raw = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-        return Guid.TryParse(raw, out var id) ? id : Guid.Empty;
-    }
-
     private async Task<Cart> GetOrCreateCartAsync(Guid userId)
     {
         var cart = await _db.Carts

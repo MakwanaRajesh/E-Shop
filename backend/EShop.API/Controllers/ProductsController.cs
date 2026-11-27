@@ -126,18 +126,23 @@ public class ProductsController(AppDbContext db, IUnitOfWork uow, CatalogCacheSe
                           "female" or "woman" or "women" or "womens" or "ladies" or
                           "kid" or "kids" or "child" or "children" or
                           "cloth" or "cloths" or "clothes" or "clothing" or "apparel" or "for" or "in" or "and" or "the")
-            ).ToList();
+            )
+            .Distinct()
+            .Take(SqlSafety.MaxSearchTerms)
+            .ToList();
 
             foreach (var term in contentTerms)
             {
-                var pattern = $"%{term}%";
+                var safeTerm = SqlSafety.EscapeLikePattern(term);
+                if (string.IsNullOrEmpty(safeTerm)) continue;
+                var pattern = $"%{safeTerm}%";
                 query = query.Where(p =>
-                    EF.Functions.ILike(p.Name, pattern) ||
-                    (p.Tags != null && EF.Functions.ILike(p.Tags, pattern)) ||
-                    (p.ShortDescription != null && EF.Functions.ILike(p.ShortDescription, pattern)) ||
-                    (p.Description != null && EF.Functions.ILike(p.Description, pattern)) ||
-                    EF.Functions.ILike(p.Category.Name, pattern) ||
-                    (p.Category.Parent != null && EF.Functions.ILike(p.Category.Parent.Name, pattern))
+                    EF.Functions.ILike(p.Name, pattern, "\\") ||
+                    (p.Tags != null && EF.Functions.ILike(p.Tags, pattern, "\\")) ||
+                    (p.ShortDescription != null && EF.Functions.ILike(p.ShortDescription, pattern, "\\")) ||
+                    (p.Description != null && EF.Functions.ILike(p.Description, pattern, "\\")) ||
+                    EF.Functions.ILike(p.Category.Name, pattern, "\\") ||
+                    (p.Category.Parent != null && EF.Functions.ILike(p.Category.Parent.Name, pattern, "\\"))
                 );
             }
         }
@@ -249,11 +254,16 @@ public class ProductsController(AppDbContext db, IUnitOfWork uow, CatalogCacheSe
         // Size Filter
         if (!string.IsNullOrWhiteSpace(q.Size))
         {
-            var sizeTerm = q.Size.Trim();
-            query = query.Where(p =>
-                p.Variants.Any(v => v.IsActive && v.Value == sizeTerm) ||
-                (p.Tags != null && EF.Functions.ILike(p.Tags, $"%{sizeTerm}%"))
-            );
+            var rawSizeTerm = q.Size.Trim();
+            if (rawSizeTerm.Length <= 24)
+            {
+                var escapedSize = SqlSafety.EscapeLikePattern(rawSizeTerm, 24);
+                var sizePattern = $"%{escapedSize}%";
+                query = query.Where(p =>
+                    p.Variants.Any(v => v.IsActive && v.Value == rawSizeTerm) ||
+                    (p.Tags != null && EF.Functions.ILike(p.Tags, sizePattern, "\\"))
+                );
+            }
         }
 
         // Rating Filter
@@ -370,8 +380,8 @@ public class ProductsController(AppDbContext db, IUnitOfWork uow, CatalogCacheSe
                 }
                 else
                 {
-                    var pattern = $"%{term}%";
-                    catQuery = catQuery.Where(c => EF.Functions.ILike(c.Name, pattern) || c.Slug == normalizedCat);
+                    var pattern = $"%{SqlSafety.EscapeLikePattern(term)}%";
+                    catQuery = catQuery.Where(c => EF.Functions.ILike(c.Name, pattern, "\\") || c.Slug == normalizedCat);
                 }
 
                 var matchingCategories = await catQuery
@@ -406,11 +416,11 @@ public class ProductsController(AppDbContext db, IUnitOfWork uow, CatalogCacheSe
                 }
                 else
                 {
-                    var pattern = $"%{term}%";
+                    var pattern = $"%{SqlSafety.EscapeLikePattern(term)}%";
                     prodQuery = prodQuery.Where(p =>
-                        EF.Functions.ILike(p.Name, pattern) ||
-                        (p.Tags != null && EF.Functions.ILike(p.Tags, pattern)) ||
-                        EF.Functions.ILike(p.Category.Name, pattern));
+                        EF.Functions.ILike(p.Name, pattern, "\\") ||
+                        (p.Tags != null && EF.Functions.ILike(p.Tags, pattern, "\\")) ||
+                        EF.Functions.ILike(p.Category.Name, pattern, "\\"));
                 }
 
                 var matchingProducts = await prodQuery

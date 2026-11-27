@@ -4,7 +4,7 @@ import React from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
-import { Trash2, Minus, Plus, ShoppingBag, ArrowRight, Package, ShieldCheck } from 'lucide-react'
+import { Trash2, Minus, Plus, ShoppingBag, ArrowRight, Package } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { useCartStore, MAX_QTY_PER_PRODUCT, MAX_CART_TOTAL_ITEMS } from '@/store/cart'
@@ -15,6 +15,7 @@ import { computeOrderPricing, FREE_DELIVERY_THRESHOLD } from '@/lib/orderPricing
 import api from '@/lib/api'
 import type { OrderPricingPreview } from '@/types'
 import { CouponSection } from '@/components/cart/CouponSection'
+import { SecurityBadge } from '@/components/ui/SecurityBadge'
 import toast from 'react-hot-toast'
 
 export default function CartPage() {
@@ -319,10 +320,9 @@ export default function CartPage() {
               <Link href="/products">← Continue Shopping</Link>
             </Button>
 
-            <p className="text-[11px] text-beige-muted/60 text-center flex items-center justify-center gap-1.5 pt-2">
-              <ShieldCheck className="w-3.5 h-3.5 text-gold" />
-              100% Secure Checkout • Genuine Quality Assured
-            </p>
+            <div className="flex justify-center pt-2">
+              <SecurityBadge variant="checkout" />
+            </div>
           </div>
         </div>
       </div>

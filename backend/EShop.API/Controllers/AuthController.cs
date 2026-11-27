@@ -1,14 +1,16 @@
 using System.Net.Mail;
-using System.Security.Claims;
 using System.Text.RegularExpressions;
+using EShop.API.Extensions;
 using EShop.API.Services;
 using EShop.Core.DTOs;
 using EShop.Core.Entities;
+using EShop.Core.Enums;
 using EShop.Core.Interfaces;
 using EShop.Infrastructure.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using EShop.Infrastructure.Data;
 
 namespace EShop.API.Controllers;
@@ -19,12 +21,14 @@ public class AuthController(
     AppDbContext db,
     IUnitOfWork  uow,
     TokenService tokenService,
-    SecurityMonitorService securityMonitor) : ControllerBase
+    SecurityMonitorService securityMonitor,
+    IMemoryCache cache) : ControllerBase
 {
     private readonly AppDbContext           _db              = db;
     private readonly IUnitOfWork            _uow             = uow;
     private readonly TokenService           _tokenService    = tokenService;
     private readonly SecurityMonitorService _securityMonitor = securityMonitor;
+    private readonly IMemoryCache           _cache           = cache;
 
     // ── POST /api/auth/register ───────────────────────────────────────────────
     [HttpPost("register")]
@@ -45,11 +49,14 @@ public class AuthController(
 
         var user = new User
         {
-            FirstName    = req.FirstName.Trim()[..Math.Min(100, req.FirstName.Trim().Length)],
-            LastName     = req.LastName.Trim()[..Math.Min(100, req.LastName.Trim().Length)],
-            Email        = email,
-            PasswordHash = BCrypt.Net.BCrypt.HashPassword(req.Password),
-            PhoneNumber  = req.EffectivePhone?.Trim()
+            FirstName       = SanitizeName(req.FirstName),
+            LastName        = SanitizeName(req.LastName),
+            Email           = email,
+            PasswordHash    = BCrypt.Net.BCrypt.HashPassword(req.Password),
+            PhoneNumber     = SanitizePhone(req.EffectivePhone),
+            Role            = UserRole.Customer, // Public registration can never create Admin accounts
+            IsActive        = true,
+            IsEmailVerified = false
         };
 
         var refreshToken = _tokenService.GenerateRefreshToken();
@@ -59,6 +66,7 @@ public class AuthController(
 
         await _db.Users.AddAsync(user);
         await _uow.SaveChangesAsync();
+        _cache.Remove($"user-auth:{user.Id}");
 
         var accessToken = _tokenService.GenerateAccessToken(user);
         return Ok(BuildAuthResponse(user, accessToken, refreshToken));
@@ -99,6 +107,7 @@ public class AuthController(
         user.RefreshTokenExpiry = DateTime.UtcNow.AddDays(refreshDays);
         _db.Users.Update(user);
         await _uow.SaveChangesAsync();
+        _cache.Remove($"user-auth:{user.Id}");
 
         var accessToken = _tokenService.GenerateAccessToken(user);
         return Ok(BuildAuthResponse(user, accessToken, refreshToken));
@@ -130,6 +139,7 @@ public class AuthController(
         user.RefreshTokenExpiry = DateTime.UtcNow.AddDays(refreshDays);
         _db.Users.Update(user);
         await _uow.SaveChangesAsync();
+        _cache.Remove($"user-auth:{user.Id}");
 
         return Ok(BuildAuthResponse(user, newAccessToken, newRefreshToken));
     }
@@ -139,7 +149,7 @@ public class AuthController(
     [HttpPost("logout")]
     public async Task<IActionResult> Logout()
     {
-        var userId = GetCurrentUserId();
+        var userId = User.GetUserId();
         if (userId == Guid.Empty) return Unauthorized();
 
         var user = await _db.Users.FindAsync(userId);
@@ -150,6 +160,7 @@ public class AuthController(
             _db.Users.Update(user);
             await _uow.SaveChangesAsync();
         }
+        _cache.Remove($"user-auth:{userId}");
 
         return NoContent();
     }
@@ -159,7 +170,7 @@ public class AuthController(
     [HttpGet("me")]
     public async Task<IActionResult> Me()
     {
-        var userId = GetCurrentUserId();
+        var userId = User.GetUserId();
         if (userId == Guid.Empty) return Unauthorized();
 
         var user = await _db.Users.AsNoTracking()
@@ -174,15 +185,15 @@ public class AuthController(
     [HttpPut("me")]
     public async Task<IActionResult> UpdateProfile([FromBody] UpdateProfileRequest req)
     {
-        var userId = GetCurrentUserId();
+        var userId = User.GetUserId();
         if (userId == Guid.Empty) return Unauthorized();
 
         var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId && u.IsActive);
         if (user is null) return Unauthorized(new { message = "User not found or disabled." });
 
-        if (!string.IsNullOrWhiteSpace(req.FirstName)) user.FirstName = req.FirstName.Trim();
-        if (!string.IsNullOrWhiteSpace(req.LastName)) user.LastName = req.LastName.Trim();
-        if (req.PhoneNumber is not null) user.PhoneNumber = req.PhoneNumber.Trim();
+        if (!string.IsNullOrWhiteSpace(req.FirstName)) user.FirstName = SanitizeName(req.FirstName);
+        if (!string.IsNullOrWhiteSpace(req.LastName)) user.LastName = SanitizeName(req.LastName);
+        if (req.PhoneNumber is not null) user.PhoneNumber = SanitizePhone(req.PhoneNumber);
 
         _db.Users.Update(user);
         await _uow.SaveChangesAsync();
@@ -191,6 +202,19 @@ public class AuthController(
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
+    private static string SanitizeName(string raw)
+    {
+        var clean = raw.Trim().Replace("<", string.Empty).Replace(">", string.Empty);
+        return clean[..Math.Min(100, clean.Length)];
+    }
+
+    private static string? SanitizePhone(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return null;
+        var clean = raw.Trim();
+        return clean[..Math.Min(25, clean.Length)];
+    }
+
     private static bool IsValidEmail(string email)
     {
         if (string.IsNullOrWhiteSpace(email) || email.Length > 256) return false;
@@ -211,11 +235,6 @@ public class AuthController(
         }
         error = string.Empty;
         return true;
-    }
-    private Guid GetCurrentUserId()
-    {
-        var raw = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-        return Guid.TryParse(raw, out var id) ? id : Guid.Empty;
     }
 
     private AuthResponse BuildAuthResponse(User user, string accessToken, string refreshToken) =>

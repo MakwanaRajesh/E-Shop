@@ -1,10 +1,16 @@
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
 using System.Text;
 using EShop.API.Converters;
+using EShop.API.Extensions;
+using EShop.API.Services;
+using EShop.Core.Enums;
 using EShop.Core.Interfaces;
 using EShop.Infrastructure.Data;
 using EShop.Infrastructure.Repositories;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using Serilog;
@@ -127,12 +133,78 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         {
             ValidateIssuerSigningKey = true,
             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
+            ValidAlgorithms = [SecurityAlgorithms.HmacSha256],
             ValidateIssuer = true,
             ValidIssuer = jwtIssuer,
             ValidateAudience = true,
             ValidAudience = jwtAudience,
             ValidateLifetime = true,
-            ClockSkew = TimeSpan.Zero
+            ClockSkew = TimeSpan.Zero,
+            NameClaimType = ClaimTypes.NameIdentifier,
+            RoleClaimType = ClaimTypes.Role
+        };
+        options.Events = new JwtBearerEvents
+        {
+            OnTokenValidated = async context =>
+            {
+                var userId = context.Principal.GetUserId();
+                if (userId == Guid.Empty)
+                {
+                    context.Fail("Invalid token subject.");
+                    return;
+                }
+
+                var sp = context.HttpContext.RequestServices;
+                var cache = sp.GetRequiredService<IMemoryCache>();
+                var cacheKey = $"user-auth:{userId}";
+
+                var authState = await cache.GetOrCreateAsync(cacheKey, async entry =>
+                {
+                    entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(20);
+                    var db = sp.GetRequiredService<AppDbContext>();
+                    var u = await db.Users
+                        .AsNoTracking()
+                        .Where(x => x.Id == userId)
+                        .Select(x => new { x.IsActive, x.Role, HasSession = x.RefreshToken != null })
+                        .FirstOrDefaultAsync(context.HttpContext.RequestAborted);
+                    return u is null ? null : new AuthSessionSnapshot(u.IsActive, u.Role, u.HasSession);
+                });
+
+                if (authState is null || !authState.IsActive || !authState.HasSession)
+                {
+                    context.Fail("Session has expired or account is disabled.");
+                    return;
+                }
+
+                var claimedRoles = context.Principal?.FindAll(ClaimTypes.Role)
+                    .Concat(context.Principal.FindAll("role"))
+                    .Select(c => c.Value)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList() ?? [];
+
+                var dbRole = authState.Role.ToString();
+                if (claimedRoles.Any(r => !string.Equals(r, dbRole, StringComparison.OrdinalIgnoreCase)))
+                {
+                    var monitor = sp.GetRequiredService<SecurityMonitorService>();
+                    var ip = context.HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+                    monitor.RecordEvent(
+                        severity: "Critical",
+                        category: "Role Escalation Attempt",
+                        title: $"JWT Role Mismatch Detected for User {userId}",
+                        description: $"Token role [{string.Join(",", claimedRoles)}] does not match authoritative database role [{dbRole}].",
+                        ipAddress: ip,
+                        referenceId: $"RBAC-{userId}");
+                    context.Fail("Token role mismatch.");
+                    return;
+                }
+
+                if (context.Principal?.Identity is ClaimsIdentity identity)
+                {
+                    foreach (var rc in identity.FindAll(c => c.Type == ClaimTypes.Role || c.Type == "role").ToList())
+                        identity.RemoveClaim(rc);
+                    identity.AddClaim(new Claim(ClaimTypes.Role, dbRole));
+                }
+            }
         };
     });
 
@@ -372,3 +444,5 @@ app.MapGet("/", () => Results.Ok(new { status = "ok", service = "EShop.API", hea
 app.MapHealthChecks("/health");
 
 app.Run();
+
+internal sealed record AuthSessionSnapshot(bool IsActive, UserRole Role, bool HasSession);

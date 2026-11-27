@@ -15,6 +15,7 @@ import toast from 'react-hot-toast'
 import { formatCurrency } from '@/lib/utils'
 import { computeOrderPricing, FREE_DELIVERY_THRESHOLD } from '@/lib/orderPricing'
 import { CouponSection } from '@/components/cart/CouponSection'
+import { SecurityBadge } from '@/components/ui/SecurityBadge'
 import type { Address, OrderPricingPreview } from '@/types'
 
 export default function CheckoutPage() {
@@ -513,10 +514,9 @@ export default function CheckoutPage() {
               <ArrowRight className="w-4 h-4" />
             </Button>
 
-            <p className="text-[11px] text-beige-muted/60 text-center flex items-center justify-center gap-1.5">
-              <ShieldCheck className="w-3.5 h-3.5 text-gold" />
-              256-bit Encrypted Checkout • Guarantee of Authenticity
-            </p>
+            <div className="flex justify-center pt-1">
+              <SecurityBadge variant="checkout" />
+            </div>
           </div>
         </div>
       </form>

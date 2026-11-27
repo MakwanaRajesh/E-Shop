@@ -26,6 +26,9 @@ import {
   FileText,
   Send,
   AlertCircle,
+  Star,
+  Search,
+  ExternalLink,
 } from 'lucide-react'
 import { useAuthStore } from '@/store/auth'
 import { useCartStore } from '@/store/cart'
@@ -36,9 +39,10 @@ import { Badge } from '@/components/ui/Badge'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Input } from '@/components/ui/Input'
 import api from '@/lib/api'
+import { invalidateFrontendCatalogCache } from '@/lib/catalogCache'
 import toast from 'react-hot-toast'
-import type { Order, Address } from '@/types'
-import { formatCurrency, formatDate } from '@/lib/utils'
+import type { Order, Address, MyReview } from '@/types'
+import { cn, formatCurrency, formatDate, formatRelativeDate, optimizeImageUrl } from '@/lib/utils'
 
 function AccountContent() {
   const router = useRouter()
@@ -50,8 +54,19 @@ function AccountContent() {
 
   const [activeTab, setActiveTab] = React.useState<'orders' | 'addresses' | 'profile' | 'support'>('orders')
   const [orders, setOrders] = React.useState<Order[]>([])
+  const [myReviewsByProduct, setMyReviewsByProduct] = React.useState<Record<string, MyReview>>({})
   const [loadingOrders, setLoadingOrders] = React.useState(true)
   const [expandedOrderId, setExpandedOrderId] = React.useState<string | null>(null)
+  const [orderStatusFilter, setOrderStatusFilter] = React.useState<'all' | 'delivered' | 'active' | 'cancelled'>('all')
+  const [orderSearch, setOrderSearch] = React.useState('')
+
+  // Delivered item rating & review composer state
+  const [activeReviewKey, setActiveReviewKey] = React.useState<string | null>(null)
+  const [reviewRating, setReviewRating] = React.useState(5)
+  const [reviewTitle, setReviewTitle] = React.useState('')
+  const [reviewComment, setReviewComment] = React.useState('')
+  const [submittingReviewKey, setSubmittingReviewKey] = React.useState<string | null>(null)
+  const [deletingReviewId, setDeletingReviewId] = React.useState<string | null>(null)
 
   // Addresses state
   const [addresses, setAddresses] = React.useState<Address[]>([])
@@ -97,25 +112,38 @@ function AccountContent() {
     }
   }, [user])
 
-  // Fetch orders
-  React.useEffect(() => {
+  // Fetch orders & user's submitted reviews
+  const fetchOrdersAndReviews = React.useCallback(async () => {
     if (!isAuthenticated) return
-    const fetchOrders = async () => {
-      try {
-        const res = await api.get<any>('/api/orders')
-        const list = res.data?.items ?? res.data?.data ?? (Array.isArray(res.data) ? res.data : [])
-        setOrders(list)
-        if (orderSuccessParam && list.length > 0) {
-          setExpandedOrderId(list[0].id)
-        }
-      } catch {
-        setOrders([])
-      } finally {
-        setLoadingOrders(false)
+    setLoadingOrders(true)
+    try {
+      const [ordersRes, reviewsRes] = await Promise.all([
+        api.get<any>('/api/orders?pageSize=50'),
+        api.get<MyReview[]>('/api/reviews/my').catch(() => ({ data: [] as MyReview[] })),
+      ])
+      const list: Order[] =
+        ordersRes.data?.items ?? ordersRes.data?.data ?? (Array.isArray(ordersRes.data) ? ordersRes.data : [])
+      setOrders(list)
+
+      const reviewMap: Record<string, MyReview> = {}
+      for (const rev of reviewsRes.data ?? []) {
+        if (rev?.productId) reviewMap[rev.productId] = rev
       }
+      setMyReviewsByProduct(reviewMap)
+
+      if (list.length > 0) {
+        setExpandedOrderId((prev) => prev ?? list[0].id)
+      }
+    } catch {
+      setOrders([])
+    } finally {
+      setLoadingOrders(false)
     }
-    fetchOrders()
-  }, [isAuthenticated, orderSuccessParam])
+  }, [isAuthenticated])
+
+  React.useEffect(() => {
+    fetchOrdersAndReviews()
+  }, [fetchOrdersAndReviews, orderSuccessParam])
 
   // Fetch addresses when tab active
   React.useEffect(() => {
@@ -133,6 +161,28 @@ function AccountContent() {
     }
     fetchAddresses()
   }, [isAuthenticated, activeTab])
+
+  const deliveredOrdersCount = orders.filter((o) => String(o.status).toLowerCase() === 'delivered').length
+  const cancelledOrdersCount = orders.filter((o) => {
+    const s = String(o.status).toLowerCase()
+    return s === 'cancelled' || s === 'refunded'
+  }).length
+  const activeOrdersCount = orders.length - deliveredOrdersCount - cancelledOrdersCount
+
+  const filteredOrders = React.useMemo(() => {
+    const q = orderSearch.trim().toLowerCase()
+    return orders.filter((order) => {
+      const s = String(order.status).toLowerCase()
+      if (orderStatusFilter === 'delivered' && s !== 'delivered') return false
+      if (orderStatusFilter === 'cancelled' && s !== 'cancelled' && s !== 'refunded') return false
+      if (orderStatusFilter === 'active' && (s === 'delivered' || s === 'cancelled' || s === 'refunded')) return false
+      if (!q) return true
+      return (
+        order.orderNumber.toLowerCase().includes(q) ||
+        order.items?.some((item) => (item.productName ?? '').toLowerCase().includes(q))
+      )
+    })
+  }, [orders, orderStatusFilter, orderSearch])
 
   if (!isAuthenticated) {
     return (
@@ -190,12 +240,74 @@ function AccountContent() {
     try {
       await api.post(`/api/orders/${orderId}/cancel`)
       toast.success('Order cancelled successfully.')
-      // Refresh orders
-      const res = await api.get<any>('/api/orders')
-      const list = res.data?.items ?? res.data?.data ?? (Array.isArray(res.data) ? res.data : [])
-      setOrders(list)
+      await fetchOrdersAndReviews()
     } catch (err: unknown) {
       toast.error((err as { message?: string })?.message ?? 'Failed to cancel order')
+    }
+  }
+
+  const handleOpenDeliveredReview = (draftKey: string, initialRating = 5) => {
+    setActiveReviewKey(draftKey)
+    setReviewRating(initialRating)
+    setReviewTitle('')
+    setReviewComment('')
+  }
+
+  const handleSubmitDeliveredReview = async (e: React.FormEvent, productId: string, draftKey: string) => {
+    e.preventDefault()
+    if (!reviewComment.trim()) {
+      toast.error('Please share your feedback about the item.')
+      return
+    }
+    setSubmittingReviewKey(draftKey)
+    try {
+      const { data } = await api.post<MyReview & { userName?: string }>('/api/reviews', {
+        productId,
+        rating: reviewRating,
+        title: reviewTitle.trim() || null,
+        comment: reviewComment.trim(),
+      })
+      setMyReviewsByProduct((prev) => ({
+        ...prev,
+        [productId]: {
+          id: data.id,
+          productId,
+          rating: data.rating,
+          title: data.title,
+          comment: data.comment,
+          isVerifiedPurchase: data.isVerifiedPurchase,
+          createdAt: data.createdAt,
+        },
+      }))
+      invalidateFrontendCatalogCache()
+      setActiveReviewKey(null)
+      setReviewTitle('')
+      setReviewComment('')
+      setReviewRating(5)
+      toast.success('Thank you! Your rating & review has been saved.')
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message ?? err?.message ?? 'Unable to submit review')
+    } finally {
+      setSubmittingReviewKey(null)
+    }
+  }
+
+  const handleDeleteDeliveredReview = async (reviewId: string, productId: string) => {
+    if (!confirm('Delete your rating & review for this item?')) return
+    setDeletingReviewId(reviewId)
+    try {
+      await api.delete(`/api/reviews/${reviewId}`)
+      setMyReviewsByProduct((prev) => {
+        const next = { ...prev }
+        delete next[productId]
+        return next
+      })
+      invalidateFrontendCatalogCache()
+      toast.success('Review removed')
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message ?? 'Failed to delete review')
+    } finally {
+      setDeletingReviewId(null)
     }
   }
 
@@ -286,7 +398,7 @@ function AccountContent() {
     return 0 // pending / payment pending
   }
 
-  const isAdmin = user?.role === 'admin'
+  const isAdmin = (user?.role ?? '').toString().toLowerCase() === 'admin'
 
   const FAQ_ITEMS = [
     {
@@ -420,7 +532,43 @@ function AccountContent() {
 
       {/* ─── TAB 1: ORDERS ─────────────────────────────────────────────────── */}
       {activeTab === 'orders' && (
-        <div>
+        <div className="space-y-6">
+          {!loadingOrders && orders.length > 0 && (
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-surface border border-border rounded-2xl p-4">
+              <div className="flex items-center gap-2 overflow-x-auto pb-1 sm:pb-0">
+                {[
+                  { id: 'all', label: `All (${orders.length})` },
+                  { id: 'delivered', label: `Delivered (${deliveredOrdersCount})` },
+                  { id: 'active', label: `In Progress (${activeOrdersCount})` },
+                  { id: 'cancelled', label: `Cancelled (${cancelledOrdersCount})` },
+                ].map((f) => (
+                  <button
+                    key={f.id}
+                    type="button"
+                    onClick={() => setOrderStatusFilter(f.id as any)}
+                    className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
+                      orderStatusFilter === f.id
+                        ? 'bg-gold text-background shadow-sm shadow-gold/20'
+                        : 'bg-surface-2 text-beige-muted hover:text-beige border border-border'
+                    }`}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+              <div className="relative sm:w-64">
+                <Search className="w-3.5 h-3.5 text-beige-muted absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  type="text"
+                  value={orderSearch}
+                  onChange={(e) => setOrderSearch(e.target.value)}
+                  placeholder="Search order # or item..."
+                  className="w-full bg-surface-2 border border-border rounded-xl pl-8 pr-3 py-1.5 text-xs text-beige placeholder:text-beige-muted/50 focus:outline-none focus:border-gold"
+                />
+              </div>
+            </div>
+          )}
+
           {loadingOrders ? (
             <div className="space-y-4">
               {Array.from({ length: 2 }).map((_, i) => (
@@ -438,18 +586,34 @@ function AccountContent() {
                 <Link href="/products">Explore Catalog</Link>
               </Button>
             </div>
+          ) : filteredOrders.length === 0 ? (
+            <div className="bg-surface border border-border rounded-2xl p-10 text-center space-y-3">
+              <Package className="w-10 h-10 text-gold/40 mx-auto" />
+              <p className="text-sm font-medium text-beige">No matching orders found.</p>
+              <button
+                type="button"
+                onClick={() => {
+                  setOrderStatusFilter('all')
+                  setOrderSearch('')
+                }}
+                className="text-xs font-semibold text-gold hover:underline"
+              >
+                Clear filters
+              </button>
+            </div>
           ) : (
             <div className="space-y-6">
-              {orders.map((order) => {
+              {filteredOrders.map((order) => {
                 const isExpanded = expandedOrderId === order.id
                 const step = getFulfillmentStep(order.status as unknown as string)
                 const isCancelled = order.status.toString().toLowerCase() === 'cancelled'
                 const canCancel =
                   order.status.toString().toLowerCase() === 'pending' ||
                   order.status.toString().toLowerCase() === 'confirmed'
-
                 const isDelivered = order.status.toString().toLowerCase() === 'delivered'
                 const isShipped = order.status.toString().toLowerCase() === 'shipped' || order.status.toString().toLowerCase().includes('outfor')
+                const totalUnits = order.items?.reduce((sum, i) => sum + (i.quantity || 1), 0) ?? 0
+                const ratingLabels = ['', 'Poor', 'Fair', 'Good', 'Very Good', 'Exceptional']
 
                 return (
                   <div
@@ -458,7 +622,7 @@ function AccountContent() {
                       isCancelled
                         ? 'border-rose-500/30 bg-rose-950/5'
                         : isDelivered
-                        ? 'border-emerald-500/30 bg-emerald-950/5 hover:border-emerald-500/50'
+                        ? 'border-emerald-500/35 bg-emerald-950/5 hover:border-emerald-500/50'
                         : isShipped
                         ? 'border-sky-500/30 bg-sky-950/5 hover:border-sky-500/50'
                         : 'border-border hover:border-gold/30'
@@ -467,14 +631,20 @@ function AccountContent() {
                     {/* Order Card Header */}
                     <div className="p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-surface-2/40 border-b border-border">
                       <div className="space-y-1.5">
-                        <div className="flex items-center gap-3">
+                        <div className="flex flex-wrap items-center gap-2.5">
                           <span className="font-mono text-sm font-bold text-gold">
                             {order.orderNumber}
                           </span>
                           <StatusBadge status={order.status} size="md" />
+                          {isDelivered && (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
+                              <CheckCircle2 className="w-3 h-3" />
+                              Delivered {formatDate(order.deliveredAt ?? order.createdAt)}
+                            </span>
+                          )}
                         </div>
                         <p className="text-[11px] text-beige-muted">
-                          Placed on {formatDate(order.createdAt)} • Payment:{' '}
+                          Placed on {formatDate(order.createdAt)} • {totalUnits} {totalUnits === 1 ? 'item' : 'items'} • Payment:{' '}
                           <span className="uppercase text-beige font-semibold">
                             {order.paymentMethod === (1 as any) || (order.paymentMethod as any) === 'CashOnDelivery'
                               ? 'Cash on Delivery'
@@ -483,7 +653,7 @@ function AccountContent() {
                         </p>
                       </div>
 
-                      <div className="flex items-center gap-4">
+                      <div className="flex items-center gap-3 self-end sm:self-center">
                         <div className="text-right">
                           <span className="text-[11px] text-beige-muted block">Total Paid</span>
                           <span className="text-base font-serif font-bold text-beige">
@@ -491,17 +661,20 @@ function AccountContent() {
                           </span>
                         </div>
                         <button
+                          type="button"
                           onClick={() => setExpandedOrderId(isExpanded ? null : order.id)}
-                          className="w-8 h-8 rounded-lg bg-surface border border-border hover:border-gold/40 flex items-center justify-center text-beige-muted hover:text-beige transition-colors"
+                          aria-label={isExpanded ? 'Hide price and delivery details' : 'View price and delivery details'}
+                          className="h-8 px-2.5 rounded-lg bg-surface border border-border hover:border-gold/40 flex items-center gap-1.5 text-[11px] font-medium text-beige-muted hover:text-beige transition-colors"
                         >
-                          {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                          <span>{isExpanded ? 'Less' : 'Invoice & Track'}</span>
+                          {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
                         </button>
                       </div>
                     </div>
 
                     {/* Visual Progress Bar (SHEIN / AJIO style) */}
                     {!isCancelled ? (
-                      <div className="p-6 bg-surface border-b border-border">
+                      <div className="px-6 py-5 bg-surface border-b border-border">
                         <div className="relative flex items-center justify-between max-w-2xl mx-auto">
                           <div className="absolute top-4 left-6 right-6 h-0.5 bg-border -z-0">
                             <div
@@ -543,7 +716,7 @@ function AccountContent() {
                                 <span
                                   className={`text-[10px] tracking-wider uppercase font-semibold text-center ${
                                     isCurrent && step === 3
-                                      ? 'text-emerald-400 font-bold'
+                                      ? 'text-emerald-600 font-bold'
                                       : isCurrent
                                       ? 'text-gold'
                                       : isDone
@@ -559,62 +732,240 @@ function AccountContent() {
                         </div>
                       </div>
                     ) : (
-                      <div className="p-4 bg-rose-500/10 border-b border-rose-500/25 flex items-center gap-2.5 text-xs text-rose-300">
-                        <AlertCircle className="w-4 h-4 text-rose-400 flex-shrink-0" />
+                      <div className="p-4 bg-rose-500/10 border-b border-rose-500/25 flex items-center gap-2.5 text-xs text-rose-700">
+                        <AlertCircle className="w-4 h-4 text-rose-500 flex-shrink-0" />
                         <span>This order was cancelled. Any pre-payments are automatically refunded within 24–48 hours.</span>
                       </div>
                     )}
 
-                    {/* Expandable Order Details */}
-                    {isExpanded && (
-                      <div className="p-6 space-y-6 animate-fade-in bg-surface-2/20">
-                        {/* Ordered Items List */}
-                        <div className="space-y-3">
-                          <span className="text-xs font-bold uppercase tracking-wider text-gold block">
-                            Ordered Items ({order.items?.length ?? 0})
+                    {/* Always-Visible Ordered Items + Post-Delivery Rating & Review */}
+                    <div className="p-5 sm:p-6 space-y-3 bg-surface-2/15">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold uppercase tracking-wider text-gold">
+                          Ordered Items ({order.items?.length ?? 0})
+                        </span>
+                        {isDelivered && (
+                          <span className="text-[11px] font-medium text-emerald-700">
+                            Delivered • Rate &amp; review your items
                           </span>
-                          <div className="space-y-2">
-                            {order.items?.map((item) => (
-                              <div
-                                key={item.id}
-                                className="flex items-center gap-4 p-3 bg-surface border border-border rounded-xl"
-                              >
-                                <div className="relative w-12 h-12 rounded-lg overflow-hidden bg-surface-2 border border-border flex-shrink-0">
+                        )}
+                      </div>
+
+                      <div className="space-y-3">
+                        {order.items?.map((item) => {
+                          const draftKey = `${order.id}:${item.productId}`
+                          const existingReview = myReviewsByProduct[item.productId]
+                          const isComposerOpen = activeReviewKey === draftKey
+                          const itemSlug = item.productSlug || item.product?.slug
+                          const productHref = itemSlug ? `/products/${itemSlug}` : undefined
+
+                          return (
+                            <div
+                              key={item.id}
+                              className="bg-surface border border-border rounded-xl p-3.5 sm:p-4 space-y-3"
+                            >
+                              <div className="flex items-center gap-4">
+                                <div className="relative w-14 h-14 rounded-lg overflow-hidden bg-surface-2 border border-border flex-shrink-0">
                                   {item.productImageUrl ? (
                                     <Image
-                                      src={item.productImageUrl}
+                                      src={optimizeImageUrl(item.productImageUrl, 160)}
                                       alt={item.productName ?? 'Product item'}
                                       fill
                                       className="object-cover"
-                                      sizes="48px"
+                                      sizes="56px"
                                     />
                                   ) : (
-                                    <div className="w-full h-full flex items-center justify-center text-[8px] text-beige-muted">
+                                    <div className="w-full h-full flex items-center justify-center text-[9px] text-beige-muted">
                                       No Img
                                     </div>
                                   )}
                                 </div>
                                 <div className="flex-1 min-w-0">
-                                  <p className="text-xs font-semibold text-beige truncate">
-                                    {item.productName}
-                                  </p>
-                                  {item.variantName && (
-                                    <p className="text-[11px] text-gold/80">{item.variantName}</p>
+                                  {productHref ? (
+                                    <Link
+                                      href={productHref}
+                                      className="text-xs sm:text-sm font-semibold text-beige hover:text-gold transition-colors inline-flex items-center gap-1 max-w-full"
+                                    >
+                                      <span className="truncate">{item.productName}</span>
+                                      <ExternalLink className="w-3 h-3 flex-shrink-0 opacity-60" />
+                                    </Link>
+                                  ) : (
+                                    <p className="text-xs sm:text-sm font-semibold text-beige truncate">
+                                      {item.productName}
+                                    </p>
                                   )}
-                                  <p className="text-[11px] text-beige-muted">
+                                  {item.variantName && (
+                                    <p className="text-[11px] text-gold/80 mt-0.5">{item.variantName}</p>
+                                  )}
+                                  <p className="text-[11px] text-beige-muted mt-0.5">
                                     Qty: {item.quantity} × {formatCurrency(item.unitPrice ?? 0)}
                                   </p>
                                 </div>
-                                <span className="text-xs font-bold text-beige font-mono">
+                                <span className="text-xs sm:text-sm font-bold text-beige font-mono flex-shrink-0">
                                   {formatCurrency(item.totalPrice ?? 0)}
                                 </span>
                               </div>
-                            ))}
-                          </div>
-                        </div>
 
+                              {/* Post-Delivery Rating & Review Display / Composer */}
+                              {isDelivered && (
+                                <div className="pt-3 border-t border-border/70">
+                                  {existingReview ? (
+                                    <div className="bg-surface-2/80 border border-gold/25 rounded-xl p-3.5 space-y-2">
+                                      <div className="flex flex-wrap items-center justify-between gap-2">
+                                        <div className="flex items-center gap-2">
+                                          <div className="flex items-center gap-0.5" aria-label={`Rated ${existingReview.rating} out of 5 stars`}>
+                                            {Array.from({ length: 5 }).map((_, starIdx) => (
+                                              <Star
+                                                key={starIdx}
+                                                className={cn(
+                                                  'w-3.5 h-3.5',
+                                                  starIdx < existingReview.rating
+                                                    ? 'text-gold fill-gold'
+                                                    : 'text-beige-muted/30',
+                                                )}
+                                              />
+                                            ))}
+                                          </div>
+                                          <span className="text-xs font-bold text-beige tabular-nums">
+                                            {existingReview.rating}.0 / 5
+                                          </span>
+                                          <span className="text-[10px] font-semibold uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-full">
+                                            Your Delivered Review
+                                          </span>
+                                        </div>
+                                        <div className="flex items-center gap-3 text-[11px] text-beige-muted">
+                                          <span>{formatRelativeDate(existingReview.createdAt)}</span>
+                                          <button
+                                            type="button"
+                                            disabled={deletingReviewId === existingReview.id}
+                                            onClick={() => handleDeleteDeliveredReview(existingReview.id, item.productId)}
+                                            className="text-beige-muted hover:text-error transition-colors disabled:opacity-50"
+                                            title="Delete your review"
+                                          >
+                                            {deletingReviewId === existingReview.id ? 'Removing...' : 'Delete'}
+                                          </button>
+                                        </div>
+                                      </div>
+                                      {existingReview.title && (
+                                        <p className="text-xs font-semibold text-beige">{existingReview.title}</p>
+                                      )}
+                                      {existingReview.comment && (
+                                        <p className="text-xs text-beige-muted leading-relaxed">
+                                          {existingReview.comment}
+                                        </p>
+                                      )}
+                                    </div>
+                                  ) : isComposerOpen ? (
+                                    <form
+                                      onSubmit={(e) => handleSubmitDeliveredReview(e, item.productId, draftKey)}
+                                      className="bg-surface-2/80 border border-gold/40 rounded-xl p-4 space-y-3 animate-fade-in"
+                                    >
+                                      <div className="flex items-center justify-between">
+                                        <span className="text-xs font-semibold uppercase tracking-wider text-beige">
+                                          Rate Delivered Product
+                                        </span>
+                                        <span className="text-xs font-medium text-gold">
+                                          {reviewRating} / 5 • {ratingLabels[reviewRating]}
+                                        </span>
+                                      </div>
+                                      <div className="flex items-center gap-1.5">
+                                        {[1, 2, 3, 4, 5].map((star) => (
+                                          <button
+                                            key={star}
+                                            type="button"
+                                            onClick={() => setReviewRating(star)}
+                                            aria-label={`Rate ${star} stars`}
+                                            className="p-1 transition-transform hover:scale-110"
+                                          >
+                                            <Star
+                                              className={cn(
+                                                'w-5 h-5',
+                                                star <= reviewRating ? 'text-gold fill-gold' : 'text-beige-muted/30',
+                                              )}
+                                            />
+                                          </button>
+                                        ))}
+                                      </div>
+                                      <input
+                                        type="text"
+                                        value={reviewTitle}
+                                        onChange={(e) => setReviewTitle(e.target.value)}
+                                        placeholder="Headline (optional) — e.g. Tailored fit & soft fabric"
+                                        maxLength={200}
+                                        className="w-full bg-surface border border-border rounded-xl px-3 py-2 text-xs text-beige focus:outline-none focus:border-gold"
+                                      />
+                                      <textarea
+                                        rows={2}
+                                        value={reviewComment}
+                                        onChange={(e) => setReviewComment(e.target.value)}
+                                        placeholder="Share your experience with quality, sizing, and finish after delivery..."
+                                        required
+                                        maxLength={2000}
+                                        className="w-full bg-surface border border-border rounded-xl px-3 py-2 text-xs text-beige focus:outline-none focus:border-gold"
+                                      />
+                                      <div className="flex items-center justify-end gap-2">
+                                        <Button
+                                          type="button"
+                                          variant="ghost"
+                                          size="sm"
+                                          onClick={() => setActiveReviewKey(null)}
+                                        >
+                                          Cancel
+                                        </Button>
+                                        <Button
+                                          type="submit"
+                                          variant="primary"
+                                          size="sm"
+                                          isLoading={submittingReviewKey === draftKey}
+                                        >
+                                          Submit Review
+                                        </Button>
+                                      </div>
+                                    </form>
+                                  ) : (
+                                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                                      <div className="flex items-center gap-2">
+                                        <span className="text-xs text-beige-muted">
+                                          How was your delivery? Tap a rating:
+                                        </span>
+                                        <div className="flex items-center gap-0.5">
+                                          {[1, 2, 3, 4, 5].map((star) => (
+                                            <button
+                                              key={star}
+                                              type="button"
+                                              onClick={() => handleOpenDeliveredReview(draftKey, star)}
+                                              aria-label={`Rate ${item.productName} ${star} stars`}
+                                              className="p-0.5 text-beige-muted/40 hover:text-gold transition-colors"
+                                            >
+                                              <Star className="w-4 h-4 hover:fill-gold" />
+                                            </button>
+                                          ))}
+                                        </div>
+                                      </div>
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => handleOpenDeliveredReview(draftKey, 5)}
+                                        className="text-xs self-start sm:self-auto"
+                                      >
+                                        Rate &amp; Review Item
+                                      </Button>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Expandable Price Breakdown & Shipping Details */}
+                    {isExpanded && (
+                      <div className="p-5 sm:p-6 pt-0 space-y-5 animate-fade-in bg-surface-2/15 border-t border-border/60">
                         {/* Order Price Summary */}
-                        <div className="bg-surface border border-border rounded-xl p-4 space-y-2 text-xs">
+                        <div className="bg-surface border border-border rounded-xl p-4 space-y-2 text-xs mt-5">
                           <span className="text-[11px] font-bold uppercase tracking-wider text-gold block">
                             Payment Summary
                           </span>
@@ -688,6 +1039,7 @@ function AccountContent() {
                             {canCancel && (
                               <div className="mt-4 pt-3 border-t border-border/80">
                                 <button
+                                  type="button"
                                   onClick={() => handleCancelOrder(order.id)}
                                   className="text-xs text-error hover:text-error/80 border border-error/30 rounded-lg px-3 py-1.5 hover:bg-error/10 transition-colors"
                                 >

@@ -49,6 +49,7 @@ import { useAuthModalStore } from '@/store/authModal'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { StatusBadge } from '@/components/ui/StatusBadge'
+import { SecurityBadge, type SecurityPostureInfo } from '@/components/ui/SecurityBadge'
 import { Input } from '@/components/ui/Input'
 import api, { getApiBaseUrl } from '@/lib/api'
 import { invalidateFrontendCatalogCache } from '@/lib/catalogCache'
@@ -114,9 +115,11 @@ interface BulkProductRow {
 }
 
 function AdminContent() {
-  const { user, isAuthenticated, logout } = useAuthStore()
+  const { user, isAuthenticated, logout, updateUser } = useAuthStore()
   const { open: openAuthModal } = useAuthModalStore()
   const [mounted, setMounted] = React.useState(false)
+  const [serverVerifiedAdmin, setServerVerifiedAdmin] = React.useState(false)
+  const [roleCheckLoading, setRoleCheckLoading] = React.useState(true)
   const [portalError, setPortalError] = React.useState<string | null>(null)
 
   React.useEffect(() => {
@@ -136,6 +139,7 @@ function AdminContent() {
   const [coupons, setCoupons] = React.useState<CouponDto[]>([])
   const [customers, setCustomers] = React.useState<CustomerDto[]>([])
   const [alerts, setAlerts] = React.useState<SecurityAlertDto[]>([])
+  const [securityPosture, setSecurityPosture] = React.useState<SecurityPostureInfo | null>(null)
   const [unreadAlerts, setUnreadAlerts] = React.useState(0)
   const [loading, setLoading] = React.useState(true)
 
@@ -260,7 +264,44 @@ function AdminContent() {
   })
   const [isSubmittingCoupon, setIsSubmittingCoupon] = React.useState(false)
 
-  const isAdmin = user?.role === 'admin' || (user?.role as unknown as string) === 'Admin'
+  const isAdmin = serverVerifiedAdmin
+
+  // Authoritative server-side RBAC check against GET /api/auth/me (prevents localStorage role tampering)
+  React.useEffect(() => {
+    let cancelled = false
+    const verifyServerRole = async () => {
+      if (!mounted) return
+      if (!isAuthenticated) {
+        setServerVerifiedAdmin(false)
+        setRoleCheckLoading(false)
+        return
+      }
+      setRoleCheckLoading(true)
+      try {
+        const { data } = await api.get<any>('/api/auth/me')
+        if (cancelled) return
+        if (data) {
+          updateUser(data)
+        }
+        const serverRole = String(data?.role ?? '').toLowerCase()
+        const verified = serverRole === 'admin' && data?.isActive !== false
+        setServerVerifiedAdmin(verified)
+        if (!verified) {
+          setPortalError('Access denied: Administrator privileges are verified server-side.')
+        }
+      } catch {
+        if (!cancelled) {
+          setServerVerifiedAdmin(false)
+        }
+      } finally {
+        if (!cancelled) setRoleCheckLoading(false)
+      }
+    }
+    verifyServerRole()
+    return () => {
+      cancelled = true
+    }
+  }, [mounted, isAuthenticated, updateUser])
 
   // Fetch all admin data
   const fetchAllData = React.useCallback(async () => {
@@ -319,6 +360,7 @@ function AdminContent() {
       if (alertRes?.data) {
         setAlerts(alertRes.data.alerts ?? alertRes.data.Alerts ?? [])
         setUnreadAlerts(alertRes.data.unreadCount ?? alertRes.data.UnreadCount ?? 0)
+        setSecurityPosture(alertRes.data.securityPosture ?? alertRes.data.SecurityPosture ?? null)
       }
     } catch {
       setPortalError('Failed to load portal data. Please check your connection and sign in again.')
@@ -1060,12 +1102,14 @@ function AdminContent() {
     })
   }, [customers, customerSearch])
 
-  if (!mounted) {
+  if (!mounted || (isAuthenticated && roleCheckLoading)) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center text-beige-muted">
         <div className="flex items-center gap-2.5">
           <RefreshCw className="w-5 h-5 animate-spin text-gold" />
-          <span className="font-mono text-sm">Loading Nexus Control Center...</span>
+          <span className="font-mono text-sm">
+            {isAuthenticated ? 'Verifying Administrator Session...' : 'Loading Nexus Control Center...'}
+          </span>
         </div>
       </div>
     )
@@ -1076,24 +1120,44 @@ function AdminContent() {
       <div className="min-h-screen bg-background text-beige flex items-center justify-center p-4">
         <div className="max-w-md w-full bg-surface border border-border rounded-2xl p-8 text-center space-y-4 shadow-2xl">
           <Shield className="w-12 h-12 text-gold mx-auto" />
-          <h1 className="font-serif text-2xl font-bold text-beige">NEXUS Control Center</h1>
+          <h1 className="font-serif text-2xl font-bold text-beige">
+            {isAuthenticated ? 'Access Denied — Admin Only' : 'NEXUS Control Center'}
+          </h1>
           <p className="text-sm text-beige-muted">
-            You must be signed in with an administrative account to access the control panel.
+            {isAuthenticated
+              ? 'Your current session does not hold verified Administrator privileges on the server.'
+              : 'You must be signed in with an administrative account to access the control panel.'}
           </p>
           <div className="bg-surface-2 p-3.5 rounded-xl text-xs text-beige-muted text-left border border-border">
-            <span className="text-gold font-mono font-semibold">Protected Access:</span>
+            <span className="text-gold font-mono font-semibold">Protected Access (DB Role Enforced):</span>
             <br />
-            Sign in with an authorized administrator account to manage inventory, orders, and security alerts.
+            {isAuthenticated
+              ? 'Client-side role claims cannot elevate permissions. Sign in with an authorized Administrator account to continue.'
+              : 'Sign in with an authorized administrator account to manage inventory, orders, and security alerts.'}
           </div>
           <div className="flex flex-col sm:flex-row gap-2.5">
-            <Button
-              variant="primary"
-              size="md"
-              className="w-full"
-              onClick={() => openAuthModal('login', '/admin')}
-            >
-              Sign In as Admin
-            </Button>
+            {isAuthenticated ? (
+              <Button
+                variant="primary"
+                size="md"
+                className="w-full"
+                onClick={() => {
+                  logout()
+                  openAuthModal('login', '/admin')
+                }}
+              >
+                Switch to Admin Account
+              </Button>
+            ) : (
+              <Button
+                variant="primary"
+                size="md"
+                className="w-full"
+                onClick={() => openAuthModal('login', '/admin')}
+              >
+                Sign In as Admin
+              </Button>
+            )}
             <Button variant="outline" size="md" className="w-full" asChild>
               <Link href="/">Return to Storefront</Link>
             </Button>
@@ -2574,6 +2638,9 @@ function AdminContent() {
                   </Button>
                 </div>
               </div>
+
+              {/* Verified Security Seal */}
+              <SecurityBadge variant="admin" posture={securityPosture} />
 
               {/* Threat KPI Cards */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">

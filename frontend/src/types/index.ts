@@ -203,6 +203,7 @@ export interface OrderItem {
   id: string
   orderId?: string
   productId: string
+  productSlug?: string
   product?: Pick<ProductListItem, 'id' | 'name' | 'slug' | 'primaryImage'>
   productName?: string
   productImageUrl?: string
@@ -277,6 +278,16 @@ export interface ReviewEligibility {
   canReview: boolean
   hasOrdered: boolean
   hasAlreadyReviewed: boolean
+}
+
+export interface MyReview {
+  id: string
+  productId: string
+  rating: number
+  title?: string | null
+  comment?: string | null
+  isVerifiedPurchase: boolean
+  createdAt: string
 }
 
 export interface CreateReviewRequest {

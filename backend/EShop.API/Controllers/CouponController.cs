@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using EShop.API.Services;
 using EShop.Core.DTOs;
 using EShop.Core.Entities;
 using EShop.Core.Enums;
@@ -35,7 +36,18 @@ public class CouponController(AppDbContext db, IUnitOfWork uow) : ControllerBase
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] CreateCouponRequest req)
     {
-        var code = req.Code.Trim().ToUpper();
+        var code = CouponService.NormalizeCode(req.Code);
+        if (code is null)
+            return BadRequest(new { message = "Coupon code must be 2-32 characters using A-Z, 0-9, '-' or '_'." });
+
+        var configError = ValidateCouponConfiguration(
+            req.DiscountType,
+            req.DiscountValue,
+            req.MinOrderValue,
+            req.MaxDiscountAmount,
+            req.UsageLimit);
+        if (configError is not null)
+            return BadRequest(new { message = configError });
 
         if (await _db.Coupons.AnyAsync(c => c.Code == code))
             return Conflict(new { message = $"A coupon with code '{code}' already exists." });
@@ -43,7 +55,7 @@ public class CouponController(AppDbContext db, IUnitOfWork uow) : ControllerBase
         var coupon = new Coupon
         {
             Code              = code,
-            Description       = req.Description,
+            Description       = req.Description?.Trim() ?? string.Empty,
             DiscountType      = req.DiscountType,
             DiscountValue     = req.DiscountValue,
             MinOrderValue     = req.MinOrderValue,
@@ -67,7 +79,19 @@ public class CouponController(AppDbContext db, IUnitOfWork uow) : ControllerBase
         var coupon = await _db.Coupons.FindAsync(id);
         if (coupon is null) return NotFound(new { message = "Coupon not found." });
 
-        var code = req.Code.Trim().ToUpper();
+        var code = CouponService.NormalizeCode(req.Code);
+        if (code is null)
+            return BadRequest(new { message = "Coupon code must be 2-32 characters using A-Z, 0-9, '-' or '_'." });
+
+        var configError = ValidateCouponConfiguration(
+            req.DiscountType,
+            req.DiscountValue,
+            req.MinOrderValue,
+            req.MaxDiscountAmount,
+            req.UsageLimit);
+        if (configError is not null)
+            return BadRequest(new { message = configError });
+
         if (!coupon.Code.Equals(code, StringComparison.OrdinalIgnoreCase) &&
             await _db.Coupons.AnyAsync(c => c.Code == code && c.Id != id))
         {
@@ -75,7 +99,7 @@ public class CouponController(AppDbContext db, IUnitOfWork uow) : ControllerBase
         }
 
         coupon.Code              = code;
-        coupon.Description       = req.Description;
+        coupon.Description       = req.Description?.Trim() ?? string.Empty;
         coupon.DiscountType      = req.DiscountType;
         coupon.DiscountValue     = req.DiscountValue;
         coupon.MinOrderValue     = req.MinOrderValue;
@@ -112,7 +136,10 @@ public class CouponController(AppDbContext db, IUnitOfWork uow) : ControllerBase
         var now = DateTime.UtcNow;
         var coupons = await _db.Coupons
             .AsNoTracking()
-            .Where(c => c.IsActive && (!c.ExpiresAt.HasValue || c.ExpiresAt > now))
+            .Where(c =>
+                c.IsActive &&
+                (!c.ExpiresAt.HasValue || c.ExpiresAt > now) &&
+                (!c.UsageLimit.HasValue || c.UsedCount < c.UsageLimit))
             .OrderBy(c => c.MinOrderValue)
             .Take(8)
             .ToListAsync();
@@ -125,41 +152,51 @@ public class CouponController(AppDbContext db, IUnitOfWork uow) : ControllerBase
     [HttpPost("validate")]
     public async Task<IActionResult> Validate([FromBody] ValidateCouponRequest req)
     {
-        var code   = req.Code.Trim().ToUpper();
+        if (req.CartTotal <= 0m)
+            return Ok(new ValidateCouponResponse(false, "Add items to your cart before applying a coupon.", 0, null));
+
+        var code = CouponService.NormalizeCode(req.Code);
+        if (code is null)
+            return Ok(new ValidateCouponResponse(false, "Invalid coupon code format. Use 2-32 letters, numbers, '-' or '_'.", 0, null));
+
         var coupon = await _db.Coupons
             .AsNoTracking()
             .FirstOrDefaultAsync(c => c.Code == code);
 
-        if (coupon is null || !coupon.IsActive)
-            return Ok(new ValidateCouponResponse(false, "Invalid or inactive coupon code.", 0, null));
-
-        if (coupon.ExpiresAt.HasValue && coupon.ExpiresAt < DateTime.UtcNow)
-            return Ok(new ValidateCouponResponse(false, "This coupon has expired.", 0, null));
-
-        if (coupon.UsageLimit.HasValue && coupon.UsedCount >= coupon.UsageLimit)
-            return Ok(new ValidateCouponResponse(false, "This coupon has reached its usage limit.", 0, null));
-
-        if (coupon.MinOrderValue.HasValue && req.CartTotal < coupon.MinOrderValue)
-            return Ok(new ValidateCouponResponse(
-                false,
-                $"Minimum cart value of ₹{coupon.MinOrderValue} required for this coupon.",
-                0, null));
-
-        var discount = coupon.DiscountType == DiscountType.Percentage
-            ? Math.Round(req.CartTotal * coupon.DiscountValue / 100, 2)
-            : coupon.DiscountValue;
-
-        if (coupon.MaxDiscountAmount.HasValue)
-            discount = Math.Min(discount, coupon.MaxDiscountAmount.Value);
-
+        var result = CouponService.Evaluate(coupon, req.CartTotal);
         return Ok(new ValidateCouponResponse(
-            true,
-            $"Coupon applied! You save ₹{discount}.",
-            discount,
-            coupon.Code));
+            result.IsValid,
+            result.Message,
+            result.DiscountAmount,
+            result.NormalizedCode));
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
+    private static string? ValidateCouponConfiguration(
+        DiscountType discountType,
+        decimal discountValue,
+        decimal? minOrderValue,
+        decimal? maxDiscountAmount,
+        int? usageLimit)
+    {
+        if (discountValue <= 0m)
+            return "Discount value must be greater than zero.";
+
+        if (discountType == DiscountType.Percentage && discountValue > 100m)
+            return "Percentage discount cannot exceed 100%.";
+
+        if (minOrderValue.HasValue && minOrderValue.Value < 0m)
+            return "Minimum order value cannot be negative.";
+
+        if (maxDiscountAmount.HasValue && maxDiscountAmount.Value <= 0m)
+            return "Maximum discount cap must be greater than zero when specified.";
+
+        if (usageLimit.HasValue && usageLimit.Value < 1)
+            return "Usage limit must be at least 1 when specified.";
+
+        return null;
+    }
+
     private static CouponDto MapDto(Coupon c) => new(
         Id:               c.Id,
         Code:             c.Code,

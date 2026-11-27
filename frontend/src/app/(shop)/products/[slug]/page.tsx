@@ -289,7 +289,7 @@ export default function ProductDetailPage({ params }: Props) {
       return
     }
     if (reviewEligibility && !reviewEligibility.hasOrdered) {
-      toast.error('Only customers who have already ordered this item can review it.')
+      toast.error('You can submit a rating and review once your order for this item is delivered.')
       return
     }
     if (!reviewComment.trim()) {
@@ -1212,42 +1212,26 @@ export default function ProductDetailPage({ params }: Props) {
         <div className="flex items-center justify-between flex-wrap gap-4 mb-6">
           <div>
             <h2 className="font-serif text-2xl font-bold text-beige">
-              Ratings & Verified Reviews {reviews.length > 0 && `(${reviews.length})`}
+              Ratings &amp; Reviews {reviews.length > 0 && `(${reviews.length})`}
             </h2>
             <p className="text-xs text-beige-muted mt-0.5">
-              Only verified buyers who have ordered this item can post a rating or review.
+              Verified customer ratings and feedback from NEXUS shoppers.
             </p>
           </div>
-          {!isAuthenticated ? (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                toast('Sign in with an account that ordered this item to leave a review.', { icon: '🔒' })
-                openAuthModal('login')
-              }}
-            >
-              Sign In to Review
-            </Button>
-          ) : reviewEligibility?.canReview ? (
+          {isAuthenticated && reviewEligibility?.canReview ? (
             <Button
               variant="outline"
               size="sm"
               onClick={() => setShowReviewForm((prev) => !prev)}
             >
-              {showReviewForm ? 'Cancel' : 'Write a Verified Review'}
+              {showReviewForm ? 'Cancel' : 'Write a Review'}
             </Button>
-          ) : reviewEligibility?.hasAlreadyReviewed ? (
+          ) : isAuthenticated && reviewEligibility?.hasAlreadyReviewed ? (
             <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-full">
               <Check className="w-3.5 h-3.5" />
-              Verified Review Submitted
+              Reviewed by You
             </span>
-          ) : (
-            <span className="inline-flex items-center gap-1.5 text-xs font-medium text-beige-muted bg-surface-2 border border-border px-3 py-1.5 rounded-full">
-              <ShieldCheck className="w-3.5 h-3.5 text-gold" />
-              Order this item to unlock rating & review
-            </span>
-          )}
+          ) : null}
         </div>
 
         {/* Out of 5 Rating Summary & Breakdown */}
@@ -1284,8 +1268,8 @@ export default function ProductDetailPage({ params }: Props) {
                   </span>
                 </div>
                 <div className="text-xs text-beige-muted space-y-1">
-                  <p className="font-semibold text-beige text-sm">Verified Quality Score</p>
-                  <p>100% of ratings come from customers who purchased this item.</p>
+                  <p className="font-semibold text-beige text-sm">Overall Customer Rating</p>
+                  <p>Based on verified customer ratings &amp; feedback.</p>
                 </div>
               </div>
 
@@ -1428,7 +1412,7 @@ export default function ProductDetailPage({ params }: Props) {
           </div>
         ) : (
           <div className="bg-surface border border-border rounded-xl p-6 text-center text-xs text-beige-muted">
-            No reviews yet. Be the first to share your thoughts on this piece.
+            No written reviews yet.
           </div>
         )}
       </section>

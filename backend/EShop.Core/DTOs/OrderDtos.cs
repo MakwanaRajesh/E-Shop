@@ -79,7 +79,8 @@ public record OrderItemDto(
     string? VariantName,
     int Quantity,
     decimal UnitPrice,
-    decimal TotalPrice
+    decimal TotalPrice,
+    string? ProductSlug = null
 );
 
 public record RazorpayOrderResponse(

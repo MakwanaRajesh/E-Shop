@@ -1,4 +1,4 @@
-using System.Security.Claims;
+using EShop.API.Extensions;
 using EShop.API.Services;
 using EShop.Core.DTOs;
 using EShop.Core.Entities;
@@ -32,20 +32,45 @@ public class ReviewsController(AppDbContext db, IUnitOfWork uow, CatalogCacheSer
         return Ok(reviews.Select(MapDto));
     }
 
+    // ── GET /api/reviews/my ───────────────────────────────────────────────────
+    [Authorize]
+    [HttpGet("my")]
+    public async Task<IActionResult> GetMyReviews()
+    {
+        var userId = User.GetUserId();
+        if (userId == Guid.Empty) return Unauthorized();
+
+        var myReviews = await _db.Reviews
+            .AsNoTracking()
+            .Where(r => r.UserId == userId)
+            .OrderByDescending(r => r.CreatedAt)
+            .Select(r => new MyReviewDto(
+                r.Id,
+                r.ProductId,
+                r.Rating,
+                r.Title,
+                r.Comment,
+                r.IsVerifiedPurchase,
+                r.CreatedAt))
+            .ToListAsync();
+
+        return Ok(myReviews);
+    }
+
     // ── GET /api/reviews/eligibility/{productId} ─────────────────────────────
     [Authorize]
     [HttpGet("eligibility/{productId:guid}")]
     public async Task<IActionResult> GetEligibility(Guid productId)
     {
-        var userId = GetCurrentUserId();
-        var hasOrdered = userId != Guid.Empty && await HasUserOrderedProductAsync(userId, productId);
+        var userId = User.GetUserId();
+        var hasDeliveredOrder = userId != Guid.Empty && await HasUserDeliveredProductAsync(userId, productId);
         var alreadyReviewed = userId != Guid.Empty && await _db.Reviews
             .AsNoTracking()
             .AnyAsync(r => r.ProductId == productId && r.UserId == userId);
 
         return Ok(new ReviewEligibilityDto(
-            CanReview:          hasOrdered && !alreadyReviewed,
-            HasOrdered:         hasOrdered,
+            CanReview:          hasDeliveredOrder && !alreadyReviewed,
+            HasOrdered:         hasDeliveredOrder,
             HasAlreadyReviewed: alreadyReviewed));
     }
 
@@ -54,20 +79,23 @@ public class ReviewsController(AppDbContext db, IUnitOfWork uow, CatalogCacheSer
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] CreateReviewRequest req)
     {
+        if (req.ProductId == Guid.Empty)
+            return BadRequest(new { message = "A valid product ID is required." });
+
         if (req.Rating < 1 || req.Rating > 5)
             return BadRequest(new { message = "Rating must be between 1 and 5." });
 
-        var userId = GetCurrentUserId();
+        var userId = User.GetUserId();
         if (userId == Guid.Empty)
             return Unauthorized(new { message = "Please sign in to submit a review." });
 
-        // Restrict reviews & ratings strictly to customers who have ordered this product
-        var hasOrdered = await HasUserOrderedProductAsync(userId, req.ProductId);
-        if (!hasOrdered)
+        // Restrict reviews & ratings strictly to customers whose order has been delivered
+        var hasDeliveredOrder = await HasUserDeliveredProductAsync(userId, req.ProductId);
+        if (!hasDeliveredOrder)
         {
             return StatusCode(StatusCodes.Status403Forbidden, new
             {
-                message = "Only verified buyers who have already ordered this item can submit a rating and review."
+                message = "Only customers whose order for this item has been delivered can submit a rating and review."
             });
         }
 
@@ -77,13 +105,21 @@ public class ReviewsController(AppDbContext db, IUnitOfWork uow, CatalogCacheSer
         if (exists)
             return Conflict(new { message = "You have already reviewed this product." });
 
+        var trimmedTitle = req.Title?.Trim();
+        if (!string.IsNullOrEmpty(trimmedTitle) && trimmedTitle.Length > 200)
+            trimmedTitle = trimmedTitle[..200];
+
+        var trimmedComment = req.Comment?.Trim();
+        if (!string.IsNullOrEmpty(trimmedComment) && trimmedComment.Length > 2000)
+            trimmedComment = trimmedComment[..2000];
+
         var review = new Review
         {
             ProductId          = req.ProductId,
             UserId             = userId,
             Rating             = req.Rating,
-            Title              = req.Title?.Trim(),
-            Comment            = req.Comment?.Trim(),
+            Title              = trimmedTitle,
+            Comment            = trimmedComment,
             IsVerifiedPurchase = true,
             IsApproved         = true
         };
@@ -107,7 +143,8 @@ public class ReviewsController(AppDbContext db, IUnitOfWork uow, CatalogCacheSer
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id)
     {
-        var userId = GetCurrentUserId();
+        var userId = User.GetUserId();
+        if (userId == Guid.Empty) return Unauthorized();
         var review = await _db.Reviews.FirstOrDefaultAsync(
             r => r.Id == id && r.UserId == userId);
 
@@ -122,23 +159,12 @@ public class ReviewsController(AppDbContext db, IUnitOfWork uow, CatalogCacheSer
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
-    private Task<bool> HasUserOrderedProductAsync(Guid userId, Guid productId) =>
+    private Task<bool> HasUserDeliveredProductAsync(Guid userId, Guid productId) =>
         _db.Orders
             .AsNoTracking()
             .AnyAsync(o => o.UserId == userId
-                        && o.Status != EShop.Core.Enums.OrderStatus.Cancelled
-                        && (o.Status != EShop.Core.Enums.OrderStatus.PaymentPending
-                            || o.PaymentStatus == EShop.Core.Enums.PaymentStatus.Completed)
+                        && o.Status == EShop.Core.Enums.OrderStatus.Delivered
                         && o.Items.Any(i => i.ProductId == productId));
-
-    private Guid GetCurrentUserId()
-    {
-        var raw = User.FindFirst(ClaimTypes.NameIdentifier)?.Value
-            ?? User.FindFirst("sub")?.Value
-            ?? User.FindFirst("id")?.Value
-            ?? User.Claims.FirstOrDefault(c => c.Type.EndsWith("nameidentifier"))?.Value;
-        return Guid.TryParse(raw, out var id) ? id : Guid.Empty;
-    }
 
     private static ReviewDto MapDto(Review r) => new(
         Id:                 r.Id,

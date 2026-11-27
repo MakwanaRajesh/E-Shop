@@ -1,4 +1,4 @@
-using System.Security.Claims;
+using EShop.API.Extensions;
 using EShop.Core.DTOs;
 using EShop.Core.Entities;
 using EShop.Core.Interfaces;
@@ -21,7 +21,8 @@ public class WishlistController(AppDbContext db, IUnitOfWork uow) : ControllerBa
     [HttpGet]
     public async Task<IActionResult> GetWishlist()
     {
-        var userId = GetCurrentUserId();
+        var userId = User.GetUserId();
+        if (userId == Guid.Empty) return Unauthorized();
 
         var items = await _db.WishlistItems
             .AsNoTracking()
@@ -73,7 +74,8 @@ public class WishlistController(AppDbContext db, IUnitOfWork uow) : ControllerBa
 
     private async Task<IActionResult> AddItemInternal(Guid productId)
     {
-        var userId  = GetCurrentUserId();
+        var userId  = User.GetUserId();
+        if (userId == Guid.Empty) return Unauthorized();
         var product = await _db.Products.FindAsync(productId);
 
         if (product is null || !product.IsActive)
@@ -96,7 +98,8 @@ public class WishlistController(AppDbContext db, IUnitOfWork uow) : ControllerBa
     [HttpDelete("{productId:guid}")]
     public async Task<IActionResult> RemoveFromWishlist(Guid productId)
     {
-        var userId = GetCurrentUserId();
+        var userId = User.GetUserId();
+        if (userId == Guid.Empty) return Unauthorized();
         var item   = await _db.WishlistItems.FirstOrDefaultAsync(
             w => w.UserId == userId && w.ProductId == productId);
 
@@ -106,13 +109,6 @@ public class WishlistController(AppDbContext db, IUnitOfWork uow) : ControllerBa
         await _uow.SaveChangesAsync();
 
         return NoContent();
-    }
-
-    // ── Helpers ───────────────────────────────────────────────────────────────
-    private Guid GetCurrentUserId()
-    {
-        var raw = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-        return Guid.TryParse(raw, out var id) ? id : Guid.Empty;
     }
 }
 

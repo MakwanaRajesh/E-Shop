@@ -23,3 +23,13 @@ public record ReviewEligibilityDto(
     bool HasOrdered,
     bool HasAlreadyReviewed
 );
+
+public record MyReviewDto(
+    Guid Id,
+    Guid ProductId,
+    int Rating,
+    string? Title,
+    string? Comment,
+    bool IsVerifiedPurchase,
+    DateTime CreatedAt
+);

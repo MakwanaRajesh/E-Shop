@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { Sparkles, Mail, Phone, MapPin, Instagram, Twitter, Facebook, Youtube } from 'lucide-react'
+import { SecurityBadge } from '@/components/ui/SecurityBadge'
 
 const QUICK_LINKS = [
   { label: 'Home', href: '/' },
@@ -11,7 +12,7 @@ const QUICK_LINKS = [
 
 const CUSTOMER_LINKS = [
   { label: 'My Account', href: '/account' },
-  { label: 'Order History', href: '/account/orders' },
+  { label: 'Order History', href: '/account' },
   { label: 'Wishlist', href: '/wishlist' },
   { label: 'Track Order', href: '/track-order' },
   { label: 'Returns & Refunds', href: '/returns' },
@@ -126,10 +127,11 @@ export function Footer() {
 
       {/* Bottom bar */}
       <div className="border-t border-[#1C1917] bg-[#0A0A0A]">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5 flex flex-col sm:flex-row items-center justify-between gap-3">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5 flex flex-col lg:flex-row items-center justify-between gap-4">
           <p className="text-xs text-[#78716C]">
             © {new Date().getFullYear()} NEXUS Luxury Store. Atelier Obsidian & Champagne Gold Edition.
           </p>
+          <SecurityBadge variant="footer" />
           <div className="flex items-center gap-5">
             <Link href="/privacy" className="text-xs text-[#78716C] hover:text-[#C5A059] transition-colors">
               Privacy Policy
