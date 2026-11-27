@@ -22,9 +22,8 @@ RUN dotnet publish -c Release -o /app/publish /p:UseAppHost=false
 FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS runtime
 WORKDIR /app
 
-ENV ASPNETCORE_URLS=http://+:10000
 EXPOSE 10000
 
 COPY --from=build /app/publish .
 
-ENTRYPOINT ["dotnet", "EShop.API.dll"]
+ENTRYPOINT ["sh", "-c", "ASPNETCORE_URLS=http://+:${PORT:-10000} exec dotnet EShop.API.dll"]

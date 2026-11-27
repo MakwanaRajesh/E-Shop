@@ -27,10 +27,10 @@ builder.WebHost.ConfigureKestrel(options =>
 });
 
 // ── Database ──────────────────────────────────────────────────────────────────
-var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
+var connectionString = ResolvePostgresConnectionString(builder.Configuration);
 if (string.IsNullOrWhiteSpace(connectionString))
     throw new InvalidOperationException(
-        "Database connection string 'ConnectionStrings:DefaultConnection' is not configured. " +
+        "Database connection string 'ConnectionStrings:DefaultConnection' (or 'DATABASE_URL') is not configured. " +
         "Set it via environment variables or dotnet user-secrets.");
 
 builder.Services.AddDbContext<AppDbContext>(options =>
@@ -39,6 +39,7 @@ builder.Services.AddDbContext<AppDbContext>(options =>
         npgsql =>
         {
             npgsql.MigrationsAssembly("EShop.Infrastructure");
+            npgsql.CommandTimeout(30);
             npgsql.EnableRetryOnFailure(
                 maxRetryCount: 3,
                 maxRetryDelay: TimeSpan.FromSeconds(5),
@@ -46,6 +47,49 @@ builder.Services.AddDbContext<AppDbContext>(options =>
         }
     )
 );
+
+static string? ResolvePostgresConnectionString(IConfiguration configuration)
+{
+    var raw = configuration.GetConnectionString("DefaultConnection");
+    if (string.IsNullOrWhiteSpace(raw))
+        raw = configuration["DATABASE_URL"] ?? Environment.GetEnvironmentVariable("DATABASE_URL");
+    if (string.IsNullOrWhiteSpace(raw))
+        return null;
+
+    var trimmed = raw.Trim();
+    if (!trimmed.StartsWith("postgres://", StringComparison.OrdinalIgnoreCase) &&
+        !trimmed.StartsWith("postgresql://", StringComparison.OrdinalIgnoreCase))
+    {
+        return trimmed;
+    }
+
+    var uri = new Uri(trimmed);
+    var userInfo = uri.UserInfo.Split(':', 2);
+    var csb = new Npgsql.NpgsqlConnectionStringBuilder
+    {
+        Host = uri.Host,
+        Port = uri.Port > 0 ? uri.Port : 5432,
+        Database = uri.AbsolutePath.TrimStart('/'),
+        Username = Uri.UnescapeDataString(userInfo[0]),
+        Password = userInfo.Length > 1 ? Uri.UnescapeDataString(userInfo[1]) : string.Empty,
+        SslMode = Npgsql.SslMode.Require,
+    };
+
+    if (!string.IsNullOrWhiteSpace(uri.Query))
+    {
+        foreach (var pair in uri.Query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var kv = pair.Split('=', 2);
+            if (kv.Length == 2 && kv[0].Equals("sslmode", StringComparison.OrdinalIgnoreCase) &&
+                Enum.TryParse<Npgsql.SslMode>(kv[1], ignoreCase: true, out var ssl))
+            {
+                csb.SslMode = ssl;
+            }
+        }
+    }
+
+    return csb.ConnectionString;
+}
 
 // ── Repositories & Unit of Work ───────────────────────────────────────────────
 builder.Services.AddScoped(typeof(IRepository<>), typeof(Repository<>));
@@ -95,9 +139,21 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 builder.Services.AddAuthorization();
 
 // ── CORS ──────────────────────────────────────────────────────────────────────
-var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
-    ?? ["http://localhost:3000"];
-var frontendUrl = builder.Configuration["FRONTEND_URL"];
+var configuredOrigins = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+void AddOrigins(string? rawOrigins)
+{
+    if (string.IsNullOrWhiteSpace(rawOrigins)) return;
+    foreach (var item in rawOrigins.Split([',', ';', ' '], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        configuredOrigins.Add(item.TrimEnd('/'));
+}
+
+foreach (var item in builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? ["http://localhost:3000"])
+    AddOrigins(item);
+AddOrigins(builder.Configuration["FRONTEND_URL"]);
+AddOrigins(builder.Configuration["CORS_ALLOWED_ORIGINS"]);
+AddOrigins(builder.Configuration["RENDER_EXTERNAL_URL"]);
+
+var strictOriginOnly = builder.Configuration.GetValue<bool>("Cors:StrictExactOriginOnly");
 
 builder.Services.AddCors(options =>
 {
@@ -105,24 +161,38 @@ builder.Services.AddCors(options =>
         policy.SetIsOriginAllowed(origin =>
         {
             if (string.IsNullOrWhiteSpace(origin)) return false;
-            if (allowedOrigins.Any(o => origin.Equals(o.TrimEnd('/'), StringComparison.OrdinalIgnoreCase)))
+            var normalized = origin.TrimEnd('/');
+            if (configuredOrigins.Contains(normalized))
                 return true;
-            if (!string.IsNullOrWhiteSpace(frontendUrl) &&
-                origin.Equals(frontendUrl.TrimEnd('/'), StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
+
+            if (!Uri.TryCreate(origin, UriKind.Absolute, out var uri))
+                return false;
+
             if (builder.Environment.IsDevelopment() &&
-                Uri.TryCreate(origin, UriKind.Absolute, out var uri) &&
-                (uri.Host == "localhost" || uri.Host == "127.0.0.1"))
+                (uri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||
+                 uri.Host.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase)))
             {
                 return true;
             }
+
+            // Allow HTTPS platform origins (Vercel/Netlify/Render/Railway) unless StrictExactOriginOnly=true.
+            // Authentication uses Authorization Bearer tokens (no cookies), so AllowCredentials is omitted cleanly.
+            if (!strictOriginOnly && uri.Scheme == Uri.UriSchemeHttps)
+            {
+                var host = uri.Host;
+                if (host.EndsWith(".vercel.app", StringComparison.OrdinalIgnoreCase) ||
+                    host.EndsWith(".netlify.app", StringComparison.OrdinalIgnoreCase) ||
+                    host.EndsWith(".onrender.com", StringComparison.OrdinalIgnoreCase) ||
+                    host.EndsWith(".up.railway.app", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
             return false;
         })
         .AllowAnyHeader()
         .AllowAnyMethod()
-        .AllowCredentials()
     );
 });
 
@@ -192,58 +262,47 @@ using (var scope = app.Services.CreateScope())
     Log.Information("Database migrated successfully.");
     await DbInitializer.SeedAsync(db);
     Log.Information("Database seeded successfully.");
-
-    // Pre-warm primary catalog endpoints into MemoryCache using the already-open startup connection
-    try
-    {
-        var cache = scope.ServiceProvider.GetRequiredService<EShop.API.Services.CatalogCacheService>();
-        await cache.GetOrCreateCategoryAsync("tree", () => EShop.API.Controllers.CategoriesController.LoadCategoryTreeAsync(db));
-        await cache.GetOrCreateProductAsync("featured", () => EShop.API.Controllers.ProductsController.LoadFeaturedAsync(db));
-
-        var q24 = new EShop.Core.DTOs.ProductQueryParams { SortBy = "relevant", Page = 1, PageSize = 24 };
-        await cache.GetOrCreateProductAsync(
-            EShop.API.Controllers.ProductsController.BuildListCacheKey(q24, 1, 24),
-            () => EShop.API.Controllers.ProductsController.QueryProductListAsync(db, q24, 1, 24));
-
-        var q16 = new EShop.Core.DTOs.ProductQueryParams { SortBy = "relevant", Page = 1, PageSize = 16 };
-        await cache.GetOrCreateProductAsync(
-            EShop.API.Controllers.ProductsController.BuildListCacheKey(q16, 1, 16),
-            () => EShop.API.Controllers.ProductsController.QueryProductListAsync(db, q16, 1, 16));
-
-        var qAll = new EShop.Core.DTOs.ProductQueryParams { SortBy = "relevant", Page = 1, PageSize = 200 };
-        await cache.GetOrCreateProductAsync(
-            EShop.API.Controllers.ProductsController.BuildListCacheKey(qAll, 1, 200),
-            () => EShop.API.Controllers.ProductsController.QueryProductListAsync(db, qAll, 1, 200));
-
-        // Warm top department & featured queries quietly after startup without blocking Kestrel
-        var scopeFactory = app.Services.GetRequiredService<IServiceScopeFactory>();
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                using var bgScope = scopeFactory.CreateScope();
-                var bgDb = bgScope.ServiceProvider.GetRequiredService<AppDbContext>();
-                foreach (var cat in new[] { "men", "women", "kids", "footwear", "watches", "accessories", "women-dresses", "men-t-shirts", "men-denim", "mens-co-ord-sets" })
-                {
-                    var cq = new EShop.Core.DTOs.ProductQueryParams { Category = cat, SortBy = "relevant", Page = 1, PageSize = 24 };
-                    await cache.GetOrCreateProductAsync(
-                        EShop.API.Controllers.ProductsController.BuildListCacheKey(cq, 1, 24),
-                        () => EShop.API.Controllers.ProductsController.QueryProductListAsync(bgDb, cq, 1, 24));
-                }
-            }
-            catch
-            {
-                /* background warm-up best-effort only */
-            }
-        });
-
-        Log.Information("Catalog memory cache pre-warmed successfully.");
-    }
-    catch (Exception ex)
-    {
-        Log.Warning(ex, "Catalog cache warm-up skipped; endpoints will populate on demand.");
-    }
 }
+
+// Pre-warm catalog caches asynchronously once Kestrel begins accepting connections (does not delay /health readiness)
+app.Lifetime.ApplicationStarted.Register(() =>
+{
+    var scopeFactory = app.Services.GetRequiredService<IServiceScopeFactory>();
+    _ = Task.Run(async () =>
+    {
+        try
+        {
+            using var bgScope = scopeFactory.CreateScope();
+            var bgDb = bgScope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var cache = bgScope.ServiceProvider.GetRequiredService<EShop.API.Services.CatalogCacheService>();
+
+            await cache.GetOrCreateCategoryAsync("tree", () => EShop.API.Controllers.CategoriesController.LoadCategoryTreeAsync(bgDb));
+            await cache.GetOrCreateProductAsync("featured", () => EShop.API.Controllers.ProductsController.LoadFeaturedAsync(bgDb));
+
+            foreach (var ps in new[] { 24, 16, 200 })
+            {
+                var q = new EShop.Core.DTOs.ProductQueryParams { SortBy = "relevant", Page = 1, PageSize = ps };
+                await cache.GetOrCreateProductAsync(
+                    EShop.API.Controllers.ProductsController.BuildListCacheKey(q, 1, ps),
+                    () => EShop.API.Controllers.ProductsController.QueryProductListAsync(bgDb, q, 1, ps));
+            }
+
+            foreach (var cat in new[] { "men", "women", "kids", "footwear", "watches", "accessories", "women-dresses", "men-t-shirts", "men-denim", "mens-co-ord-sets" })
+            {
+                var cq = new EShop.Core.DTOs.ProductQueryParams { Category = cat, SortBy = "relevant", Page = 1, PageSize = 24 };
+                await cache.GetOrCreateProductAsync(
+                    EShop.API.Controllers.ProductsController.BuildListCacheKey(cq, 1, 24),
+                    () => EShop.API.Controllers.ProductsController.QueryProductListAsync(bgDb, cq, 1, 24));
+            }
+
+            Log.Information("Catalog memory cache pre-warmed successfully.");
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "Catalog cache warm-up skipped; endpoints will populate on demand.");
+        }
+    });
+});
 
 // ── Middleware pipeline ───────────────────────────────────────────────────────
 app.UseForwardedHeaders(new ForwardedHeadersOptions
@@ -282,8 +341,8 @@ if (app.Environment.IsDevelopment() || builder.Configuration.GetValue<bool>("Swa
     });
 }
 
-app.UseMiddleware<EShop.API.Middleware.GlobalExceptionMiddleware>();
 app.UseCors("EShopPolicy");
+app.UseMiddleware<EShop.API.Middleware.GlobalExceptionMiddleware>();
 app.UseResponseCompression();
 app.UseMiddleware<EShop.API.Middleware.RateLimitingMiddleware>();
 
@@ -291,6 +350,7 @@ app.UseSerilogRequestLogging();
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
+app.MapGet("/", () => Results.Ok(new { status = "ok", service = "EShop.API", health = "/health" }));
 app.MapHealthChecks("/health");
 
 app.Run();

@@ -11,7 +11,8 @@ public static class DbInitializer
         // Fast-path: if already seeded and no broken/legacy images remain, skip redundant round-trips
         var hasAdmin = await context.Users.AnyAsync(u => u.Email == "admin@nexus.com" && u.Role == UserRole.Admin);
         var productCount = await context.Products.CountAsync();
-        if (hasAdmin && productCount >= 40)
+        var hasCuratedCoordCategory = await context.Categories.AnyAsync(c => c.Slug == "mens-co-ord-sets");
+        if (hasAdmin && productCount >= 67 && hasCuratedCoordCategory)
         {
             var hasBrokenImages = await context.ProductImages.AnyAsync(i =>
                 i.Url.StartsWith("data:") ||
@@ -1359,17 +1360,23 @@ public static class DbInitializer
 
         context.ChangeTracker.Clear();
 
-        // 2. Query all products without tracking to avoid any entity state collision
+        // 2. Query all products with existing primary image URL so Shein/custom images are never overwritten
         var allProducts = await context.Products
             .AsNoTracking()
-            .Select(p => new { p.Id, p.Slug, p.Name })
+            .Select(p => new
+            {
+                p.Id,
+                p.Slug,
+                p.Name,
+                HasSheinImage = p.Images.Any(i => i.Url.Contains("sheinindia.in"))
+            })
             .ToListAsync();
 
         foreach (var prod in allProducts)
         {
             var key = prod.Slug.ToLowerInvariant();
             if (luxuryImageMap.TryGetValue(key, out var meta) ||
-                (prod.Name.Contains("Polo", StringComparison.OrdinalIgnoreCase) && luxuryImageMap.TryGetValue("polo-t-shirt", out meta)))
+                (!prod.HasSheinImage && prod.Name.Contains("Polo", StringComparison.OrdinalIgnoreCase) && luxuryImageMap.TryGetValue("polo-t-shirt", out meta)))
             {
                 var existingImgId = await context.ProductImages
                     .AsNoTracking()
@@ -1419,11 +1426,17 @@ public static class DbInitializer
             }
         }
 
-        // Purge any base64 or google static images across all products
+        // Purge any base64, google static, or legacy broken stock URLs across all products so fast-path skips on next startup
         await context.Database.ExecuteSqlRawAsync(
             @"UPDATE ""ProductImages"" 
               SET ""Url"" = 'https://images.unsplash.com/photo-1586363104862-3a5e2ab60d99?w=1200&auto=format&fit=crop&q=85' 
-              WHERE ""Url"" LIKE 'data:%' OR ""Url"" LIKE '%gstatic%' OR ""Url"" NOT LIKE 'http%';");
+              WHERE ""Url"" LIKE 'data:%'
+                 OR ""Url"" LIKE '%gstatic%'
+                 OR ""Url"" NOT LIKE 'http%'
+                 OR ""Url"" LIKE '%photo-1542272604-780c96856592%'
+                 OR ""Url"" LIKE '%photo-1541643600914-78b084683702%'
+                 OR ""Url"" LIKE '%photo-1625910513413-7ec40a5a4155%'
+                 OR ""Url"" LIKE '%photo-1547996160-71dfabb1a7b1%';");
 
         // Upgrade category banner images to high-res editorial photos
         var categoryMap = new Dictionary<string, string>

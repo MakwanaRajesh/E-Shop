@@ -50,7 +50,7 @@ import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Input } from '@/components/ui/Input'
-import api from '@/lib/api'
+import api, { getApiBaseUrl } from '@/lib/api'
 import { invalidateFrontendCatalogCache } from '@/lib/catalogCache'
 import toast, { Toaster } from 'react-hot-toast'
 import { AuthModal } from '@/components/auth/AuthModal'
@@ -290,7 +290,7 @@ function AdminContent() {
 
       if (failedEndpoints.length > 0) {
         setPortalError(
-          `Could not load ${failedEndpoints.join(', ')}. Ensure the backend API (http://localhost:5000) is running and your Admin session is active.`
+          `Could not load ${failedEndpoints.join(', ')}. Ensure the backend API (${getApiBaseUrl()}) is reachable and your Admin session is active.`
         )
       }
 

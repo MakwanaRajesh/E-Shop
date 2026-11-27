@@ -3,10 +3,35 @@ import type { ApiError, AuthResponse } from '@/types'
 
 // ─── Base Instance ─────────────────────────────────────────────────────────────
 
+const RAW_PUBLIC_API_URL = (process.env.NEXT_PUBLIC_API_URL ?? '').trim().replace(/\/+$/, '')
+
+function isLocalUrl(url: string): boolean {
+  if (!url) return false
+  return /^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0)(:\d+)?$/i.test(url)
+}
+
+export function getApiBaseUrl(): string {
+  if (typeof window !== 'undefined') {
+    const pageHost = window.location.hostname.toLowerCase()
+    const isBrowserLocal = pageHost === 'localhost' || pageHost === '127.0.0.1'
+
+    if (!isBrowserLocal) {
+      // Production browser: never try to reach the visitor's own localhost:5000.
+      // Use configured production NEXT_PUBLIC_API_URL, or fall back cleanly to same-origin /api/proxy.
+      if (RAW_PUBLIC_API_URL && !isLocalUrl(RAW_PUBLIC_API_URL)) {
+        return RAW_PUBLIC_API_URL
+      }
+      return '/api/proxy'
+    }
+  }
+
+  return RAW_PUBLIC_API_URL || 'http://localhost:5000'
+}
+
 const api: AxiosInstance = axios.create({
-  baseURL: process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:5000',
+  baseURL: getApiBaseUrl(),
   headers: { 'Content-Type': 'application/json' },
-  timeout: 15000,
+  timeout: 45000,
 })
 
 // ─── Token Helpers ─────────────────────────────────────────────────────────────
@@ -53,6 +78,7 @@ const setTokens = (accessToken: string, refreshToken: string) => {
 
 api.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
+    config.baseURL = getApiBaseUrl()
     const token = getAccessToken()
     if (token && config.headers) {
       config.headers.Authorization = `Bearer ${token}`
@@ -86,6 +112,18 @@ api.interceptors.response.use(
   async (error: AxiosError) => {
     const originalRequest = error.config as InternalAxiosRequestConfig & {
       _retry?: boolean
+      _coldStartRetried?: boolean
+    }
+
+    // Automatic single retry for idempotent GET calls during cloud cold-starts (Render/Railway sleep wake)
+    const method = (originalRequest?.method ?? 'get').toLowerCase()
+    const status = error.response?.status
+    const isTransient = !error.response || error.code === 'ECONNABORTED' || status === 502 || status === 503 || status === 504
+    if (originalRequest && method === 'get' && isTransient && !originalRequest._coldStartRetried) {
+      originalRequest._coldStartRetried = true
+      originalRequest.timeout = 60000
+      await new Promise((resolve) => setTimeout(resolve, 1500))
+      return api(originalRequest)
     }
 
     if (error.response?.status === 401 && !originalRequest._retry) {
@@ -113,8 +151,9 @@ api.interceptors.response.use(
       }
 
       try {
+        const base = getApiBaseUrl()
         const { data } = await axios.post<AuthResponse>(
-          `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:5000'}/api/auth/refresh`,
+          `${base}/api/auth/refresh`,
           { refreshToken },
         )
         setTokens(data.accessToken, data.refreshToken)
@@ -144,11 +183,18 @@ api.interceptors.response.use(
 
 function transformError(error: unknown): ApiError {
   if (axios.isAxiosError(error)) {
-    const data = error.response?.data
+    const data = error.response?.data as { message?: string; detail?: string; title?: string; errors?: Record<string, string[]> } | undefined
     let msg = data?.message ?? data?.detail ?? data?.title ?? error.message ?? 'An unexpected error occurred'
     if (data?.errors && typeof data.errors === 'object') {
       const errList = Object.values(data.errors).flat().join(', ')
       if (errList) msg = errList
+    }
+    if (!error.response && (msg === 'Network Error' || error.code === 'ECONNABORTED')) {
+      const base = getApiBaseUrl()
+      msg =
+        base === '/api/proxy'
+          ? 'Unable to reach the backend API through proxy. Verify NEXT_PUBLIC_API_URL or API_URL is configured on your server.'
+          : `Unable to reach the backend API (${base}). If your hosted backend is waking up from sleep, please tap Retry in a few seconds.`
     }
     return {
       message: msg,
