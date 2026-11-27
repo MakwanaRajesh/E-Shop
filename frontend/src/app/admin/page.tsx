@@ -4455,8 +4455,18 @@ Nexus Linen Shirt | 3499 | 4999 | 15 | NX-M-02 | https://images.unsplash.com/...
                     </span>
                   </div>
                   <div className="flex justify-between text-beige-muted print:text-gray-600">
-                    <span>White-Glove Courier Delivery:</span>
-                    <span className="font-semibold text-emerald-700 print:text-black uppercase">Complimentary</span>
+                    <span>Doorstep Delivery Charges:</span>
+                    <span className="font-semibold text-emerald-700 print:text-black uppercase">
+                      {(inspectOrder.shippingCost ?? 0) === 0
+                        ? 'FREE'
+                        : formatCurrency(inspectOrder.shippingCost ?? 0)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-beige-muted print:text-gray-600">
+                    <span>Platform Fee:</span>
+                    <span className="font-mono text-beige print:text-black">
+                      {formatCurrency(inspectOrder.platformFee ?? 0)}
+                    </span>
                   </div>
                   <div className="flex justify-between border-t border-border pt-2 text-sm font-bold text-gold print:text-black print:border-gray-400">
                     <span>Total Invoice Value:</span>

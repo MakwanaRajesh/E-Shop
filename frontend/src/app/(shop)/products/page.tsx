@@ -4,7 +4,7 @@ import React, { Suspense } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { SlidersHorizontal, X, ChevronDown, ChevronRight, Search, Sparkles } from 'lucide-react'
 import { ProductCard } from '@/components/product/ProductCard'
-import { ProductCardSkeleton } from '@/components/ui/Skeleton'
+import { ProductGridSkeleton } from '@/components/ui/Skeleton'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import api from '@/lib/api'
@@ -96,22 +96,28 @@ const CATEGORY_TREE = [
     ],
   },
   {
-    name: 'Luxury Watches',
-    slug: 'watches',
-    subcategories: [
-      { name: "Automatic Chronographs", slug: 'watches' },
-    ],
+    name: 'Handbags & Totes',
+    slug: 'women-handbags',
+    subcategories: [],
   },
   {
-    name: 'Accessories & Fragrances',
+    name: 'Haute Fragrances',
+    slug: 'fragrances',
+    subcategories: [],
+  },
+  {
+    name: 'Fine Jewelry',
+    slug: 'jewelry',
+    subcategories: [],
+  },
+  {
+    name: 'Accessories',
     slug: 'accessories',
-    subcategories: [
-      { name: "Italian Leather Bags & Wallets", slug: 'accessories' },
-      { name: "Haute Fragrances", slug: 'fragrances' },
-      { name: "Fine Jewelry", slug: 'jewelry' },
-    ],
+    subcategories: [],
   },
 ]
+
+const ALL_CATEGORY_NODES = CATEGORY_TREE.flatMap((c) => [c, ...c.subcategories])
 
 function ProductsContent() {
   const searchParams = useSearchParams()
@@ -347,9 +353,9 @@ function ProductsContent() {
     : null
 
   const activeCatLabel = subCategory
-    ? CATEGORY_TREE.flatMap((c) => c.subcategories).find((s) => s.slug === subCategory)?.name ?? subCategory.replace('-', ' ')
+    ? ALL_CATEGORY_NODES.find((s) => s.slug === subCategory)?.name ?? subCategory.replace(/-/g, ' ')
     : category
-    ? activeCategoryObj?.name ?? category.replace('-', ' ')
+    ? ALL_CATEGORY_NODES.find((s) => s.slug === category)?.name ?? category.replace(/-/g, ' ')
     : null
 
   const activePriceLabel =
@@ -529,10 +535,7 @@ function ProductsContent() {
               <div key={cat.name} className="space-y-1 pt-0.5">
                 <button
                   type="button"
-                  onClick={() => {
-                    updateParam('category', isCatActive ? undefined : cat.slug)
-                    updateParam('subCategory', undefined)
-                  }}
+                  onClick={() => updateParams({ category: isCatActive ? undefined : cat.slug, subCategory: undefined })}
                   className={cn(
                     'w-full text-left px-2.5 py-1.5 rounded-lg transition-colors flex items-center justify-between font-medium cursor-pointer',
                     isCatActive && !subCategory
@@ -836,7 +839,9 @@ function ProductsContent() {
       {/* ── Page Title & Search Term Banner ── */}
       <div className="mb-6">
         <h1 className="font-serif text-2xl sm:text-3xl font-bold text-beige capitalize flex items-center gap-2">
-          {category ? `${activeCategoryObj?.name ?? category.replace('-', ' ')} Collection` : 'All Luxury Collections'}
+          {category
+            ? `${ALL_CATEGORY_NODES.find((s) => s.slug === category)?.name ?? category.replace(/-/g, ' ')} Collection`
+            : 'All Luxury Collections'}
           {search && (
             <span className="text-base font-normal text-beige-muted font-sans">
               matching &ldquo;<span className="text-gold font-medium">{search}</span>&rdquo;
@@ -1127,11 +1132,11 @@ function ProductsContent() {
             </div>
           )}
           {isLoading ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6">
-              {Array.from({ length: 6 }).map((_, i) => (
-                <ProductCardSkeleton key={i} />
-              ))}
-            </div>
+            <ProductGridSkeleton
+              count={6}
+              label="Loading handpicked fashion pieces..."
+              gridClassName="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6"
+            />
           ) : result && result.items && result.items.length > 0 ? (
             <>
               <div

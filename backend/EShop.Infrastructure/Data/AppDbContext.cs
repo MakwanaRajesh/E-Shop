@@ -98,6 +98,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.HasIndex(o => o.OrderNumber).IsUnique();
             e.Property(o => o.SubTotal).HasPrecision(18, 2);
             e.Property(o => o.ShippingCost).HasPrecision(18, 2);
+            e.Property(o => o.PlatformFee).HasPrecision(18, 2);
             e.Property(o => o.Discount).HasPrecision(18, 2);
             e.Property(o => o.Tax).HasPrecision(18, 2);
             e.Property(o => o.TotalAmount).HasPrecision(18, 2);

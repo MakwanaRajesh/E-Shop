@@ -51,6 +51,7 @@ public record OrderDto(
     PaymentMethod PaymentMethod,
     decimal SubTotal,
     decimal ShippingCost,
+    decimal PlatformFee,
     decimal Discount,
     decimal Tax,
     decimal TotalAmount,
@@ -93,4 +94,16 @@ public record VerifyPaymentRequest(
     string RazorpayPaymentId,
     string RazorpayOrderId,
     string RazorpaySignature
+);
+
+public record OrderPricingPreviewDto(
+    decimal SubTotal,
+    decimal Discount,
+    decimal ShippingCost,
+    decimal PlatformFee,
+    decimal TotalAmount,
+    bool IsFirstOrderEligible,
+    decimal FreeDeliveryThreshold,
+    decimal StandardDeliveryFee,
+    string? FreeDeliveryReason
 );

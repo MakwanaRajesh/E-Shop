@@ -1,5 +1,7 @@
+using System.Net.Sockets;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Primitives;
+using Npgsql;
 
 namespace EShop.API.Services;
 
@@ -29,7 +31,7 @@ public sealed class CatalogCacheService(IMemoryCache cache) : IDisposable
             token = new CancellationChangeToken(_productsCts.Token);
         }
 
-        var value = await factory();
+        var value = await ExecuteWithTransientRetryAsync(factory);
 
         var options = new MemoryCacheEntryOptions()
             .SetAbsoluteExpiration(ttl ?? TimeSpan.FromMinutes(5))
@@ -76,7 +78,7 @@ public sealed class CatalogCacheService(IMemoryCache cache) : IDisposable
             token = new CancellationChangeToken(_categoriesCts.Token);
         }
 
-        var value = await factory();
+        var value = await ExecuteWithTransientRetryAsync(factory);
 
         var options = new MemoryCacheEntryOptions()
             .SetAbsoluteExpiration(ttl ?? TimeSpan.FromMinutes(10))
@@ -115,6 +117,34 @@ public sealed class CatalogCacheService(IMemoryCache cache) : IDisposable
     {
         InvalidateProducts();
         InvalidateCategories();
+    }
+
+    private static bool IsTransientDbFailure(Exception ex)
+    {
+        for (var cur = ex; cur is not null; cur = cur.InnerException)
+        {
+            if (cur is SocketException or TimeoutException)
+                return true;
+            if (cur is NpgsqlException npg && npg.IsTransient)
+                return true;
+        }
+        return false;
+    }
+
+    private static async Task<T> ExecuteWithTransientRetryAsync<T>(Func<Task<T>> factory)
+    {
+        const int maxAttempts = 3;
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                return await factory();
+            }
+            catch (Exception ex) when (attempt < maxAttempts && IsTransientDbFailure(ex))
+            {
+                await Task.Delay(200 * attempt);
+            }
+        }
     }
 
     public void Dispose()

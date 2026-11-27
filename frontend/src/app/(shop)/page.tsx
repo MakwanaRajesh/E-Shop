@@ -6,106 +6,109 @@ import Image from 'next/image'
 import { ArrowRight, Truck, ShieldCheck, RefreshCw, Star, Mail, Sparkles, ChevronRight, LayoutGrid } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { ProductCard } from '@/components/product/ProductCard'
-import { ProductCardSkeleton } from '@/components/ui/Skeleton'
+import { ProductGridSkeleton } from '@/components/ui/Skeleton'
 import type { ProductListItem } from '@/types'
 import api from '@/lib/api'
 import { fetchWithCatalogCache, peekCatalogCache, prefetchCatalogEndpoint } from '@/lib/catalogCache'
 import { useRecentlyViewedStore } from '@/store/recentlyViewed'
 import toast from 'react-hot-toast'
 
-// Quick Category Circles (SHEIN / AJIO style)
+// Quick Category Circles (Unbranded Curated Atelier Edit)
 const CATEGORY_CIRCLES = [
   {
     name: 'Men',
     href: '/products?category=men',
-    imageUrl: 'https://images.unsplash.com/photo-1617137984095-74e4e5e3613f?auto=format&fit=crop&w=600&q=85',
-    tag: 'Trending',
+    imageUrl: 'https://cdn.shopify.com/s/files/1/0420/7073/7058/files/1150f4e060977b4cb76b4a94ec53cf04.webp?v=1724415898&width=400',
+    tag: 'New',
   },
   {
     name: 'Women',
     href: '/products?category=women',
-    imageUrl: 'https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=600&q=85',
-    tag: 'Couture',
+    imageUrl: 'https://cdn.shopify.com/s/files/1/1695/7273/files/MAIN_2673174c-f193-4299-8b1f-35f25eefe3cd.jpg?v=1795417011&width=400',
+    tag: 'Trending',
   },
   {
     name: 'Kids',
     href: '/products?category=kids',
-    imageUrl: 'https://images.unsplash.com/photo-1503919545889-aef636e10ad4?auto=format&fit=crop&w=600&q=85',
-    tag: 'Junior',
+    imageUrl: 'https://cdn.shopify.com/s/files/1/0266/6276/4597/files/301071502MAROON_1.jpg?v=1795606894&width=400',
   },
   {
     name: 'Footwear',
     href: '/products?category=footwear',
-    imageUrl: 'https://images.unsplash.com/photo-1549298916-b41d501d3772?auto=format&fit=crop&w=600&q=85',
-    tag: 'Italian',
+    imageUrl: 'https://cdn.shopify.com/s/files/1/0266/6276/4597/files/301084439CHAMPAGNE_1.jpg?v=1793785136&width=400',
   },
   {
     name: 'Dresses',
     href: '/products?category=women&subCategory=women-dresses',
-    imageUrl: 'https://images.unsplash.com/photo-1572804013309-59a88b7e92f1?auto=format&fit=crop&w=600&q=85',
+    imageUrl: 'https://cdn.shopify.com/s/files/1/1695/7273/files/FF-8065_Ai_Catalog_1.jpg?v=1789718396&width=400',
   },
   {
     name: 'T-Shirts',
     href: '/products?category=men&subCategory=men-t-shirts',
-    imageUrl: 'https://images.unsplash.com/photo-1521572267360-ee0c2909d518?auto=format&fit=crop&w=600&q=85',
+    imageUrl: 'https://cdn.shopify.com/s/files/1/0420/7073/7058/files/2c80f44c87a00e45bc01c4ac4139a13e.jpg?v=1736325660&width=400',
   },
   {
     name: 'Denim',
     href: '/products?category=men&subCategory=men-denim',
-    imageUrl: 'https://images.unsplash.com/photo-1576995853123-5a10305d93c0?auto=format&fit=crop&w=600&q=85',
+    imageUrl: 'https://cdn.shopify.com/s/files/1/0420/7073/7058/files/4MCRD0011-01_2_35286081-88dd-49fd-91ce-59127d5a018c.jpg?v=1750149271&width=400',
   },
   {
     name: 'Co-ord Sets',
     href: '/products?category=men&subCategory=mens-co-ord-sets',
-    imageUrl: 'https://assets.sheinindia.in/medias/shein_sys_master/root1/20260824/fFTs/6a8c56f05d467f347a00859a/shein_dark_olive_shein_men_spread_collar_textured_polo_tshirt_%26_shorts.jpg',
-    tag: 'New',
+    imageUrl: 'https://assets.sheinindia.in/medias/shein_sys_master/root1/20260908/r8mR/6a9f841ba2cabf7bc64c979d/shein_cream_shein_men_vacay_mandarin_collar_textured_shirt_%26_short_sets.jpg',
+    tag: 'Popular',
   },
   {
-    name: 'Watches',
-    href: '/products?category=watches',
-    imageUrl: 'https://images.unsplash.com/photo-1522335789203-aabd1fc54bc9?auto=format&fit=crop&w=600&q=85',
+    name: 'Ethnic',
+    href: '/products?category=women&subCategory=women-ethnic',
+    imageUrl: 'https://cdn.shopify.com/s/files/1/0266/6276/4597/files/301092471INDIGO_1.jpg?v=1795588927&width=400',
+  },
+  {
+    name: 'Handbags',
+    href: '/products?category=women&subCategory=women-handbags',
+    imageUrl: 'https://cdn.shopify.com/s/files/1/0266/6276/4597/files/301088969001_1_1.jpg?v=1795611834&width=400',
   },
   {
     name: 'Fragrances',
     href: '/products?category=fragrances',
-    imageUrl: 'https://images.unsplash.com/photo-1547887537-6158d64c35b3?auto=format&fit=crop&w=600&q=85',
+    imageUrl: 'https://cdn.shopify.com/s/files/1/0266/6276/4597/files/300968674001_b064f5c4-63b5-4724-a07f-f9b9f514c7c1.jpg?v=1789020636&width=400',
   },
   {
     name: 'Jewelry',
     href: '/products?category=jewelry',
-    imageUrl: 'https://images.unsplash.com/photo-1599643478518-a784e5dc4c8f?auto=format&fit=crop&w=600&q=85',
+    imageUrl: 'https://assets.sheinindia.in/medias/shein_sys_master/root1/20261117/xhpE/6afc9189018d001d47a33d35/shein_gold_shein_women_toggle_clasp_butterfly_charm_beaded_pendant.jpg',
   },
 ]
 
 const FEATURED_COLLECTIONS = [
   {
-    name: "Men's Collection",
+    name: "Men's Modern Edit",
     slug: 'men',
-    description: 'Californian Supima T-Shirts, French Linen Shirts, Japanese Selvedge Denim & Italian Sneakers',
-    imageUrl: 'https://images.unsplash.com/photo-1617137984095-74e4e5e3613f?auto=format&fit=crop&w=1200&q=85',
-    subChips: ['Supima Tees', 'Linen Shirts', 'Selvedge Jeans', 'Italian Sneakers', 'Activewear'],
+    description: 'Linen Slim-Fit Shirts, Knitted Polos, Relaxed Denim, Co-ord Sets & Leather Chelsea Boots',
+    imageUrl: 'https://cdn.shopify.com/s/files/1/0420/7073/7058/files/1_320dfa4f-6263-4d25-9a58-8e427f6d11fa.jpg?v=1795612551&width=1000',
+    subChips: ['Linen Shirts', 'Knitted Polos', 'Baggy Denim', 'Co-ord Sets', 'Chelsea Boots'],
   },
   {
     name: "Women's Couturier",
     slug: 'women',
-    description: 'Mulberry Silk Cowl Dresses, Handcrafted Chanderi Kurta Sets, Wide-Leg Denim & Stiletto Pumps',
-    imageUrl: 'https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=1200&q=85',
-    subChips: ['Silk Slip Dresses', 'Chanderi Kurtas', 'Wide-Leg Denim', 'Designer Stilettos'],
+    description: 'Modal Satin Maxi Dresses, Poplin Shirts, Embroidered Kurtas, Wide-Leg Trousers & Heels',
+    imageUrl: 'https://cdn.shopify.com/s/files/1/1695/7273/files/MAIN_9aa8338b-0e62-4375-a003-1b50d4037387.jpg?v=1795417048&width=1000',
+    subChips: ['Satin Maxis', 'Poplin Blouses', 'Ethnic Kurtas', 'Block Heels'],
   },
   {
-    name: 'Horology & Fine Living',
-    slug: 'watches',
-    description: 'Precision Swiss Automatic Chronographs, Tuscan Box-Calf Briefcases, 18k Accents & Rare Oud',
-    imageUrl: 'https://images.unsplash.com/photo-1522335789203-aabd1fc54bc9?auto=format&fit=crop&w=1200&q=85',
-    subChips: ['Swiss Chronographs', 'Tourbillons', 'Italian Briefcase', 'Imperial Santal'],
+    name: 'Bags, Jewels & Perfumes',
+    slug: 'accessories',
+    description: 'Signature Eau De Parfums, Suede Everyday Totes, Fine Crystal Jewelry & UV400 Eyewear',
+    imageUrl: 'https://cdn.shopify.com/s/files/1/0266/6276/4597/files/300943554001_4c8b67f8-f202-49f3-b55d-4915ef136a2d.jpg?v=1778150044&width=1000',
+    subChips: ['Fine Perfumes', 'Suede Totes', 'Crystal Pendants', 'UV400 Sunglasses'],
   },
 ]
 
 const WHY_CHOOSE_US = [
   {
     icon: Truck,
-    title: 'Complimentary White-Glove Delivery',
-    description: 'Insured premium doorstep shipping on all orders over ₹5,000 with real-time tracking.',
+    title: 'Free Delivery ₹999+ & 1st Order',
+    description: 'Enjoy complimentary doorstep delivery on your very first order and on every order ₹999+ (just ₹99 below ₹999).',
   },
   {
     icon: ShieldCheck,
@@ -177,17 +180,17 @@ export default function HomePage() {
 
   return (
     <div className="overflow-x-hidden">
-      {/* ── Category Quick Circles Strip (AJIO / SHEIN style) ── */}
+      {/* ── Category Quick Circles Strip (No Scrollbar) ── */}
       <section className="bg-[#FAF8F5] border-b border-[#E7E5E4] py-5">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center gap-6 overflow-x-auto pb-2 scrollbar-none justify-start md:justify-center">
+          <div className="flex flex-wrap items-center justify-center gap-4 sm:gap-5 lg:gap-3 xl:gap-4">
             {CATEGORY_CIRCLES.map((c) => (
               <Link
                 key={c.name}
                 href={c.href}
                 className="flex flex-col items-center gap-2 flex-shrink-0 group"
               >
-                <div className="relative w-16 h-16 sm:w-20 sm:h-20 rounded-full p-0.5 border-2 border-[#E7E5E4] group-hover:border-[#C5A059] transition-all duration-300 shadow-sm group-hover:shadow-md">
+                <div className="relative w-16 h-16 sm:w-[70px] sm:h-[70px] xl:w-[74px] xl:h-[74px] rounded-full p-0.5 border-2 border-[#E7E5E4] group-hover:border-[#C5A059] transition-all duration-300 shadow-sm group-hover:shadow-md">
                   <div className="w-full h-full rounded-full overflow-hidden relative bg-[#F5F2EB]">
                     <Image
                       src={c.imageUrl}
@@ -214,7 +217,7 @@ export default function HomePage() {
               href="/products"
               className="flex flex-col items-center gap-2 flex-shrink-0 group"
             >
-              <div className="relative w-16 h-16 sm:w-20 sm:h-20 rounded-full p-0.5 border-2 border-[#C5A059]/60 group-hover:border-[#C5A059] transition-all duration-300 shadow-sm group-hover:shadow-md">
+              <div className="relative w-16 h-16 sm:w-[70px] sm:h-[70px] xl:w-[74px] xl:h-[74px] rounded-full p-0.5 border-2 border-[#C5A059]/60 group-hover:border-[#C5A059] transition-all duration-300 shadow-sm group-hover:shadow-md">
                 <div className="w-full h-full rounded-full overflow-hidden relative bg-[#111111] flex items-center justify-center group-hover:bg-[#1C1917] transition-colors">
                   <LayoutGrid className="w-6 h-6 sm:w-7 sm:h-7 text-[#D4AF37] group-hover:scale-110 transition-transform duration-300" />
                 </div>
@@ -251,8 +254,8 @@ export default function HomePage() {
           </h1>
 
           <p className="text-[#A8A29E] text-base sm:text-xl max-w-2xl mx-auto mb-10 leading-relaxed animate-fade-in font-light">
-            From Californian Supima tees and Italian linen to precision chronographs and Mulberry silk.
-            Shop authentic luxury designed for modern living.
+            From Supima cotton tees and relaxed linen shirts to tailored evening dresses and signature scents.
+            Shop authentic fashion curated for modern living.
           </p>
 
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4 animate-slide-up">
@@ -279,8 +282,8 @@ export default function HomePage() {
 
           <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mt-16 border-t border-[#262422] pt-10">
             {[
-              { value: '100%', label: 'Authentic Luxury' },
-              { value: '₹5,000+', label: 'Free Delivery' },
+              { value: '100%', label: 'Quality Checked' },
+              { value: '₹999+', label: 'Free Delivery' },
               { value: '30-Day', label: 'Doorstep Returns' },
               { value: '24/7', label: 'VIP Concierge' },
             ].map((stat) => (
@@ -382,11 +385,11 @@ export default function HomePage() {
           </div>
 
           {isLoading ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-              {Array.from({ length: 4 }).map((_, i) => (
-                <ProductCardSkeleton key={i} />
-              ))}
-            </div>
+            <ProductGridSkeleton
+              count={4}
+              label="Loading handpicked signature pieces..."
+              gridClassName="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6"
+            />
           ) : featuredProducts.length > 0 ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
               {featuredProducts.slice(0, 8).map((product, idx) => (
@@ -402,7 +405,8 @@ export default function HomePage() {
       </section>
 
       {/* ── Recently Viewed ───────────────────────────────────── */}
-      {mounted && recentlyViewed.length > 0 && (
+      {mounted &&
+        recentlyViewed.filter((p) => !p.slug.startsWith('nexus-') && p.slug !== 'polo-t-shirt').length > 0 && (
         <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16 bg-[#FAF8F5] border-t border-[#E7E5E4]">
           <div className="flex items-end justify-between mb-10">
             <div>
@@ -422,9 +426,12 @@ export default function HomePage() {
             </Link>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-            {recentlyViewed.slice(0, 4).map((product) => (
-              <ProductCard key={product.id} product={product} />
-            ))}
+            {recentlyViewed
+              .filter((p) => !p.slug.startsWith('nexus-') && p.slug !== 'polo-t-shirt')
+              .slice(0, 4)
+              .map((product) => (
+                <ProductCard key={product.id} product={product} />
+              ))}
           </div>
         </section>
       )}

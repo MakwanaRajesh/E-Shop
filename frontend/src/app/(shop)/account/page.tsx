@@ -613,6 +613,37 @@ function AccountContent() {
                           </div>
                         </div>
 
+                        {/* Order Price Summary */}
+                        <div className="bg-surface border border-border rounded-xl p-4 space-y-2 text-xs">
+                          <span className="text-[11px] font-bold uppercase tracking-wider text-gold block">
+                            Payment Summary
+                          </span>
+                          <div className="flex justify-between text-beige-muted">
+                            <span>Subtotal</span>
+                            <span className="text-beige font-medium">{formatCurrency(order.subTotal ?? order.subtotal ?? 0)}</span>
+                          </div>
+                          {(order.discount ?? order.discountAmount ?? 0) > 0 && (
+                            <div className="flex justify-between text-emerald-600 font-medium">
+                              <span>Discount {order.couponCode ? `(${order.couponCode})` : ''}</span>
+                              <span>-{formatCurrency(order.discount ?? order.discountAmount ?? 0)}</span>
+                            </div>
+                          )}
+                          <div className="flex justify-between text-beige-muted">
+                            <span>Delivery Charges</span>
+                            <span className={(order.shippingCost ?? 0) === 0 ? 'text-emerald-600 font-semibold' : 'text-beige font-medium'}>
+                              {(order.shippingCost ?? 0) === 0 ? 'FREE' : formatCurrency(order.shippingCost ?? 0)}
+                            </span>
+                          </div>
+                          <div className="flex justify-between text-beige-muted">
+                            <span>Platform Fee</span>
+                            <span className="text-beige font-medium">{formatCurrency(order.platformFee ?? 0)}</span>
+                          </div>
+                          <div className="flex justify-between pt-2 border-t border-border font-bold text-sm text-beige">
+                            <span>Total Paid</span>
+                            <span className="text-gold">{formatCurrency(order.totalAmount ?? 0)}</span>
+                          </div>
+                        </div>
+
                         {/* Shipping Details & Logistics Tracking */}
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-4 border-t border-border text-xs">
                           <div>

@@ -17,3 +17,9 @@ public record CreateReviewRequest(
     string? Title,
     string? Comment
 );
+
+public record ReviewEligibilityDto(
+    bool CanReview,
+    bool HasOrdered,
+    bool HasAlreadyReviewed
+);

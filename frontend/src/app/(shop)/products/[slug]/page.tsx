@@ -29,7 +29,7 @@ import { ProductDetailSkeleton } from '@/components/ui/Skeleton'
 import { ProductCard } from '@/components/product/ProductCard'
 import api from '@/lib/api'
 import { buildCatalogKey, fetchWithCatalogCache, invalidateFrontendCatalogCache, peekCatalogCache } from '@/lib/catalogCache'
-import type { Product, ProductListItem, Review } from '@/types'
+import type { Product, ProductListItem, Review, ReviewEligibility } from '@/types'
 import { cn, formatCurrency, getStockStatus, calculateDiscount, formatRelativeDate, optimizeImageUrl } from '@/lib/utils'
 import { useAuthStore } from '@/store/auth'
 import { useCartStore } from '@/store/cart'
@@ -71,9 +71,20 @@ function getSimilarProductQuery(product: Product): {
   viewAllHref: string
 } {
   const tagsStr = Array.isArray(product.tags) ? product.tags.join(' ') : (product.tags ?? '')
+  const catLower = (product.categoryName ?? '').toLowerCase()
   const text = `${product.name} ${product.categoryName ?? ''} ${tagsStr}`.toLowerCase()
+  const isWomen =
+    /\b(women(?:'s|s)?|dress|kurta|kurti|blouse|palazzo|handbag|tote|sling|ethnic|heels|mules)\b/.test(text)
+  const isMen = !isWomen && /\b(men(?:'s|s)?|boys)\b/.test(text)
 
   if (/\b(co-ord|coord)\b/.test(text)) {
+    if (isWomen && !/\bmen(?:'s|s)?\b/.test(catLower)) {
+      return {
+        params: { category: 'women-dresses', pageSize: 12 },
+        label: "More Women's Co-Ords & Dresses",
+        viewAllHref: '/products?category=women&subCategory=women-dresses',
+      }
+    }
     return {
       params: { category: 'mens-co-ord-sets', pageSize: 12 },
       label: "More Men's Co-ord Sets",
@@ -81,72 +92,110 @@ function getSimilarProductQuery(product: Product): {
     }
   }
   if (/\b(t-shirt|tshirt|tee|tees|polo)\b/.test(text)) {
-    return {
-      params: { search: 't-shirt', pageSize: 12 },
-      label: 'More T-Shirts & Tees',
-      viewAllHref: '/products?search=t-shirt',
-    }
+    return isWomen
+      ? {
+          params: { category: 'women-tops', pageSize: 12 },
+          label: "More Women's Tops & Tees",
+          viewAllHref: '/products?category=women&subCategory=women-tops',
+        }
+      : {
+          params: { category: 'men-t-shirts', pageSize: 12 },
+          label: "More Men's T-Shirts & Tees",
+          viewAllHref: '/products?category=men&subCategory=men-t-shirts',
+        }
   }
-  if (/\b(denim|jeans|trouser|palazzo)\b/.test(text)) {
-    return {
-      params: { search: 'denim', pageSize: 12 },
-      label: 'More Denim & Jeans',
-      viewAllHref: '/products?search=denim',
-    }
+  if (/\b(denim|jeans|trouser|palazzo|pants)\b/.test(text)) {
+    return isWomen
+      ? {
+          params: { category: 'women-denim', pageSize: 12 },
+          label: "More Women's Denim & Trousers",
+          viewAllHref: '/products?category=women&subCategory=women-denim',
+        }
+      : {
+          params: { category: 'men-denim', pageSize: 12 },
+          label: "More Men's Denim & Jeans",
+          viewAllHref: '/products?category=men&subCategory=men-denim',
+        }
   }
-  if (/\b(footwear|shoe|shoes|sneaker|sneakers|heel|heels|loafer|loafers|flat|flats)\b/.test(text)) {
-    return {
-      params: { category: 'footwear', pageSize: 12 },
-      label: 'More Footwear',
-      viewAllHref: '/products?category=footwear',
-    }
+  if (/\b(footwear|shoe|shoes|sneaker|sneakers|heel|heels|loafer|loafers|flat|flats|mule|mules|sandal|sandals)\b/.test(text)) {
+    return isWomen
+      ? {
+          params: { category: 'women-footwear', pageSize: 12 },
+          label: "More Women's Footwear",
+          viewAllHref: '/products?category=women&subCategory=women-footwear',
+        }
+      : isMen
+      ? {
+          params: { category: 'men-footwear', pageSize: 12 },
+          label: "More Men's Footwear",
+          viewAllHref: '/products?category=men&subCategory=men-footwear',
+        }
+      : {
+          params: { category: 'footwear', pageSize: 12 },
+          label: 'More Footwear',
+          viewAllHref: '/products?category=footwear',
+        }
   }
-  if (/\b(dress|dresses|gown)\b/.test(text)) {
+  if (/\b(kurta|kurti|ethnic|sharara|chikankari|kurta set)\b/.test(text)) {
     return {
-      params: { search: 'dress', pageSize: 12 },
-      label: 'More Dresses',
-      viewAllHref: '/products?search=dress',
-    }
-  }
-  if (/\b(kurta|kurti|ethnic|sharara|chikankari)\b/.test(text)) {
-    return {
-      params: { search: 'kurta', pageSize: 12 },
+      params: { category: 'women-ethnic', pageSize: 12 },
       label: 'More Ethnic & Kurtas',
-      viewAllHref: '/products?search=kurta',
+      viewAllHref: '/products?category=women&subCategory=women-ethnic',
     }
   }
-  if (/\b(shirt|blouse|top)\b/.test(text)) {
+  if (/\b(dress|dresses|gown|jumpsuit|romper)\b/.test(text)) {
     return {
-      params: { search: 'shirt', pageSize: 12 },
-      label: 'More Shirts & Tops',
-      viewAllHref: '/products?search=shirt',
+      params: { category: 'women-dresses', pageSize: 12 },
+      label: 'More Dresses & Western',
+      viewAllHref: '/products?category=women&subCategory=women-dresses',
     }
   }
-  if (/\b(watch|watches|tourbillon|chronograph|automatic)\b/.test(text)) {
+  if (/\b(blouse|top|tunic)\b/.test(text) || (isWomen && /\bshirt\b/.test(text))) {
     return {
-      params: { category: 'watches', pageSize: 12 },
-      label: 'More Luxury Watches',
-      viewAllHref: '/products?category=watches',
+      params: { category: 'women-tops', pageSize: 12 },
+      label: "More Women's Tops & Shirts",
+      viewAllHref: '/products?category=women&subCategory=women-tops',
     }
   }
-  if (/\b(parfum|perfume|fragrance|extrait)\b/.test(text)) {
+  if (/\bshirt\b/.test(text)) {
+    return {
+      params: { category: 'men-shirts', pageSize: 12 },
+      label: "More Men's Shirts",
+      viewAllHref: '/products?category=men&subCategory=men-shirts',
+    }
+  }
+  if (/\b(hoodie|jacket|cardigan|sweater|trunks|track)\b/.test(text)) {
+    return {
+      params: { category: 'men-activewear', pageSize: 12 },
+      label: 'More Menswear & Outerwear',
+      viewAllHref: '/products?category=men&subCategory=men-activewear',
+    }
+  }
+  if (/\b(parfum|perfume|fragrance|toilette|studiowest|omen)\b/.test(text)) {
     return {
       params: { category: 'fragrances', pageSize: 12 },
-      label: 'More Fragrances',
+      label: 'More Signature Fragrances',
       viewAllHref: '/products?category=fragrances',
     }
   }
-  if (/\b(ring|chain|jewelry|jewellery|diamond)\b/.test(text)) {
+  if (/\b(ring|pendant|necklace|jewelry|jewellery|bracelet)\b/.test(text)) {
     return {
       params: { category: 'jewelry', pageSize: 12 },
-      label: 'More Fine Jewelry',
+      label: 'More Jewelry & Pendants',
       viewAllHref: '/products?category=jewelry',
     }
   }
-  if (/\b(bag|tote|handbag|clutch|wallet|briefcase)\b/.test(text)) {
+  if (/\b(bag|tote|handbag|clutch|sling|hobo)\b/.test(text)) {
     return {
-      params: { search: 'leather', pageSize: 12 },
-      label: 'More Bags & Accessories',
+      params: { category: 'women-handbags', pageSize: 12 },
+      label: 'More Handbags & Slings',
+      viewAllHref: '/products?category=women&subCategory=women-handbags',
+    }
+  }
+  if (/\b(sunglass|cap|eyewear)\b/.test(text)) {
+    return {
+      params: { category: 'accessories', pageSize: 12 },
+      label: 'More Sunglasses & Accessories',
       viewAllHref: '/products?category=accessories',
     }
   }
@@ -204,12 +253,32 @@ export default function ProductDetailPage({ params }: Props) {
   const { open: openAuthModal } = useAuthModalStore()
   const { items: recentlyViewed, addProduct: addRecentlyViewed } = useRecentlyViewedStore()
 
-  // Write Review state
+  // Write Review state (Verified buyers who ordered this product only)
+  const [reviewEligibility, setReviewEligibility] = React.useState<ReviewEligibility | null>(null)
   const [showReviewForm, setShowReviewForm] = React.useState(false)
   const [reviewRating, setReviewRating] = React.useState(5)
   const [reviewTitle, setReviewTitle] = React.useState('')
   const [reviewComment, setReviewComment] = React.useState('')
   const [isSubmittingReview, setIsSubmittingReview] = React.useState(false)
+
+  React.useEffect(() => {
+    if (!isAuthenticated || !product?.id) {
+      setReviewEligibility(null)
+      return
+    }
+    let active = true
+    api
+      .get<ReviewEligibility>(`/api/reviews/eligibility/${product.id}`)
+      .then(({ data }) => {
+        if (active) setReviewEligibility(data)
+      })
+      .catch(() => {
+        if (active) setReviewEligibility(null)
+      })
+    return () => {
+      active = false
+    }
+  }, [isAuthenticated, product?.id])
 
   const handleSubmitReview = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -217,6 +286,10 @@ export default function ProductDetailPage({ params }: Props) {
     if (!isAuthenticated) {
       toast('Please sign in to write a review', { icon: '✍️' })
       openAuthModal('login')
+      return
+    }
+    if (reviewEligibility && !reviewEligibility.hasOrdered) {
+      toast.error('Only customers who have already ordered this item can review it.')
       return
     }
     if (!reviewComment.trim()) {
@@ -231,15 +304,20 @@ export default function ProductDetailPage({ params }: Props) {
         title: reviewTitle.trim() || null,
         comment: reviewComment.trim(),
       })
-      setReviews((prev) => [data, ...prev])
+      const nextReviews = [data, ...reviews]
+      setReviews(nextReviews)
+      const nextCount = nextReviews.length
+      const nextAvg = nextCount > 0 ? nextReviews.reduce((s, r) => s + r.rating, 0) / nextCount : reviewRating
+      setProduct((prev) => (prev ? { ...prev, averageRating: nextAvg, reviewCount: nextCount } : prev))
+      setReviewEligibility({ canReview: false, hasOrdered: true, hasAlreadyReviewed: true })
       invalidateFrontendCatalogCache()
       setReviewTitle('')
       setReviewComment('')
       setReviewRating(5)
       setShowReviewForm(false)
-      toast.success('Thank you! Your review has been published.')
+      toast.success('Thank you! Your verified review has been published.')
     } catch (err: any) {
-      toast.error(err?.message ?? 'Unable to submit review')
+      toast.error(err?.response?.data?.message ?? err?.message ?? 'Unable to submit review')
     } finally {
       setIsSubmittingReview(false)
     }
@@ -638,27 +716,43 @@ export default function ProductDetailPage({ params }: Props) {
             {product.name}
           </h1>
 
-          {/* Rating */}
-          {product.reviewCount > 0 && (
-            <div className="flex items-center gap-3">
-              <div className="flex">
-                {Array.from({ length: 5 }).map((_, i) => (
-                  <Star
-                    key={i}
-                    className={cn(
-                      'w-4 h-4',
-                      i < Math.round(product.averageRating)
-                        ? 'text-gold fill-gold'
-                        : 'text-beige-muted/30',
-                    )}
-                  />
-                ))}
+          {/* Rating out of 5 */}
+          {(() => {
+            const count = reviews.length > 0 ? reviews.length : (product.reviewCount ?? 0)
+            const ratingVal =
+              reviews.length > 0
+                ? reviews.reduce((acc, r) => acc + r.rating, 0) / reviews.length
+                : (product.averageRating ?? 0)
+            return (
+              <div className="flex items-center flex-wrap gap-3">
+                <div className="inline-flex items-center gap-1.5 bg-surface-2 border border-gold/30 px-2.5 py-1 rounded-full">
+                  <span className="text-xs font-bold text-beige tabular-nums">
+                    {ratingVal.toFixed(1)}
+                  </span>
+                  <span className="text-[11px] text-beige-muted">/ 5</span>
+                  <Star className="w-3.5 h-3.5 text-gold fill-gold" />
+                </div>
+                <div className="flex">
+                  {Array.from({ length: 5 }).map((_, i) => (
+                    <Star
+                      key={i}
+                      className={cn(
+                        'w-4 h-4',
+                        ratingVal > 0 && i < Math.round(ratingVal)
+                          ? 'text-gold fill-gold'
+                          : 'text-beige-muted/30',
+                      )}
+                    />
+                  ))}
+                </div>
+                <span className="text-sm text-beige-muted">
+                  {count > 0
+                    ? `${count} verified buyer ${count === 1 ? 'review' : 'reviews'}`
+                    : 'No reviews yet'}
+                </span>
               </div>
-              <span className="text-sm text-beige-muted">
-                {product.averageRating.toFixed(1)} ({product.reviewCount} reviews)
-              </span>
-            </div>
-          )}
+            )
+          })()}
 
           {/* Price */}
           <div className="flex items-baseline gap-3">
@@ -687,7 +781,7 @@ export default function ProductDetailPage({ params }: Props) {
               • Apply code <span className="font-mono text-gold font-bold">NEXUS10</span> for 10% instant discount at checkout.
             </p>
             <p className="text-beige-muted">
-              • Complimentary white-glove doorstep delivery on all orders over ₹5,000.
+              • Free doorstep delivery on all orders ₹999+ and on your first order (₹99 below ₹999 • ₹9 platform fee).
             </p>
           </div>
 
@@ -844,8 +938,8 @@ export default function ProductDetailPage({ params }: Props) {
           {/* Trust badges */}
           <div className="grid grid-cols-3 gap-3 pt-2">
             {[
-              { icon: Truck, text: 'Free Shipping ₹5k+' },
-              { icon: ShieldCheck, text: '100% Authentic' },
+              { icon: Truck, text: 'Free Delivery ₹999+ & 1st Order' },
+              { icon: ShieldCheck, text: '100% Quality Checked' },
               { icon: RefreshCw, text: '30-Day Returns' },
             ].map(({ icon: Icon, text }) => (
               <div
@@ -1095,7 +1189,7 @@ export default function ProductDetailPage({ params }: Props) {
                     <span>Complimentary Express Delivery</span>
                   </div>
                   <p className="text-beige-muted">
-                    Enjoy free doorstep delivery on all orders over ₹5,000. Orders ship in discreet, tamper-proof signature luxury packaging with tracking.
+                    Enjoy free doorstep delivery on orders ₹999+ and on a new customer&apos;s first order (₹99 below ₹999, plus ₹9 platform fee). Orders ship in tamper-proof signature packaging with live tracking.
                   </p>
                 </div>
                 <div className="bg-surface-2/40 border border-border p-3.5 rounded-xl space-y-1">
@@ -1113,34 +1207,114 @@ export default function ProductDetailPage({ params }: Props) {
         </Accordion.Root>
       </div>
 
-      {/* ── Reviews & Write a Review ── */}
+      {/* ── Reviews & Verified Buyer Ratings ── */}
       <section className="mb-16">
         <div className="flex items-center justify-between flex-wrap gap-4 mb-6">
           <div>
             <h2 className="font-serif text-2xl font-bold text-beige">
-              Customer Reviews {reviews.length > 0 && `(${reviews.length})`}
+              Ratings & Verified Reviews {reviews.length > 0 && `(${reviews.length})`}
             </h2>
             <p className="text-xs text-beige-muted mt-0.5">
-              Verified buyer feedback & craftsmanship ratings
+              Only verified buyers who have ordered this item can post a rating or review.
             </p>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              if (!isAuthenticated) {
-                toast('Please sign in to write a review', { icon: '✍️' })
+          {!isAuthenticated ? (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                toast('Sign in with an account that ordered this item to leave a review.', { icon: '🔒' })
                 openAuthModal('login')
-                return
-              }
-              setShowReviewForm((prev) => !prev)
-            }}
-          >
-            {showReviewForm ? 'Cancel' : 'Write a Review'}
-          </Button>
+              }}
+            >
+              Sign In to Review
+            </Button>
+          ) : reviewEligibility?.canReview ? (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowReviewForm((prev) => !prev)}
+            >
+              {showReviewForm ? 'Cancel' : 'Write a Verified Review'}
+            </Button>
+          ) : reviewEligibility?.hasAlreadyReviewed ? (
+            <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-full">
+              <Check className="w-3.5 h-3.5" />
+              Verified Review Submitted
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1.5 text-xs font-medium text-beige-muted bg-surface-2 border border-border px-3 py-1.5 rounded-full">
+              <ShieldCheck className="w-3.5 h-3.5 text-gold" />
+              Order this item to unlock rating & review
+            </span>
+          )}
         </div>
 
-        {showReviewForm && (
+        {/* Out of 5 Rating Summary & Breakdown */}
+        {(() => {
+          const totalRev = reviews.length > 0 ? reviews.length : (product.reviewCount ?? 0)
+          const avgScore =
+            reviews.length > 0
+              ? reviews.reduce((s, r) => s + r.rating, 0) / reviews.length
+              : (product.averageRating ?? 0)
+          if (totalRev <= 0 && avgScore <= 0) return null
+          return (
+            <div className="bg-surface border border-border rounded-2xl p-5 sm:p-6 mb-6 grid grid-cols-1 md:grid-cols-3 gap-6 items-center">
+              <div className="flex items-center gap-4">
+                <div className="flex flex-col items-center justify-center bg-surface-2 border border-gold/30 rounded-2xl px-5 py-4 min-w-[116px]">
+                  <div className="flex items-baseline gap-1">
+                    <span className="font-serif text-3xl font-bold text-beige tabular-nums">
+                      {avgScore.toFixed(1)}
+                    </span>
+                    <span className="text-sm text-beige-muted font-medium">/ 5</span>
+                  </div>
+                  <div className="flex gap-0.5 mt-1.5">
+                    {Array.from({ length: 5 }).map((_, i) => (
+                      <Star
+                        key={i}
+                        className={cn(
+                          'w-3.5 h-3.5',
+                          i < Math.round(avgScore) ? 'text-gold fill-gold' : 'text-beige-muted/30',
+                        )}
+                      />
+                    ))}
+                  </div>
+                  <span className="text-[11px] text-beige-muted mt-1">
+                    {totalRev} {totalRev === 1 ? 'Rating' : 'Ratings'}
+                  </span>
+                </div>
+                <div className="text-xs text-beige-muted space-y-1">
+                  <p className="font-semibold text-beige text-sm">Verified Quality Score</p>
+                  <p>100% of ratings come from customers who purchased this item.</p>
+                </div>
+              </div>
+
+              <div className="md:col-span-2 space-y-1.5">
+                {[5, 4, 3, 2, 1].map((star) => {
+                  const starCount = reviews.filter((r) => r.rating === star).length
+                  const pct = reviews.length > 0 ? Math.round((starCount / reviews.length) * 100) : 0
+                  return (
+                    <div key={star} className="flex items-center gap-2.5 text-xs">
+                      <span className="w-8 font-medium text-beige flex items-center gap-0.5 tabular-nums">
+                        {star}
+                        <Star className="w-3 h-3 text-gold fill-gold" />
+                      </span>
+                      <div className="flex-1 h-2 bg-surface-2 rounded-full overflow-hidden border border-border/50">
+                        <div
+                          className="h-full bg-gold rounded-full transition-all duration-300"
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                      <span className="w-10 text-right text-beige-muted tabular-nums">{starCount}</span>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )
+        })()}
+
+        {showReviewForm && reviewEligibility?.canReview && (
           <form
             onSubmit={handleSubmitReview}
             className="bg-surface border border-gold/40 rounded-2xl p-5 sm:p-6 mb-6 space-y-4 shadow-sm animate-fade-in"

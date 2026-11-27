@@ -34,6 +34,39 @@ public class OrdersController(
     private readonly SecurityMonitorService _securityMonitor   = securityMonitor;
     private readonly CatalogCacheService    _catalogCache      = catalogCache;
 
+    private const decimal FreeDeliveryThreshold = 999m;
+    private const decimal StandardDeliveryFee = 99m;
+    private const decimal PlatformFeeAmount = 9m;
+
+    // ── GET /api/orders/pricing-preview ───────────────────────────────────────
+    [AllowAnonymous]
+    [HttpGet("pricing-preview")]
+    public async Task<IActionResult> GetPricingPreview([FromQuery] decimal subTotal = 0m, [FromQuery] decimal discount = 0m)
+    {
+        var userId = GetCurrentUserId();
+        var isFirstOrder = userId != Guid.Empty && !await _db.Orders
+            .AsNoTracking()
+            .AnyAsync(o => o.UserId == userId && o.Status != OrderStatus.Cancelled);
+
+        var safeSubTotal = Math.Max(0m, subTotal);
+        var safeDiscount = Math.Clamp(discount, 0m, safeSubTotal);
+        var (shippingCost, reason) = CalculateShipping(safeSubTotal, isFirstOrder);
+        var platformFee = safeSubTotal > 0m ? PlatformFeeAmount : 0m;
+        var total = Math.Max(0m, safeSubTotal - safeDiscount + shippingCost + platformFee);
+
+        return Ok(new OrderPricingPreviewDto(
+            SubTotal:              safeSubTotal,
+            Discount:              safeDiscount,
+            ShippingCost:          shippingCost,
+            PlatformFee:           platformFee,
+            TotalAmount:           total,
+            IsFirstOrderEligible:  isFirstOrder,
+            FreeDeliveryThreshold: FreeDeliveryThreshold,
+            StandardDeliveryFee:   StandardDeliveryFee,
+            FreeDeliveryReason:    reason
+        ));
+    }
+
     // ── POST /api/orders ──────────────────────────────────────────────────────
     [HttpPost]
     public async Task<IActionResult> CreateOrder([FromBody] CreateOrderRequest req)
@@ -293,9 +326,14 @@ public class OrdersController(
                 }
             }
 
-            var shippingCost = subTotal > 5000 ? 0 : 99;
-            var totalAmount  = Math.Max(0, subTotal - discount + shippingCost);
-            var isCod        = req.PaymentMethod == PaymentMethod.CashOnDelivery;
+            var isFirstOrder = !await _db.Orders
+                .AsNoTracking()
+                .AnyAsync(o => o.UserId == userId && o.Status != OrderStatus.Cancelled);
+
+            var (shippingCost, _) = CalculateShipping(subTotal, isFirstOrder);
+            var platformFee = PlatformFeeAmount;
+            var totalAmount = Math.Max(0m, subTotal - discount + shippingCost + platformFee);
+            var isCod       = req.PaymentMethod == PaymentMethod.CashOnDelivery;
 
             var order = new Order
             {
@@ -307,6 +345,7 @@ public class OrdersController(
                 SubTotal             = subTotal,
                 Discount             = discount,
                 ShippingCost         = shippingCost,
+                PlatformFee          = platformFee,
                 Tax                  = 0,
                 TotalAmount          = totalAmount,
                 CouponCode           = couponCode,
@@ -549,6 +588,15 @@ public class OrdersController(
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
+    private static (decimal ShippingCost, string? FreeDeliveryReason) CalculateShipping(decimal subTotal, bool isFirstOrder)
+    {
+        if (isFirstOrder)
+            return (0m, "first_order");
+        if (subTotal >= FreeDeliveryThreshold)
+            return (0m, "order_above_999");
+        return (StandardDeliveryFee, null);
+    }
+
     private Guid GetCurrentUserId()
     {
         var raw = User.FindFirst(ClaimTypes.NameIdentifier)?.Value
@@ -566,6 +614,7 @@ public class OrdersController(
         PaymentMethod:        o.PaymentMethod,
         SubTotal:             o.SubTotal,
         ShippingCost:         o.ShippingCost,
+        PlatformFee:          o.PlatformFee,
         Discount:             o.Discount,
         Tax:                  o.Tax,
         TotalAmount:          o.TotalAmount,

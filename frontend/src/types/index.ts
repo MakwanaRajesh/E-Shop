@@ -232,6 +232,7 @@ export interface Order {
   subtotal?: number
   subTotal?: number
   shippingCost?: number
+  platformFee?: number
   discountAmount?: number
   discount?: number
   couponCode?: string
@@ -258,6 +259,24 @@ export interface Review {
   body: string
   isVerifiedPurchase: boolean
   createdAt: string
+}
+
+export interface OrderPricingPreview {
+  subTotal: number
+  discount: number
+  shippingCost: number
+  platformFee: number
+  totalAmount: number
+  isFirstOrderEligible: boolean
+  freeDeliveryThreshold: number
+  standardDeliveryFee: number
+  freeDeliveryReason?: 'first_order' | 'order_above_999' | null
+}
+
+export interface ReviewEligibility {
+  canReview: boolean
+  hasOrdered: boolean
+  hasAlreadyReviewed: boolean
 }
 
 export interface CreateReviewRequest {

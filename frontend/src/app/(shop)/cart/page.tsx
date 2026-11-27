@@ -11,6 +11,9 @@ import { useCartStore, MAX_QTY_PER_PRODUCT, MAX_CART_TOTAL_ITEMS } from '@/store
 import { useAuthStore } from '@/store/auth'
 import { useAuthModalStore } from '@/store/authModal'
 import { formatCurrency, optimizeImageUrl } from '@/lib/utils'
+import { computeOrderPricing, FREE_DELIVERY_THRESHOLD } from '@/lib/orderPricing'
+import api from '@/lib/api'
+import type { OrderPricingPreview } from '@/types'
 import { CouponSection } from '@/components/cart/CouponSection'
 import toast from 'react-hot-toast'
 
@@ -19,10 +22,17 @@ export default function CartPage() {
   const { cart, updateItem, removeItem, isLoading, fetchCart, appliedCoupon } = useCartStore()
   const { isAuthenticated } = useAuthStore()
   const { open: openAuthModal } = useAuthModalStore()
+  const [isFirstOrderEligible, setIsFirstOrderEligible] = React.useState(false)
 
   React.useEffect(() => {
     if (isAuthenticated) {
       fetchCart()
+      api
+        .get<OrderPricingPreview>('/api/orders/pricing-preview', { params: { subTotal: 1 } })
+        .then(({ data }) => setIsFirstOrderEligible(Boolean(data?.isFirstOrderEligible)))
+        .catch(() => {})
+    } else {
+      setIsFirstOrderEligible(false)
     }
   }, [isAuthenticated, fetchCart])
 
@@ -104,7 +114,8 @@ export default function CartPage() {
   const subtotal = cart.subtotal ?? (cart as any).subTotal ?? 0
   const itemCount = cart.itemCount ?? (cart as any).totalItems ?? cart.items?.reduce((s, i) => s + i.quantity, 0) ?? 0
   const discount = appliedCoupon?.discountAmount ?? (cart as any).discountAmount ?? 0
-  const finalTotal = Math.max(0, subtotal - discount)
+  const pricing = computeOrderPricing(subtotal, discount, isFirstOrderEligible)
+  const finalTotal = pricing.totalPayable
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
@@ -255,10 +266,34 @@ export default function CartPage() {
                   <span>-{formatCurrency(discount)}</span>
                 </div>
               )}
-              <div className="flex justify-between">
-                <span className="text-beige-muted">Delivery</span>
-                <span className="text-success text-xs font-semibold uppercase">Complimentary</span>
+              <div className="flex justify-between items-center">
+                <span className="text-beige-muted">
+                  Delivery Charges
+                  {pricing.freeDeliveryReason === 'first_order' && (
+                    <span className="ml-1.5 text-[10px] font-semibold uppercase text-gold bg-gold/10 px-1.5 py-0.5 rounded">
+                      1st Order Free
+                    </span>
+                  )}
+                </span>
+                {pricing.shippingCost === 0 ? (
+                  <span className="text-success text-xs font-semibold uppercase flex items-center gap-1.5">
+                    <span className="line-through text-beige-muted/60 font-normal">₹99</span>
+                    FREE
+                  </span>
+                ) : (
+                  <span className="text-beige font-semibold">{formatCurrency(pricing.shippingCost)}</span>
+                )}
               </div>
+              <div className="flex justify-between">
+                <span className="text-beige-muted">Platform Fee</span>
+                <span className="text-beige font-semibold">{formatCurrency(pricing.platformFee)}</span>
+              </div>
+              {pricing.amountForFreeDelivery > 0 && (
+                <div className="bg-surface-2/80 border border-border rounded-lg px-3 py-2 text-[11px] text-beige-muted">
+                  Add <span className="text-gold font-semibold">{formatCurrency(pricing.amountForFreeDelivery)}</span> more for{' '}
+                  <span className="text-beige font-semibold">FREE delivery</span> (orders ₹{FREE_DELIVERY_THRESHOLD}+). Free on a new shopper&apos;s 1st order.
+                </div>
+              )}
             </div>
 
             <div className="h-px bg-border" />

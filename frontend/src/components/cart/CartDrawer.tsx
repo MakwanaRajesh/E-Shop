@@ -20,16 +20,38 @@ import { useAuthStore } from '@/store/auth'
 import { useAuthModalStore } from '@/store/authModal'
 import { Button } from '@/components/ui/Button'
 import { formatCurrency } from '@/lib/utils'
+import {
+  computeOrderPricing,
+  FREE_DELIVERY_THRESHOLD,
+} from '@/lib/orderPricing'
+import api from '@/lib/api'
+import type { OrderPricingPreview } from '@/types'
 import { CouponSection } from '@/components/cart/CouponSection'
 import toast from 'react-hot-toast'
-
-const FREE_SHIPPING_THRESHOLD = 5000
 
 export function CartDrawer() {
   const router = useRouter()
   const { cart, isOpen, setOpen, updateItem, removeItem, isLoading } = useCartStore()
   const { isAuthenticated } = useAuthStore()
   const { open: openAuthModal } = useAuthModalStore()
+  const [isFirstOrderEligible, setIsFirstOrderEligible] = React.useState(false)
+
+  React.useEffect(() => {
+    if (!isAuthenticated) {
+      setIsFirstOrderEligible(false)
+      return
+    }
+    let active = true
+    api
+      .get<OrderPricingPreview>('/api/orders/pricing-preview', { params: { subTotal: 1 } })
+      .then(({ data }) => {
+        if (active) setIsFirstOrderEligible(Boolean(data?.isFirstOrderEligible))
+      })
+      .catch(() => {})
+    return () => {
+      active = false
+    }
+  }, [isOpen, isAuthenticated])
 
   // Close on Escape key
   React.useEffect(() => {
@@ -56,9 +78,13 @@ export function CartDrawer() {
 
   const items = cart?.items ?? []
   const subtotal = cart?.subtotal ?? (cart as any)?.subTotal ?? 0
+  const discount = (cart as any)?.discountAmount ?? 0
   const itemCount = cart?.itemCount ?? (cart as any)?.totalItems ?? items.reduce((s, i) => s + i.quantity, 0)
-  const remainingForFreeShipping = Math.max(0, FREE_SHIPPING_THRESHOLD - subtotal)
-  const shippingProgress = Math.min(100, Math.round((subtotal / FREE_SHIPPING_THRESHOLD) * 100))
+  const pricing = computeOrderPricing(subtotal, discount, isFirstOrderEligible)
+  const remainingForFreeShipping = pricing.amountForFreeDelivery
+  const shippingProgress = isFirstOrderEligible
+    ? 100
+    : Math.min(100, Math.round((subtotal / FREE_DELIVERY_THRESHOLD) * 100))
 
   const handleCheckout = () => {
     setOpen(false)
@@ -100,18 +126,20 @@ export function CartDrawer() {
             </button>
           </div>
 
-          {/* Free Shipping Meter (SHEIN / AJIO Style) */}
+          {/* Free Delivery Progress Bar */}
           <div className="bg-surface-2/60 px-5 py-3 border-b border-border">
             <div className="flex items-center justify-between text-xs mb-1.5 font-medium">
-              {remainingForFreeShipping === 0 ? (
+              {pricing.shippingCost === 0 && subtotal > 0 ? (
                 <span className="text-success flex items-center gap-1">
                   <Sparkles className="w-3.5 h-3.5" />
-                  Unlocked FREE Luxury Express Delivery!
+                  {pricing.freeDeliveryReason === 'first_order'
+                    ? 'FREE First-Order Delivery Unlocked!'
+                    : 'Unlocked FREE Doorstep Delivery (₹999+)!'}
                 </span>
               ) : (
                 <span className="text-beige-muted">
                   Add <span className="text-gold font-semibold">{formatCurrency(remainingForFreeShipping)}</span> for{' '}
-                  <span className="text-beige font-semibold">FREE Delivery</span>
+                  <span className="text-beige font-semibold">FREE Delivery</span> (orders ₹999+)
                 </span>
               )}
               <span className="text-[11px] text-gold font-mono">{shippingProgress}%</span>
@@ -275,22 +303,24 @@ export function CartDrawer() {
                   </div>
                 )}
                 <div className="flex justify-between text-beige-muted">
-                  <span>Estimated Delivery</span>
-                  <span className="text-success font-medium">
-                    {remainingForFreeShipping === 0 ? 'FREE' : '₹49'}
-                  </span>
+                  <span>Delivery Charges</span>
+                  {pricing.shippingCost === 0 ? (
+                    <span className="text-success font-medium flex items-center gap-1.5">
+                      <span className="line-through text-beige-muted/60">₹99</span>
+                      FREE
+                    </span>
+                  ) : (
+                    <span className="text-beige font-medium">{formatCurrency(pricing.shippingCost)}</span>
+                  )}
+                </div>
+                <div className="flex justify-between text-beige-muted">
+                  <span>Platform Fee</span>
+                  <span className="text-beige font-medium">{formatCurrency(pricing.platformFee)}</span>
                 </div>
                 <div className="flex justify-between items-baseline pt-2 border-t border-border">
                   <span className="font-semibold text-beige text-sm">Estimated Total</span>
                   <span className="font-serif text-xl font-bold gold-text-gradient">
-                    {formatCurrency(
-                      Math.max(
-                        0,
-                        subtotal -
-                          ((cart as any)?.discountAmount ?? 0) +
-                          (remainingForFreeShipping === 0 ? 0 : 49),
-                      ),
-                    )}
+                    {formatCurrency(pricing.totalPayable)}
                   </span>
                 </div>
               </div>

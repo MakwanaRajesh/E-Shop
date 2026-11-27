@@ -294,6 +294,10 @@ namespace EShop.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<decimal>("PlatformFee")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
                     b.Property<string>("RazorpayOrderId")
                         .HasColumnType("text");
 

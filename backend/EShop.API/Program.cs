@@ -258,10 +258,24 @@ var app = builder.Build();
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    await db.Database.MigrateAsync();
-    Log.Information("Database migrated successfully.");
-    await DbInitializer.SeedAsync(db);
-    Log.Information("Database seeded successfully.");
+    for (var attempt = 1; ; attempt++)
+    {
+        try
+        {
+            await db.Database.MigrateAsync();
+            Log.Information("Database migrated successfully.");
+            await DbInitializer.SeedAsync(db);
+            Log.Information("Database seeded successfully.");
+            break;
+        }
+        catch (Exception ex) when (attempt < 3 && (ex is System.Net.Sockets.SocketException
+                                                || ex.InnerException is System.Net.Sockets.SocketException
+                                                || (ex is Npgsql.NpgsqlException npg && npg.IsTransient)))
+        {
+            Log.Warning(ex, "Transient database connection failure during startup (attempt {Attempt}/3); retrying...", attempt);
+            await Task.Delay(500 * attempt);
+        }
+    }
 }
 
 // Pre-warm catalog caches asynchronously once Kestrel begins accepting connections (does not delay /health readiness)
@@ -286,8 +300,12 @@ app.Lifetime.ApplicationStarted.Register(() =>
                     EShop.API.Controllers.ProductsController.BuildListCacheKey(q, 1, ps),
                     () => EShop.API.Controllers.ProductsController.QueryProductListAsync(bgDb, q, 1, ps));
             }
+            var page2Q = new EShop.Core.DTOs.ProductQueryParams { SortBy = "relevant", Page = 2, PageSize = 24 };
+            await cache.GetOrCreateProductAsync(
+                EShop.API.Controllers.ProductsController.BuildListCacheKey(page2Q, 2, 24),
+                () => EShop.API.Controllers.ProductsController.QueryProductListAsync(bgDb, page2Q, 2, 24));
 
-            foreach (var cat in new[] { "men", "women", "kids", "footwear", "watches", "accessories", "women-dresses", "men-t-shirts", "men-denim", "mens-co-ord-sets" })
+            foreach (var cat in new[] { "men", "women", "kids", "footwear", "accessories", "fragrances", "jewelry", "women-dresses", "women-ethnic", "women-handbags", "men-t-shirts", "men-shirts", "men-denim", "mens-co-ord-sets" })
             {
                 var cq = new EShop.Core.DTOs.ProductQueryParams { Category = cat, SortBy = "relevant", Page = 1, PageSize = 24 };
                 await cache.GetOrCreateProductAsync(

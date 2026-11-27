@@ -13,8 +13,9 @@ import { Input } from '@/components/ui/Input'
 import api from '@/lib/api'
 import toast from 'react-hot-toast'
 import { formatCurrency } from '@/lib/utils'
+import { computeOrderPricing, FREE_DELIVERY_THRESHOLD } from '@/lib/orderPricing'
 import { CouponSection } from '@/components/cart/CouponSection'
-import type { Address } from '@/types'
+import type { Address, OrderPricingPreview } from '@/types'
 
 export default function CheckoutPage() {
   const router = useRouter()
@@ -26,6 +27,7 @@ export default function CheckoutPage() {
   const [savedAddresses, setSavedAddresses] = React.useState<Address[]>([])
   const [selectedAddressId, setSelectedAddressId] = React.useState<string | 'new'>('new')
   const [useNewAddress, setUseNewAddress] = React.useState(false)
+  const [isFirstOrderEligible, setIsFirstOrderEligible] = React.useState(false)
 
   const [newAddress, setNewAddress] = React.useState({
     fullName: user ? `${user.firstName} ${user.lastName}` : '',
@@ -60,6 +62,10 @@ export default function CheckoutPage() {
       }
     }
     loadAddresses()
+    api
+      .get<OrderPricingPreview>('/api/orders/pricing-preview', { params: { subTotal: 1 } })
+      .then(({ data }) => setIsFirstOrderEligible(Boolean(data?.isFirstOrderEligible)))
+      .catch(() => {})
   }, [isAuthenticated, fetchCart])
 
   if (!isAuthenticated) {
@@ -77,7 +83,8 @@ export default function CheckoutPage() {
   const items = cart?.items ?? []
   const subtotal = cart?.subtotal ?? (cart as any)?.subTotal ?? 0
   const discount = appliedCoupon?.discountAmount ?? (cart as any)?.discountAmount ?? 0
-  const total = Math.max(0, subtotal - discount)
+  const pricing = computeOrderPricing(subtotal, discount, isFirstOrderEligible)
+  const total = pricing.totalPayable
 
   if (items.length === 0) {
     return (
@@ -455,10 +462,38 @@ export default function CheckoutPage() {
                   <span>-{formatCurrency(discount)}</span>
                 </div>
               )}
-              <div className="flex justify-between text-beige-muted">
-                <span>Doorstep Delivery</span>
-                <span className="text-success font-medium">FREE</span>
+              <div className="flex justify-between text-beige-muted items-center">
+                <span>
+                  Doorstep Delivery
+                  {pricing.freeDeliveryReason === 'first_order' && (
+                    <span className="ml-1.5 text-[10px] font-semibold uppercase text-gold bg-gold/10 px-1.5 py-0.5 rounded">
+                      1st Order Free
+                    </span>
+                  )}
+                  {pricing.freeDeliveryReason === 'order_above_999' && (
+                    <span className="ml-1.5 text-[10px] font-semibold uppercase text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded">
+                      ₹{FREE_DELIVERY_THRESHOLD}+
+                    </span>
+                  )}
+                </span>
+                {pricing.shippingCost === 0 ? (
+                  <span className="text-success font-medium flex items-center gap-1.5">
+                    <span className="line-through text-beige-muted/60 font-normal">₹99</span>
+                    FREE
+                  </span>
+                ) : (
+                  <span className="text-beige font-semibold">{formatCurrency(pricing.shippingCost)}</span>
+                )}
               </div>
+              <div className="flex justify-between text-beige-muted">
+                <span>Platform Fee</span>
+                <span className="text-beige font-semibold">{formatCurrency(pricing.platformFee)}</span>
+              </div>
+              {pricing.amountForFreeDelivery > 0 && (
+                <p className="text-[11px] text-beige-muted bg-surface-2 rounded-lg px-2.5 py-1.5 border border-border">
+                  Orders ₹{FREE_DELIVERY_THRESHOLD}+ qualify for <strong className="text-beige">FREE delivery</strong> (or first order is free).
+                </p>
+              )}
               <div className="flex justify-between items-baseline pt-2 border-t border-border">
                 <span className="font-semibold text-beige">Total Payable</span>
                 <span className="font-serif text-2xl font-bold gold-text-gradient">

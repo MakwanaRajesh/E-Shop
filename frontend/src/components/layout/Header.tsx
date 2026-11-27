@@ -30,55 +30,52 @@ import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import api from '@/lib/api'
 import { prefetchCatalogEndpoint } from '@/lib/catalogCache'
 
-// Mega-Menu Category Definitions (SHEIN / AJIO / Flipkart style)
+// Mega-Menu Category Definitions (Unified Unbranded Atelier Categories)
 export const MEGA_MENU_CATEGORIES = [
   {
     name: 'Men',
     slug: 'men',
     highlight: 'New Season',
     spotlight: {
-      tag: 'The Sartorial Edit',
-      title: "Men's Luxury Sartorial",
-      subtitle: 'Californian Supima & French Linen',
-      imageUrl: 'https://images.unsplash.com/photo-1617137984095-74e4e5e3613f?w=800&auto=format&fit=crop&q=85',
+      tag: 'Curated Menswear',
+      title: "Men's Modern Wardrobe",
+      subtitle: 'Linen Shirts, Overshirts, Relaxed Denim & Co-ords',
+      imageUrl: 'https://cdn.shopify.com/s/files/1/0420/7073/7058/files/1150f4e060977b4cb76b4a94ec53cf04.webp?v=1724415898&width=800',
       href: '/products?category=men',
     },
     columns: [
       {
         title: 'Topwear',
         items: [
-          { label: "T-Shirts & Polos", href: '/products?category=men&subCategory=men-t-shirts' },
+          { label: 'T-Shirts & Knitted Polos', href: '/products?category=men&subCategory=men-t-shirts' },
           { label: 'Co-ord Sets', href: '/products?category=men&subCategory=mens-co-ord-sets' },
-          { label: 'Casual Shirts', href: '/products?category=men&subCategory=men-shirts' },
-          { label: 'Formal Shirts', href: '/products?category=men&search=formal+shirt' },
-          { label: 'Hoodies & Sweatshirts', href: '/products?category=men&search=hoodie' },
-          { label: 'Jackets & Blazers', href: '/products?category=men&search=jacket' },
+          { label: 'Linen & Casual Shirts', href: '/products?category=men&subCategory=men-shirts' },
+          { label: 'Overshirts', href: '/products?category=men&subCategory=men-shirts&search=overshirt' },
+          { label: 'Hoodies & Jackets', href: '/products?category=men&subCategory=men-activewear' },
         ],
       },
       {
         title: 'Bottomwear',
         items: [
-          { label: 'Jeans & Denim', href: '/products?category=men&subCategory=men-denim' },
-          { label: 'Casual Trousers & Chinos', href: '/products?category=men&search=chino' },
-          { label: 'Joggers & Cargo Pants', href: '/products?category=men&search=cargo' },
-          { label: 'Shorts & Bermuda', href: '/products?category=men&subCategory=men-shorts' },
+          { label: 'Jeans & Baggy Denim', href: '/products?category=men&subCategory=men-denim' },
+          { label: 'Shorts & Cargo Pants', href: '/products?category=men&subCategory=men-shorts' },
+          { label: 'Lounge & Track Pants', href: '/products?category=men&subCategory=men-innerwear' },
         ],
       },
       {
         title: 'Footwear',
         items: [
-          { label: 'Luxury Sneakers', href: '/products?category=men&subCategory=men-footwear' },
-          { label: 'Formal Shoes', href: '/products?category=men&search=formal+shoes' },
-          { label: 'Loafers & Moccasins', href: '/products?category=men&search=loafers' },
-          { label: 'Slides & Sandals', href: '/products?category=men&search=slides' },
+          { label: 'Leather Chelsea Boots', href: '/products?category=men&subCategory=men-footwear&search=boots' },
+          { label: 'Dark Brown Penny Loafers', href: '/products?category=men&subCategory=men-footwear&search=loafers' },
+          { label: 'All Men’s Footwear', href: '/products?category=men&subCategory=men-footwear' },
         ],
       },
       {
-        title: 'Active & Innerwear',
+        title: 'Outerwear & Essentials',
         items: [
-          { label: 'Performance Activewear', href: '/products?category=men&subCategory=men-activewear' },
-          { label: 'Boxer Briefs & Trunks', href: '/products?category=men&subCategory=men-innerwear' },
-          { label: 'Loungewear & Pyjamas', href: '/products?category=men&search=loungewear' },
+          { label: 'Hoodies, Jackets & Knits', href: '/products?category=men&subCategory=men-activewear' },
+          { label: 'Trunks & Loungewear', href: '/products?category=men&subCategory=men-innerwear' },
+          { label: 'Men’s Fragrances & Caps', href: '/products?category=accessories' },
         ],
       },
     ],
@@ -88,38 +85,36 @@ export const MEGA_MENU_CATEGORIES = [
     slug: 'women',
     highlight: 'Trending',
     spotlight: {
-      tag: 'Spring Couture',
-      title: "Women's Haute Edit",
-      subtitle: 'Mulberry Silk & Lucknowi Chikankari',
-      imageUrl: 'https://images.unsplash.com/photo-1483985988355-763728e1935b?w=800&auto=format&fit=crop&q=85',
+      tag: 'Tailored & Contemporary',
+      title: "Women's Style Edit",
+      subtitle: 'Modal Satin Dresses, Poplin Blouses & Ethnic Kurtas',
+      imageUrl: 'https://cdn.shopify.com/s/files/1/1695/7273/files/MAIN_2673174c-f193-4299-8b1f-35f25eefe3cd.jpg?v=1795417011&width=800',
       href: '/products?category=women',
     },
     columns: [
       {
         title: 'Western Wear',
         items: [
-          { label: 'Dresses & Gowns', href: '/products?category=women&subCategory=women-dresses' },
-          { label: 'Tops, Tees & Blouses', href: '/products?category=women&subCategory=women-tops' },
-          { label: 'Jeans & Jeggings', href: '/products?category=women&subCategory=women-denim' },
-          { label: 'Trousers & Skirts', href: '/products?category=women&search=skirt' },
+          { label: 'Midi, Maxi & Wrap Dresses', href: '/products?category=women&subCategory=women-dresses' },
+          { label: 'Tops, Shirts & Blouses', href: '/products?category=women&subCategory=women-tops' },
+          { label: 'Wide-Leg Denim & Trousers', href: '/products?category=women&subCategory=women-denim' },
+          { label: 'Co-ord Sets & Workwear', href: '/products?category=women&search=co-ord' },
         ],
       },
       {
         title: 'Ethnic & Fusion',
         items: [
-          { label: 'Chanderi Kurta Sets', href: '/products?category=women&subCategory=women-ethnic' },
-          { label: 'Chikankari Tunics', href: '/products?category=women&search=chikankari' },
-          { label: 'Designer Sarees', href: '/products?category=women&search=saree' },
-          { label: 'Dupattas & Stoles', href: '/products?category=women&search=dupatta' },
+          { label: 'Embroidered Cotton Kurtas', href: '/products?category=women&subCategory=women-ethnic' },
+          { label: 'Bandhani Printed Kurtas', href: '/products?category=women&subCategory=women-ethnic&search=bandhani' },
+          { label: 'Cotton Straight Kurtas', href: '/products?category=women&subCategory=women-ethnic&search=straight' },
         ],
       },
       {
-        title: 'Footwear & Bags',
+        title: 'Footwear & Handbags',
         items: [
-          { label: 'Stiletto & Block Heels', href: '/products?category=women&subCategory=women-footwear' },
-          { label: 'Ballet Flats', href: '/products?category=women&search=flats' },
-          { label: 'Leather Handbags', href: '/products?category=women&subCategory=women-handbags' },
-          { label: 'Evening Clutches', href: '/products?category=women&search=clutch' },
+          { label: 'Block Heels & Boots', href: '/products?category=women&subCategory=women-footwear' },
+          { label: 'Suede Totes & Slings', href: '/products?category=women&subCategory=women-handbags' },
+          { label: 'All Women’s Collection', href: '/products?category=women' },
         ],
       },
     ],
@@ -128,34 +123,32 @@ export const MEGA_MENU_CATEGORIES = [
     name: 'Kids',
     slug: 'kids',
     spotlight: {
-      tag: 'Designer Junior',
-      title: 'Kids Luxury Wardrobe',
-      subtitle: '100% Organic Pima Cotton & Tulle',
-      imageUrl: 'https://images.unsplash.com/photo-1503919545889-aef636e10ad4?w=800&auto=format&fit=crop&q=85',
+      tag: 'Junior Studio',
+      title: 'Kids Studio Wardrobe',
+      subtitle: 'Playful Jackets, Party Dresses & Everyday Sneakers',
+      imageUrl: 'https://cdn.shopify.com/s/files/1/0266/6276/4597/files/301071502MAROON_1.jpg?v=1795606894&width=800',
       href: '/products?category=kids',
     },
     columns: [
       {
-        title: 'Boys (2–14Y)',
+        title: 'Boys & Outerwear',
         items: [
-          { label: 'T-Shirts & Polos', href: '/products?category=kids&subCategory=kids-boys' },
-          { label: 'Shirts & Denim', href: '/products?category=kids&search=boys+denim' },
-          { label: 'Shorts & Sets', href: '/products?category=kids&search=boys+shorts' },
+          { label: 'Race-Theme Jackets', href: '/products?category=kids&subCategory=kids-boys' },
+          { label: 'All Boys Apparel', href: '/products?category=kids&subCategory=kids-boys' },
         ],
       },
       {
-        title: 'Girls (2–14Y)',
+        title: 'Girls Apparel',
         items: [
-          { label: 'Dresses & Frocks', href: '/products?category=kids&subCategory=kids-girls' },
-          { label: 'Tops & Skirts', href: '/products?category=kids&search=girls+tops' },
-          { label: 'Ethnic Sets', href: '/products?category=kids&search=girls+ethnic' },
+          { label: 'Bow-Detailed A-Line Dresses', href: '/products?category=kids&subCategory=kids-girls' },
+          { label: 'All Girls Apparel', href: '/products?category=kids&subCategory=kids-girls' },
         ],
       },
       {
-        title: 'Footwear & Baby',
+        title: 'Kids Footwear',
         items: [
-          { label: 'Kids Sneakers', href: '/products?category=kids&subCategory=kids-footwear' },
-          { label: 'Infant Rompers', href: '/products?category=kids&search=romper' },
+          { label: 'Velcro Sneakers', href: '/products?category=kids&subCategory=kids-footwear&search=sneakers' },
+          { label: 'Clogs & Slip-Ons', href: '/products?category=kids&subCategory=kids-footwear' },
         ],
       },
     ],
@@ -164,64 +157,60 @@ export const MEGA_MENU_CATEGORIES = [
     name: 'Footwear',
     slug: 'footwear',
     spotlight: {
-      tag: 'Artisan Craft',
-      title: 'Handcrafted Footwear',
-      subtitle: 'Italian Calfskin & Stiletto Pumps',
-      imageUrl: 'https://images.unsplash.com/photo-1549298916-b41d501d3772?w=800&auto=format&fit=crop&q=85',
+      tag: 'Crafted Footwear',
+      title: 'Curated Footwear',
+      subtitle: 'Chelsea Boots, Penny Loafers & Satin Heels',
+      imageUrl: 'https://cdn.shopify.com/s/files/1/0266/6276/4597/files/301084439CHAMPAGNE_1.jpg?v=1793785136&width=800',
       href: '/products?category=footwear',
     },
     columns: [
       {
         title: 'Men’s Footwear',
         items: [
-          { label: 'Italian Leather Sneakers', href: '/products?category=men&subCategory=men-footwear' },
-          { label: 'Penny Loafers', href: '/products?category=men&subCategory=men-footwear&search=loafers' },
+          { label: 'Leather & Suede Chelsea Boots', href: '/products?category=men&subCategory=men-footwear&search=boots' },
+          { label: 'Dark Brown Penny Loafers', href: '/products?category=men&subCategory=men-footwear&search=loafers' },
           { label: 'All Men’s Shoes', href: '/products?category=men&subCategory=men-footwear' },
         ],
       },
       {
         title: 'Women’s Footwear',
         items: [
-          { label: 'Designer Stiletto Heels', href: '/products?category=women&subCategory=women-footwear' },
-          { label: 'Comfort Ballet Flats', href: '/products?category=women&subCategory=women-footwear&search=flats' },
-          { label: 'All Women’s Shoes', href: '/products?category=women&subCategory=women-footwear' },
+          { label: 'Satin & Kolhapuri Block Heels', href: '/products?category=women&subCategory=women-footwear&search=heel' },
+          { label: 'Platform Loafers & Boots', href: '/products?category=women&subCategory=women-footwear' },
         ],
       },
       {
-        title: 'Full Footwear Catalog',
+        title: 'Kids Footwear',
         items: [
-          { label: 'Court Retro Sneakers', href: '/products?category=footwear' },
-          { label: 'Kids Sneakers', href: '/products?category=kids&subCategory=kids-footwear' },
+          { label: 'Velcro Sneakers & Clogs', href: '/products?category=kids&subCategory=kids-footwear' },
           { label: 'All Footwear', href: '/products?category=footwear' },
         ],
       },
     ],
   },
   {
-    name: 'Watches',
-    slug: 'watches',
+    name: 'Ethnic & Bags',
+    slug: 'women-ethnic',
     spotlight: {
-      tag: 'Master Horology',
-      title: 'Precision Timepieces',
-      subtitle: 'Swiss Tourbillon & Chronographs',
-      imageUrl: 'https://images.unsplash.com/photo-1522335789203-aabd1fc54bc9?w=800&auto=format&fit=crop&q=85',
-      href: '/products?category=watches',
+      tag: 'Ethnic & Bags',
+      title: 'Ethnic & Handbags',
+      subtitle: 'Handcrafted Kurtas & Suede Everyday Totes',
+      imageUrl: 'https://cdn.shopify.com/s/files/1/0266/6276/4597/files/301092471INDIGO_1.jpg?v=1795588927&width=800',
+      href: '/products?category=women&subCategory=women-ethnic',
     },
     columns: [
       {
-        title: 'Horology Collections',
+        title: 'Ethnic Kurtas',
         items: [
-          { label: 'Automatic Chronographs', href: '/products?category=watches' },
-          { label: 'Grand Tourbillon Editions', href: '/products?category=watches&search=tourbillon' },
-          { label: 'Minimalist Dress Timepieces', href: '/products?category=watches&search=minimalist' },
+          { label: 'Cotton & Embroidered Kurtas', href: '/products?category=women&subCategory=women-ethnic' },
+          { label: 'Bandhani Printed Kurtas', href: '/products?category=women&subCategory=women-ethnic&search=bandhani' },
         ],
       },
       {
-        title: 'Styles & Movements',
+        title: 'Handbags & Clutches',
         items: [
-          { label: 'Swiss Automatic Movements', href: '/products?category=watches' },
-          { label: 'Classic Dress Watches', href: '/products?category=watches&search=classic' },
-          { label: 'Rose Gold & Steel Editions', href: '/products?category=watches' },
+          { label: 'Suede Totes & Shoulder Bags', href: '/products?category=women&subCategory=women-handbags' },
+          { label: 'Quilted Slings & Studded Clutches', href: '/products?category=women&subCategory=women-handbags&search=sling' },
         ],
       },
     ],
@@ -230,25 +219,25 @@ export const MEGA_MENU_CATEGORIES = [
     name: 'Accessories',
     slug: 'accessories',
     spotlight: {
-      tag: 'Signature Accents',
-      title: 'Fine Living Accents',
-      subtitle: 'Florentine Leather & 18k Solid Gold',
-      imageUrl: 'https://images.unsplash.com/photo-1548036328-c9fa89d128fa?w=800&auto=format&fit=crop&q=85',
+      tag: 'Fragrances, Jewels & Eyewear',
+      title: 'Finishing Touches',
+      subtitle: 'Fine Perfumes, UV400 Eyewear & Crystal Jewelry',
+      imageUrl: 'https://cdn.shopify.com/s/files/1/0266/6276/4597/files/300968674001_b064f5c4-63b5-4724-a07f-f9b9f514c7c1.jpg?v=1789020636&width=800',
       href: '/products?category=accessories',
     },
     columns: [
       {
-        title: 'Leather & Travel',
+        title: 'Eyewear, Bags & Caps',
         items: [
-          { label: 'Italian Leather Briefcases', href: '/products?category=accessories&search=briefcase' },
-          { label: 'Designer Wallets & Belts', href: '/products?category=accessories&search=wallet' },
+          { label: 'UV400 & Cat-Eye Sunglasses', href: '/products?category=accessories&search=sunglass' },
+          { label: 'Crossbody Slings & Caps', href: '/products?category=accessories' },
         ],
       },
       {
-        title: 'Fragrances & Jewels',
+        title: 'Fragrances & Jewelry',
         items: [
-          { label: 'Haute Fragrances & Oud', href: '/products?category=fragrances' },
-          { label: 'Fine 18k Solid Gold Jewelry', href: '/products?category=jewelry' },
+          { label: 'Signature Eau De Parfums', href: '/products?category=fragrances' },
+          { label: 'Crystal Pendants & Open Rings', href: '/products?category=jewelry' },
         ],
       },
     ],
@@ -256,21 +245,21 @@ export const MEGA_MENU_CATEGORIES = [
   {
     name: 'Offers & Sale',
     slug: 'sale',
-    highlight: 'Save up to 40%',
+    highlight: 'Save up to 50%',
     spotlight: {
       tag: 'Exclusive Privilege',
-      title: 'The Private Vault',
-      subtitle: 'Curated Deals with Code NEXUS10',
-      imageUrl: 'https://images.unsplash.com/photo-1513094735237-8f2714d57c13?w=800&auto=format&fit=crop&q=85',
+      title: 'The Curated Vault',
+      subtitle: 'Save Extra 10% with Code NEXUS10',
+      imageUrl: 'https://cdn.shopify.com/s/files/1/0420/7073/7058/files/1_320dfa4f-6263-4d25-9a58-8e427f6d11fa.jpg?v=1795612551&width=800',
       href: '/products',
     },
     columns: [
       {
         title: 'Curated Deals',
         items: [
-          { label: 'Flash Deals Under ₹2,999', href: '/products?maxPrice=2999' },
-          { label: 'Bestselling Vault', href: '/products?sort=popular' },
-          { label: 'Luxury Specials with Code NEXUS10', href: '/products' },
+          { label: 'Flash Deals Under ₹1,499', href: '/products?maxPrice=1499' },
+          { label: 'New Arrivals Across 4 Brands', href: '/products?sort=newest' },
+          { label: 'Featured Highlights', href: '/products?sort=relevant' },
         ],
       },
       {
@@ -439,7 +428,7 @@ export function Header() {
           <div className="flex items-center gap-3">
             <span className="flex items-center gap-1.5 text-[#FAF8F5] font-medium">
               <Sparkles className="w-3 h-3 text-[#C5A059]" />
-              Complimentary White-Glove Doorstep Delivery on orders ₹5,000+
+              Free Delivery on orders ₹999+ & Your First Order (₹9 Platform Fee)
             </span>
             <span className="text-[#57534E]">|</span>
             <span>Use code <strong className="text-[#C5A059] font-mono font-bold tracking-wider">NEXUS10</strong> for 10% instant off</span>
@@ -497,7 +486,7 @@ export function Header() {
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     onFocus={() => setSearchFocused(true)}
-                    placeholder="Search for T-shirts, Denim, Sneakers, Watches, Perfumes..."
+                    placeholder="Search for shirts, dresses, denim, sneakers, bags, perfumes..."
                     className="w-full bg-[#FAF8F5] hover:bg-[#FFFFFF] border border-[#E7E5E4] focus:border-[#C5A059] rounded-full pl-11 pr-28 py-2.5 text-xs text-[#111111] placeholder:text-[#78716C] focus:outline-none transition-all shadow-inner"
                   />
                   <Search className="w-4 h-4 text-[#78716C] absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" />

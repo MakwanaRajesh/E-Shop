@@ -12,6 +12,7 @@ public class Order : BaseEntity
 
     public decimal SubTotal { get; set; }
     public decimal ShippingCost { get; set; } = 0;
+    public decimal PlatformFee { get; set; } = 0;
     public decimal Discount { get; set; } = 0;
     public decimal Tax { get; set; } = 0;
     public decimal TotalAmount { get; set; }

@@ -92,10 +92,17 @@ export function calculateDiscount(price: number, compareAtPrice?: number): numbe
  */
 export function optimizeImageUrl(url: string | null | undefined, width = 450, quality = 65): string {
   if (!url) {
-    return 'https://images.unsplash.com/photo-1521572267360-ee0c2909d518?auto=format&fit=crop&w=400&q=60'
+    return 'https://cdn.shopify.com/s/files/1/0420/7073/7058/files/4MSS3977-10_1_dd270c38-3890-4d4d-8e8e-977ab67bab3d.jpg?v=1741767846&width=500'
   }
 
   try {
+    // Shopify CDN: append width parameter for fast right-sized WebP/JPEG delivery
+    if (url.includes('cdn.shopify.com')) {
+      const parsed = new URL(url)
+      parsed.searchParams.set('width', String(width))
+      return parsed.toString()
+    }
+
     // Unsplash: append or override auto=format, fit=crop, w, q
     if (url.includes('images.unsplash.com')) {
       const parsed = new URL(url)
