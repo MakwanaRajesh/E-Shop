@@ -43,6 +43,7 @@ import {
   RotateCcw,
   PackagePlus,
   Filter,
+  MessageSquare,
 } from 'lucide-react'
 import { useAuthStore } from '@/store/auth'
 import { useAuthModalStore } from '@/store/authModal'
@@ -55,7 +56,7 @@ import api, { getApiBaseUrl } from '@/lib/api'
 import { invalidateFrontendCatalogCache } from '@/lib/catalogCache'
 import toast, { Toaster } from 'react-hot-toast'
 import { AuthModal } from '@/components/auth/AuthModal'
-import type { DashboardStats, Order, ProductListItem, Category } from '@/types'
+import type { DashboardStats, Order, ProductListItem, Category, SupportTicket } from '@/types'
 import { formatCurrency, formatDate } from '@/lib/utils'
 
 const safeStr = (s?: string | null) => (s ?? '').toLowerCase().trim()
@@ -128,7 +129,7 @@ function AdminContent() {
 
   // Navigation state
   const [activeTab, setActiveTab] = React.useState<
-    'overview' | 'products' | 'categories' | 'orders' | 'security' | 'coupons' | 'customers' | 'settings'
+    'overview' | 'products' | 'categories' | 'orders' | 'support' | 'security' | 'coupons' | 'customers' | 'settings'
   >('overview')
 
   // Main data states
@@ -138,6 +139,13 @@ function AdminContent() {
   const [categories, setCategories] = React.useState<Category[]>([])
   const [coupons, setCoupons] = React.useState<CouponDto[]>([])
   const [customers, setCustomers] = React.useState<CustomerDto[]>([])
+  const [supportTickets, setSupportTickets] = React.useState<SupportTicket[]>([])
+  const [ticketStatusFilter, setTicketStatusFilter] = React.useState<'all' | 'Open' | 'InReview' | 'Resolved' | 'Closed'>('all')
+  const [ticketSearch, setTicketSearch] = React.useState('')
+  const [ticketDrafts, setTicketDrafts] = React.useState<
+    Record<string, { status: string; priority: string; adminResponse: string }>
+  >({})
+  const [savingTicketId, setSavingTicketId] = React.useState<string | null>(null)
   const [alerts, setAlerts] = React.useState<SecurityAlertDto[]>([])
   const [securityPosture, setSecurityPosture] = React.useState<SecurityPostureInfo | null>(null)
   const [unreadAlerts, setUnreadAlerts] = React.useState(0)
@@ -310,7 +318,7 @@ function AdminContent() {
     setPortalError(null)
     try {
       const failedEndpoints: string[] = []
-      const [dashRes, ordRes, prodRes, catRes, coupRes, custRes, alertRes] = await Promise.all([
+      const [dashRes, ordRes, prodRes, catRes, coupRes, custRes, alertRes, supportRes] = await Promise.all([
         api.get<DashboardStats>('/api/admin/dashboard').catch((e) => {
           failedEndpoints.push(`dashboard (${e?.statusCode || 'network'})`)
           return null
@@ -327,6 +335,7 @@ function AdminContent() {
         api.get<CouponDto[]>('/api/coupons').catch(() => null),
         api.get<any>('/api/admin/customers?pageSize=100').catch(() => null),
         api.get<any>('/api/admin/security/alerts').catch(() => null),
+        api.get<any>('/api/admin/support/tickets?pageSize=100').catch(() => null),
       ])
 
       if (failedEndpoints.length > 0) {
@@ -362,6 +371,9 @@ function AdminContent() {
         setUnreadAlerts(alertRes.data.unreadCount ?? alertRes.data.UnreadCount ?? 0)
         setSecurityPosture(alertRes.data.securityPosture ?? alertRes.data.SecurityPosture ?? null)
       }
+
+      const tktList = supportRes?.data?.items ?? supportRes?.data?.Items ?? supportRes?.data?.data ?? []
+      setSupportTickets(Array.isArray(tktList) ? tktList : [])
     } catch {
       setPortalError('Failed to load portal data. Please check your connection and sign in again.')
       toast.error('Failed to load portal data')
@@ -373,6 +385,42 @@ function AdminContent() {
   React.useEffect(() => {
     fetchAllData()
   }, [fetchAllData])
+
+  const handleUpdateSupportTicket = async (
+    ticketId: string,
+    overrideStatus?: 'Open' | 'InReview' | 'Resolved' | 'Closed',
+  ) => {
+    const existing = supportTickets.find((t) => t.id === ticketId)
+    if (!existing) return
+    const draft = ticketDrafts[ticketId] ?? {
+      status: existing.status,
+      priority: existing.priority,
+      adminResponse: existing.adminResponse ?? '',
+    }
+    const nextStatus = overrideStatus ?? draft.status
+    setSavingTicketId(ticketId)
+    try {
+      const { data } = await api.patch<SupportTicket>(`/api/admin/support/tickets/${ticketId}`, {
+        status: nextStatus,
+        priority: draft.priority,
+        adminResponse: draft.adminResponse,
+      })
+      setSupportTickets((prev) => prev.map((t) => (t.id === ticketId ? data : t)))
+      setTicketDrafts((prev) => ({
+        ...prev,
+        [ticketId]: {
+          status: data.status,
+          priority: data.priority,
+          adminResponse: data.adminResponse ?? '',
+        },
+      }))
+      toast.success(`Ticket ${data.ticketNumber} updated to ${data.status}`)
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message ?? 'Failed to update support ticket')
+    } finally {
+      setSavingTicketId(null)
+    }
+  }
 
   // Security Alert Handlers
   const handleResolveAlert = async (alertId: string, customAction?: string) => {
@@ -1191,6 +1239,12 @@ function AdminContent() {
               { id: 'categories', label: 'Collections / Depts', icon: FolderTree, count: categories.length },
               { id: 'orders', label: 'Orders & Fulfillment', icon: ShoppingCart, count: orders.length },
               {
+                id: 'support',
+                label: 'Support Tickets',
+                icon: MessageSquare,
+                count: supportTickets.filter((t) => t.status === 'Open' || t.status === 'InReview').length,
+              },
+              {
                 id: 'security',
                 label: 'Threats & Suspicious',
                 icon: ShieldAlert,
@@ -1314,7 +1368,7 @@ function AdminContent() {
 
         {/* Mobile Navigation Tabs */}
         <div className="md:hidden flex items-center gap-2 p-3 overflow-x-auto border-b border-border bg-surface-2 text-xs">
-          {['overview', 'products', 'categories', 'orders', 'security', 'coupons', 'customers', 'settings'].map((tab) => (
+          {['overview', 'products', 'categories', 'orders', 'support', 'security', 'coupons', 'customers', 'settings'].map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab as any)}
@@ -2835,6 +2889,295 @@ function AdminContent() {
                     <Shield className="w-12 h-12 text-emerald-600 mx-auto mb-3" />
                     <h3 className="font-serif text-lg font-bold text-beige">Zero Security Threats Detected</h3>
                     <p className="text-xs text-beige-muted mt-1">All gateway transactions and inventory are running smoothly.</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* ─── TAB: SUPPORT TICKETS & PRODUCT ISSUES ──────────────────────── */}
+          {activeTab === 'support' && (
+            <div className="space-y-6">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <h1 className="font-serif text-3xl font-bold text-beige">Support Tickets &amp; Resolution Desk</h1>
+                  <p className="text-sm text-beige-muted mt-1">
+                    Review customer product queries, order issues, and send direct support resolutions.
+                  </p>
+                </div>
+                <Button variant="outline" size="sm" onClick={fetchAllData} className="flex items-center gap-1.5 self-start sm:self-center">
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  Refresh Queue
+                </Button>
+              </div>
+
+              {/* Support KPIs */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="bg-surface border border-amber-200 rounded-2xl p-4 shadow-sm">
+                  <span className="text-[11px] uppercase font-semibold text-amber-700">Open Tickets</span>
+                  <p className="font-serif text-2xl font-bold text-amber-800 mt-1">
+                    {supportTickets.filter((t) => t.status === 'Open').length}
+                  </p>
+                </div>
+                <div className="bg-surface border border-sky-200 rounded-2xl p-4 shadow-sm">
+                  <span className="text-[11px] uppercase font-semibold text-sky-700">In Review</span>
+                  <p className="font-serif text-2xl font-bold text-sky-800 mt-1">
+                    {supportTickets.filter((t) => t.status === 'InReview').length}
+                  </p>
+                </div>
+                <div className="bg-surface border border-emerald-200 rounded-2xl p-4 shadow-sm">
+                  <span className="text-[11px] uppercase font-semibold text-emerald-700">Resolved / Closed</span>
+                  <p className="font-serif text-2xl font-bold text-emerald-800 mt-1">
+                    {supportTickets.filter((t) => t.status === 'Resolved' || t.status === 'Closed').length}
+                  </p>
+                </div>
+                <div className="bg-surface border border-border rounded-2xl p-4 shadow-sm">
+                  <span className="text-[11px] uppercase font-semibold text-beige-muted">High / Urgent</span>
+                  <p className="font-serif text-2xl font-bold text-rose-700 mt-1">
+                    {supportTickets.filter((t) => t.priority === 'High' || t.priority === 'Urgent').length}
+                  </p>
+                </div>
+              </div>
+
+              {/* Filters & Search */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-2 overflow-x-auto pb-1 sm:pb-0">
+                  {[
+                    { id: 'all', label: `All (${supportTickets.length})` },
+                    { id: 'Open', label: `Open (${supportTickets.filter((t) => t.status === 'Open').length})` },
+                    { id: 'InReview', label: `In Review (${supportTickets.filter((t) => t.status === 'InReview').length})` },
+                    { id: 'Resolved', label: `Resolved (${supportTickets.filter((t) => t.status === 'Resolved').length})` },
+                    { id: 'Closed', label: `Closed (${supportTickets.filter((t) => t.status === 'Closed').length})` },
+                  ].map((f) => (
+                    <button
+                      key={f.id}
+                      type="button"
+                      onClick={() => setTicketStatusFilter(f.id as any)}
+                      className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${
+                        ticketStatusFilter === f.id
+                          ? 'bg-gold text-background font-bold shadow-md shadow-gold/20'
+                          : 'bg-surface border border-border text-beige-muted hover:text-beige'
+                      }`}
+                    >
+                      {f.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="relative sm:w-72">
+                  <Search className="w-3.5 h-3.5 text-beige-muted absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={ticketSearch}
+                    onChange={(e) => setTicketSearch(e.target.value)}
+                    placeholder="Search ticket #, product, customer..."
+                    className="w-full bg-surface border border-border rounded-xl pl-8 pr-3 py-2 text-xs text-beige focus:outline-none focus:border-gold"
+                  />
+                </div>
+              </div>
+
+              {/* Ticket List */}
+              <div className="space-y-4">
+                {supportTickets
+                  .filter((t) => {
+                    if (ticketStatusFilter !== 'all' && t.status !== ticketStatusFilter) return false
+                    const q = safeStr(ticketSearch)
+                    if (!q) return true
+                    return (
+                      safeStr(t.ticketNumber).includes(q) ||
+                      safeStr(t.subject).includes(q) ||
+                      safeStr(t.issueType).includes(q) ||
+                      safeStr(t.productName).includes(q) ||
+                      safeStr(t.orderNumber).includes(q) ||
+                      safeStr(t.customerName).includes(q) ||
+                      safeStr(t.customerEmail).includes(q)
+                    )
+                  })
+                  .map((tkt) => {
+                    const draft = ticketDrafts[tkt.id] ?? {
+                      status: tkt.status,
+                      priority: tkt.priority,
+                      adminResponse: tkt.adminResponse ?? '',
+                    }
+                    const statusBadge =
+                      tkt.status === 'Resolved'
+                        ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
+                        : tkt.status === 'InReview'
+                        ? 'bg-sky-100 text-sky-800 border-sky-200'
+                        : tkt.status === 'Closed'
+                        ? 'bg-surface-2 text-beige-muted border-border'
+                        : 'bg-amber-100 text-amber-800 border-amber-200'
+
+                    return (
+                      <div
+                        key={tkt.id}
+                        className="bg-surface border border-border rounded-2xl p-5 sm:p-6 shadow-md space-y-4"
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <div className="flex flex-wrap items-center gap-2.5">
+                            <span className="font-mono text-sm font-bold text-gold">{tkt.ticketNumber}</span>
+                            <span className={`text-[11px] font-mono font-bold uppercase px-2.5 py-0.5 rounded-full border ${statusBadge}`}>
+                              {tkt.status === 'InReview' ? 'In Review' : tkt.status}
+                            </span>
+                            <span className="text-[11px] font-mono uppercase px-2 py-0.5 rounded bg-surface-2 border border-border text-beige-muted">
+                              {tkt.priority} Priority
+                            </span>
+                          </div>
+                          <div className="text-xs text-beige-muted font-mono">
+                            Submitted {formatDate(tkt.createdAt)}
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
+                          <div className="lg:col-span-2 space-y-3">
+                            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+                              <span>
+                                <strong className="text-beige">Customer:</strong> {tkt.customerName} ({tkt.customerEmail})
+                              </span>
+                              {tkt.orderNumber && (
+                                <span className="font-mono text-gold font-semibold">
+                                  Order: {tkt.orderNumber}
+                                </span>
+                              )}
+                            </div>
+
+                            {tkt.productName && (
+                              <div className="flex items-center gap-3 p-3 rounded-xl bg-surface-2/70 border border-border">
+                                {isValidImageUrl(tkt.productImageUrl) && (
+                                  <div className="relative w-11 h-11 rounded-lg overflow-hidden bg-surface flex-shrink-0 border border-border">
+                                    <Image
+                                      src={tkt.productImageUrl!}
+                                      alt={tkt.productName}
+                                      fill
+                                      className="object-cover"
+                                      sizes="44px"
+                                    />
+                                  </div>
+                                )}
+                                <div className="min-w-0 flex-1">
+                                  <p className="text-xs font-bold text-beige truncate">{tkt.productName}</p>
+                                  <p className="text-[11px] text-beige-muted">
+                                    {tkt.category} • <span className="text-gold font-semibold">{tkt.issueType}</span>
+                                  </p>
+                                </div>
+                              </div>
+                            )}
+
+                            {!tkt.productName && (
+                              <p className="text-xs text-beige-muted">
+                                <strong>Category:</strong> {tkt.category} • <strong className="text-gold">{tkt.issueType}</strong>
+                              </p>
+                            )}
+
+                            <div className="bg-surface-2/40 border border-border rounded-xl p-3.5 space-y-1">
+                              <h3 className="text-sm font-bold text-beige">{tkt.subject}</h3>
+                              <p className="text-xs text-beige-muted leading-relaxed whitespace-pre-wrap">{tkt.message}</p>
+                            </div>
+                          </div>
+
+                          {/* Support Resolution Controls */}
+                          <div className="bg-surface-2/60 border border-border rounded-xl p-4 space-y-3">
+                            <span className="text-xs font-bold uppercase tracking-wider text-gold block">
+                              Support Review &amp; Solve
+                            </span>
+
+                            <div className="grid grid-cols-2 gap-2">
+                              <div>
+                                <label className="text-[10px] font-semibold uppercase text-beige-muted block mb-1">
+                                  Status
+                                </label>
+                                <select
+                                  value={draft.status}
+                                  onChange={(e) =>
+                                    setTicketDrafts((prev) => ({
+                                      ...prev,
+                                      [tkt.id]: { ...draft, status: e.target.value },
+                                    }))
+                                  }
+                                  className="w-full bg-surface border border-border rounded-lg px-2 py-1.5 text-xs text-beige focus:outline-none focus:border-gold"
+                                >
+                                  <option value="Open">Open</option>
+                                  <option value="InReview">In Review</option>
+                                  <option value="Resolved">Resolved</option>
+                                  <option value="Closed">Closed</option>
+                                </select>
+                              </div>
+                              <div>
+                                <label className="text-[10px] font-semibold uppercase text-beige-muted block mb-1">
+                                  Priority
+                                </label>
+                                <select
+                                  value={draft.priority}
+                                  onChange={(e) =>
+                                    setTicketDrafts((prev) => ({
+                                      ...prev,
+                                      [tkt.id]: { ...draft, priority: e.target.value },
+                                    }))
+                                  }
+                                  className="w-full bg-surface border border-border rounded-lg px-2 py-1.5 text-xs text-beige focus:outline-none focus:border-gold"
+                                >
+                                  <option value="Low">Low</option>
+                                  <option value="Normal">Normal</option>
+                                  <option value="High">High</option>
+                                  <option value="Urgent">Urgent</option>
+                                </select>
+                              </div>
+                            </div>
+
+                            <div>
+                              <label className="text-[10px] font-semibold uppercase text-beige-muted block mb-1">
+                                Resolution / Reply to Customer
+                              </label>
+                              <textarea
+                                rows={3}
+                                value={draft.adminResponse}
+                                onChange={(e) =>
+                                  setTicketDrafts((prev) => ({
+                                    ...prev,
+                                    [tkt.id]: { ...draft, adminResponse: e.target.value },
+                                  }))
+                                }
+                                placeholder="Write solution steps, replacement / refund note, or answer..."
+                                className="w-full bg-surface border border-border rounded-lg px-2.5 py-2 text-xs text-beige focus:outline-none focus:border-gold resize-none"
+                              />
+                            </div>
+
+                            <div className="flex flex-wrap gap-2">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                disabled={savingTicketId === tkt.id}
+                                onClick={() => handleUpdateSupportTicket(tkt.id)}
+                                className="flex-1 text-xs"
+                              >
+                                {savingTicketId === tkt.id ? 'Saving...' : 'Save Review'}
+                              </Button>
+                              {tkt.status !== 'Resolved' && (
+                                <Button
+                                  type="button"
+                                  variant="primary"
+                                  size="sm"
+                                  disabled={savingTicketId === tkt.id}
+                                  onClick={() => handleUpdateSupportTicket(tkt.id, 'Resolved')}
+                                  className="flex-1 text-xs"
+                                >
+                                  Mark Resolved
+                                </Button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })}
+
+                {supportTickets.length === 0 && (
+                  <div className="text-center py-12 bg-surface border border-border rounded-2xl">
+                    <MessageSquare className="w-12 h-12 text-gold/40 mx-auto mb-3" />
+                    <h3 className="font-serif text-lg font-bold text-beige">No Support Tickets Yet</h3>
+                    <p className="text-xs text-beige-muted mt-1">
+                      Customer queries and product issue reports raised from /account will appear here for review.
+                    </p>
                   </div>
                 )}
               </div>

@@ -19,6 +19,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<Review> Reviews => Set<Review>();
     public DbSet<Coupon> Coupons => Set<Coupon>();
     public DbSet<WishlistItem> WishlistItems => Set<WishlistItem>();
+    public DbSet<SupportTicket> SupportTickets => Set<SupportTicket>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -211,6 +212,39 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
              .WithMany(p => p.WishlistItems)
              .HasForeignKey(w => w.ProductId)
              .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // ── SupportTicket ─────────────────────────────────────────────────
+        modelBuilder.Entity<SupportTicket>(e =>
+        {
+            e.HasKey(t => t.Id);
+            e.HasIndex(t => t.TicketNumber).IsUnique();
+            e.HasIndex(t => new { t.UserId, t.CreatedAt });
+            e.HasIndex(t => new { t.Status, t.CreatedAt });
+            e.Property(t => t.TicketNumber).HasMaxLength(32).IsRequired();
+            e.Property(t => t.OrderNumber).HasMaxLength(64);
+            e.Property(t => t.ProductName).HasMaxLength(500);
+            e.Property(t => t.ProductSlug).HasMaxLength(500);
+            e.Property(t => t.Category).HasMaxLength(120).IsRequired();
+            e.Property(t => t.IssueType).HasMaxLength(120).IsRequired();
+            e.Property(t => t.Subject).HasMaxLength(200).IsRequired();
+            e.Property(t => t.Message).HasMaxLength(2000).IsRequired();
+            e.Property(t => t.AdminResponse).HasMaxLength(2000);
+            e.Property(t => t.ReviewedByAdminName).HasMaxLength(200);
+            e.Property(t => t.Status).HasConversion<string>();
+            e.Property(t => t.Priority).HasConversion<string>();
+            e.HasOne(t => t.User)
+             .WithMany()
+             .HasForeignKey(t => t.UserId)
+             .OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(t => t.Order)
+             .WithMany()
+             .HasForeignKey(t => t.OrderId)
+             .OnDelete(DeleteBehavior.SetNull);
+            e.HasOne(t => t.Product)
+             .WithMany()
+             .HasForeignKey(t => t.ProductId)
+             .OnDelete(DeleteBehavior.SetNull);
         });
     }
 

@@ -29,6 +29,7 @@ import {
   Star,
   Search,
   ExternalLink,
+  X,
 } from 'lucide-react'
 import { useAuthStore } from '@/store/auth'
 import { useCartStore } from '@/store/cart'
@@ -41,7 +42,7 @@ import { Input } from '@/components/ui/Input'
 import api from '@/lib/api'
 import { invalidateFrontendCatalogCache } from '@/lib/catalogCache'
 import toast from 'react-hot-toast'
-import type { Order, Address, MyReview } from '@/types'
+import type { Order, OrderItem, Address, MyReview, SupportTicket, ProductListItem } from '@/types'
 import { cn, formatCurrency, formatDate, formatRelativeDate, optimizeImageUrl } from '@/lib/utils'
 
 function AccountContent() {
@@ -92,14 +93,54 @@ function AccountContent() {
   const [savingProfile, setSavingProfile] = React.useState(false)
 
   // Support / Customer Care ticket state
+  const [tickets, setTickets] = React.useState<SupportTicket[]>([])
+  const [loadingTickets, setLoadingTickets] = React.useState(false)
   const [ticketForm, setTicketForm] = React.useState({
-    category: 'Order Status & Delivery',
+    category: 'Damaged or Wrong Item',
+    issueType: 'Damaged or Defective Product',
+    orderId: '',
     orderNumber: '',
+    productId: '',
+    productName: '',
+    productImageUrl: '',
     subject: '',
     message: '',
   })
+  const [productSearchTerm, setProductSearchTerm] = React.useState('')
+  const [productSearchResults, setProductSearchResults] = React.useState<ProductListItem[]>([])
+  const [searchingProducts, setSearchingProducts] = React.useState(false)
   const [submittingTicket, setSubmittingTicket] = React.useState(false)
+  const [closingTicketId, setClosingTicketId] = React.useState<string | null>(null)
   const [expandedFaq, setExpandedFaq] = React.useState<number | null>(null)
+
+  // Search catalog products for support ticket attachment
+  React.useEffect(() => {
+    const q = productSearchTerm.trim()
+    if (q.length < 2) {
+      setProductSearchResults([])
+      return
+    }
+    let active = true
+    setSearchingProducts(true)
+    const timer = setTimeout(async () => {
+      try {
+        const { data } = await api.get<{ items?: ProductListItem[]; data?: ProductListItem[] }>('/api/products', {
+          params: { search: q, page: 1, pageSize: 6 },
+        })
+        if (active) {
+          setProductSearchResults(data?.items ?? data?.data ?? [])
+        }
+      } catch {
+        if (active) setProductSearchResults([])
+      } finally {
+        if (active) setSearchingProducts(false)
+      }
+    }, 250)
+    return () => {
+      active = false
+      clearTimeout(timer)
+    }
+  }, [productSearchTerm])
 
   // Sync profile form when user updates
   React.useEffect(() => {
@@ -112,18 +153,21 @@ function AccountContent() {
     }
   }, [user])
 
-  // Fetch orders & user's submitted reviews
+  // Fetch orders, user reviews & support tickets
   const fetchOrdersAndReviews = React.useCallback(async () => {
     if (!isAuthenticated) return
     setLoadingOrders(true)
+    setLoadingTickets(true)
     try {
-      const [ordersRes, reviewsRes] = await Promise.all([
+      const [ordersRes, reviewsRes, ticketsRes] = await Promise.all([
         api.get<any>('/api/orders?pageSize=50'),
         api.get<MyReview[]>('/api/reviews/my').catch(() => ({ data: [] as MyReview[] })),
+        api.get<SupportTicket[]>('/api/support/tickets').catch(() => ({ data: [] as SupportTicket[] })),
       ])
       const list: Order[] =
         ordersRes.data?.items ?? ordersRes.data?.data ?? (Array.isArray(ordersRes.data) ? ordersRes.data : [])
       setOrders(list)
+      setTickets(Array.isArray(ticketsRes.data) ? ticketsRes.data : [])
 
       const reviewMap: Record<string, MyReview> = {}
       for (const rev of reviewsRes.data ?? []) {
@@ -138,6 +182,7 @@ function AccountContent() {
       setOrders([])
     } finally {
       setLoadingOrders(false)
+      setLoadingTickets(false)
     }
   }, [isAuthenticated])
 
@@ -370,23 +415,79 @@ function AccountContent() {
     }
   }
 
-  const handleTicketSubmit = (e: React.FormEvent) => {
+  const handleTicketSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (!ticketForm.subject.trim() || !ticketForm.message.trim()) {
+      toast.error('Please enter a subject and details for your support request.')
+      return
+    }
     setSubmittingTicket(true)
-    setTimeout(() => {
-      const tktNum = `TKT-${Math.floor(100000 + Math.random() * 900000)}`
-      toast.success(`Support Ticket ${tktNum} created! Our Concierge will reach out within 2 hours.`, {
-        duration: 6000,
-        icon: '🛎️',
+    try {
+      const { data } = await api.post<SupportTicket>('/api/support/tickets', {
+        category: ticketForm.category,
+        issueType: ticketForm.issueType,
+        orderId: ticketForm.orderId || null,
+        orderNumber: ticketForm.orderNumber.trim() || null,
+        productId: ticketForm.productId || null,
+        subject: ticketForm.subject.trim(),
+        message: ticketForm.message.trim(),
       })
+      setTickets((prev) => [data, ...prev])
       setTicketForm({
-        category: 'Order Status & Delivery',
+        category: 'Damaged or Wrong Item',
+        issueType: 'Damaged or Defective Product',
+        orderId: '',
         orderNumber: '',
+        productId: '',
+        productName: '',
+        productImageUrl: '',
         subject: '',
         message: '',
       })
+      setProductSearchTerm('')
+      setProductSearchResults([])
+      toast.success(`Support Ticket ${data.ticketNumber} submitted to our support team!`, {
+        duration: 5000,
+        icon: '🛎️',
+      })
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message ?? err?.message ?? 'Failed to submit support ticket')
+    } finally {
       setSubmittingTicket(false)
-    }, 1000)
+    }
+  }
+
+  const handleCloseTicket = async (ticketId: string) => {
+    setClosingTicketId(ticketId)
+    try {
+      const { data } = await api.post<SupportTicket>(`/api/support/tickets/${ticketId}/close`)
+      setTickets((prev) => prev.map((t) => (t.id === ticketId ? data : t)))
+      toast.success(`Ticket ${data.ticketNumber} marked as closed.`)
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message ?? err?.message ?? 'Unable to close ticket')
+    } finally {
+      setClosingTicketId(null)
+    }
+  }
+
+  const handleStartSupportForOrderItem = (order: Order, item: OrderItem) => {
+    setTicketForm((prev) => ({
+      ...prev,
+      orderId: order.id,
+      orderNumber: order.orderNumber,
+      productId: item.productId,
+      productName: item.productName ?? 'Selected Item',
+      productImageUrl: item.productImageUrl ?? '',
+      category: 'Damaged or Wrong Item',
+      issueType: 'Damaged or Defective Product',
+      subject: prev.subject || `Assistance with ${item.productName ?? order.orderNumber}`,
+    }))
+    setActiveTab('support')
+    if (typeof window !== 'undefined') {
+      setTimeout(() => {
+        document.getElementById('support-ticket-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      }, 60)
+    }
   }
 
   const getFulfillmentStep = (status: string) => {
@@ -801,9 +902,19 @@ function AccountContent() {
                                     Qty: {item.quantity} × {formatCurrency(item.unitPrice ?? 0)}
                                   </p>
                                 </div>
-                                <span className="text-xs sm:text-sm font-bold text-beige font-mono flex-shrink-0">
-                                  {formatCurrency(item.totalPrice ?? 0)}
-                                </span>
+                                <div className="text-right flex-shrink-0 space-y-1">
+                                  <span className="text-xs sm:text-sm font-bold text-beige font-mono block">
+                                    {formatCurrency(item.totalPrice ?? 0)}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleStartSupportForOrderItem(order, item)}
+                                    className="text-[11px] font-medium text-gold hover:underline inline-flex items-center gap-1"
+                                  >
+                                    <Headphones className="w-3 h-3" />
+                                    Need Help?
+                                  </button>
+                                </div>
                               </div>
 
                               {/* Post-Delivery Rating & Review Display / Composer */}
@@ -1312,12 +1423,25 @@ function AccountContent() {
           </div>
 
           {/* Raise Support Ticket Form */}
-          <div className="bg-surface border border-border rounded-2xl p-6 sm:p-8 space-y-6">
-            <h3 className="font-serif text-xl font-bold text-beige flex items-center gap-2">
-              <Headphones className="w-5 h-5 text-gold" />
-              Raise a Support Request or Return
-            </h3>
-            <form onSubmit={handleTicketSubmit} className="space-y-4 max-w-2xl">
+          <div id="support-ticket-form" className="bg-surface border border-border rounded-2xl p-6 sm:p-8 space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <h3 className="font-serif text-xl font-bold text-beige flex items-center gap-2">
+                  <Headphones className="w-5 h-5 text-gold" />
+                  Raise a Support Ticket for a Product or Order
+                </h3>
+                <p className="text-xs text-beige-muted mt-1">
+                  Select which order &amp; product you need help with and specify the issue so our support team can review and resolve it quickly.
+                </p>
+              </div>
+              {tickets.length > 0 && (
+                <span className="text-xs font-mono font-semibold text-gold bg-gold/10 border border-gold/30 px-3 py-1 rounded-full self-start sm:self-center">
+                  {tickets.filter((t) => t.status === 'Open' || t.status === 'InReview').length} Active Ticket(s)
+                </span>
+              )}
+            </div>
+
+            <form onSubmit={handleTicketSubmit} className="space-y-5 max-w-3xl">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="text-xs font-semibold text-beige-muted block mb-1">
@@ -1328,27 +1452,242 @@ function AccountContent() {
                     onChange={(e) => setTicketForm({ ...ticketForm, category: e.target.value })}
                     className="w-full bg-surface-2 border border-border rounded-xl px-3 py-2 text-xs text-beige focus:outline-none focus:border-gold"
                   >
-                    <option value="Order Status & Delivery">Order Status & Live Tracking</option>
-                    <option value="Request Doorstep Return">Request Doorstep Return or Exchange</option>
-                    <option value="Payment & Refund Inquiry">Payment or Refund Assistance</option>
-                    <option value="Size & Fitting Consultation">Size & Fitting Consultation</option>
-                    <option value="Damaged or Wrong Item">Report Damaged or Defective Item</option>
-                    <option value="General Inquiry">General Feedback or Inquiry</option>
+                    <option value="Damaged or Wrong Item">Damaged, Defective or Wrong Item</option>
+                    <option value="Size & Fitting Exchange">Size &amp; Fitting Exchange</option>
+                    <option value="Order Status & Delivery">Order Status &amp; Delivery</option>
+                    <option value="Request Doorstep Return">Request Doorstep Return or Refund</option>
+                    <option value="Product Quality & Authenticity">Product Quality &amp; Authenticity</option>
+                    <option value="Payment & Refund Inquiry">Payment or Coupon Inquiry</option>
+                    <option value="General Inquiry">General Product / Store Inquiry</option>
                   </select>
                 </div>
 
                 <div>
                   <label className="text-xs font-semibold text-beige-muted block mb-1">
-                    Order Reference (Optional)
+                    Specific Product / Order Issue
                   </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. ORD-20261022-XXXXXX"
-                    value={ticketForm.orderNumber}
-                    onChange={(e) => setTicketForm({ ...ticketForm, orderNumber: e.target.value })}
-                    className="w-full bg-surface-2 border border-border rounded-xl px-3 py-2 text-xs text-beige focus:outline-none focus:border-gold font-mono"
-                  />
+                  <select
+                    value={ticketForm.issueType}
+                    onChange={(e) => setTicketForm({ ...ticketForm, issueType: e.target.value })}
+                    className="w-full bg-surface-2 border border-border rounded-xl px-3 py-2 text-xs text-beige focus:outline-none focus:border-gold"
+                  >
+                    <option value="Damaged or Defective Product">Damaged or Defective Product</option>
+                    <option value="Wrong Item or Wrong Size Delivered">Wrong Item or Wrong Size Delivered</option>
+                    <option value="Size & Fitting Exchange Request">Size &amp; Fitting Exchange Request</option>
+                    <option value="Quality or Finish Concern">Quality or Finish Concern</option>
+                    <option value="Missing Accessories or Parts">Missing Accessories or Parts</option>
+                    <option value="Delivery Delay or Tracking Help">Delivery Delay or Tracking Help</option>
+                    <option value="Refund or Payment Issue">Refund or Payment Issue</option>
+                    <option value="Product Details & Sizing Question">Product Details &amp; Sizing Question</option>
+                    <option value="Other Assistance">Other Assistance</option>
+                  </select>
                 </div>
+              </div>
+
+              {/* Select Order */}
+              <div>
+                <label className="text-xs font-semibold text-beige-muted block mb-1">
+                  Related Order (Optional)
+                </label>
+                <select
+                  value={ticketForm.orderId}
+                  onChange={(e) => {
+                    const selected = orders.find((o) => o.id === e.target.value)
+                    setTicketForm((prev) => ({
+                      ...prev,
+                      orderId: selected?.id ?? '',
+                      orderNumber: selected?.orderNumber ?? '',
+                      productId:
+                        selected && selected.items?.length === 1
+                          ? selected.items[0].productId
+                          : '',
+                      productName:
+                        selected && selected.items?.length === 1
+                          ? selected.items[0].productName ?? ''
+                          : '',
+                      productImageUrl:
+                        selected && selected.items?.length === 1
+                          ? selected.items[0].productImageUrl ?? ''
+                          : '',
+                    }))
+                  }}
+                  className="w-full bg-surface-2 border border-border rounded-xl px-3 py-2 text-xs text-beige focus:outline-none focus:border-gold font-mono"
+                >
+                  <option value="">General query (not linked to a specific order)</option>
+                  {orders.map((ord) => (
+                    <option key={ord.id} value={ord.id}>
+                      {ord.orderNumber} • {String(ord.status)} • {formatCurrency(ord.totalAmount ?? 0)} ({ord.items?.length ?? 0} item{(ord.items?.length ?? 0) === 1 ? '' : 's'})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Product Selector from Selected Order or Catalog Search */}
+              <div className="space-y-3 bg-surface-2/60 border border-border rounded-xl p-4">
+                <div className="flex items-center justify-between gap-2">
+                  <label className="text-xs font-semibold text-beige block">
+                    Which Product Is This Issue About?
+                  </label>
+                  {ticketForm.productId && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setTicketForm((prev) => ({
+                          ...prev,
+                          productId: '',
+                          productName: '',
+                          productImageUrl: '',
+                        }))
+                      }
+                      className="text-[11px] text-beige-muted hover:text-error inline-flex items-center gap-1"
+                    >
+                      <X className="w-3 h-3" />
+                      Clear Product
+                    </button>
+                  )}
+                </div>
+
+                {/* Clickable items from chosen order */}
+                {(() => {
+                  const chosenOrder = orders.find((o) => o.id === ticketForm.orderId)
+                  if (!chosenOrder || !chosenOrder.items?.length) return null
+                  return (
+                    <div className="space-y-1.5">
+                      <span className="text-[11px] text-gold font-medium block">
+                        Select item from order {chosenOrder.orderNumber}:
+                      </span>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {chosenOrder.items.map((item) => {
+                          const isSelected = ticketForm.productId === item.productId
+                          return (
+                            <button
+                              key={item.id}
+                              type="button"
+                              onClick={() =>
+                                setTicketForm((prev) => ({
+                                  ...prev,
+                                  productId: item.productId,
+                                  productName: item.productName ?? 'Product Item',
+                                  productImageUrl: item.productImageUrl ?? '',
+                                }))
+                              }
+                              className={`flex items-center gap-2.5 p-2 rounded-xl border text-left transition-all ${
+                                isSelected
+                                  ? 'border-gold bg-gold/10 shadow-sm'
+                                  : 'border-border bg-surface hover:border-gold/50'
+                              }`}
+                            >
+                              <div className="relative w-10 h-10 rounded-lg overflow-hidden bg-surface-2 flex-shrink-0 border border-border">
+                                {item.productImageUrl ? (
+                                  <Image
+                                    src={optimizeImageUrl(item.productImageUrl, 100)}
+                                    alt={item.productName ?? 'Product'}
+                                    fill
+                                    className="object-cover"
+                                    sizes="40px"
+                                  />
+                                ) : null}
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <p className="text-xs font-semibold text-beige truncate">{item.productName}</p>
+                                <p className="text-[10px] text-beige-muted">
+                                  Qty {item.quantity} • {formatCurrency(item.unitPrice ?? 0)}
+                                </p>
+                              </div>
+                              {isSelected && <CheckCircle2 className="w-4 h-4 text-gold flex-shrink-0" />}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )
+                })()}
+
+                {/* Search catalog products */}
+                <div className="space-y-2">
+                  <div className="relative">
+                    <Search className="w-3.5 h-3.5 text-beige-muted absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    <input
+                      type="text"
+                      value={productSearchTerm}
+                      onChange={(e) => setProductSearchTerm(e.target.value)}
+                      placeholder="Search any product in catalog by name (e.g. Polo T-Shirt, Denim)..."
+                      className="w-full bg-surface border border-border rounded-xl pl-8 pr-3 py-2 text-xs text-beige placeholder:text-beige-muted/60 focus:outline-none focus:border-gold"
+                    />
+                  </div>
+                  {searchingProducts && (
+                    <p className="text-[11px] text-beige-muted">Searching catalog...</p>
+                  )}
+                  {productSearchResults.length > 0 && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-1">
+                      {productSearchResults.map((p) => {
+                        const thumb = p.primaryImageUrl || p.primaryImage || ''
+                        const isSelected = ticketForm.productId === p.id
+                        return (
+                          <button
+                            key={p.id}
+                            type="button"
+                            onClick={() => {
+                              setTicketForm((prev) => ({
+                                ...prev,
+                                productId: p.id,
+                                productName: p.name,
+                                productImageUrl: thumb,
+                              }))
+                              setProductSearchTerm('')
+                              setProductSearchResults([])
+                            }}
+                            className={`flex items-center gap-2.5 p-2 rounded-xl border text-left transition-all ${
+                              isSelected
+                                ? 'border-gold bg-gold/10'
+                                : 'border-border bg-surface hover:border-gold/50'
+                            }`}
+                          >
+                            <div className="relative w-9 h-9 rounded-lg overflow-hidden bg-surface-2 flex-shrink-0 border border-border">
+                              {thumb ? (
+                                <Image
+                                  src={optimizeImageUrl(thumb, 100)}
+                                  alt={p.name}
+                                  fill
+                                  className="object-cover"
+                                  sizes="36px"
+                                />
+                              ) : null}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="text-xs font-semibold text-beige truncate">{p.name}</p>
+                              <p className="text-[10px] text-gold font-mono">{formatCurrency(p.price)}</p>
+                            </div>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* Selected Product Confirmation */}
+                {ticketForm.productId && ticketForm.productName && (
+                  <div className="flex items-center gap-3 p-2.5 rounded-xl bg-surface border border-gold/40">
+                    <div className="relative w-10 h-10 rounded-lg overflow-hidden bg-surface-2 flex-shrink-0 border border-border">
+                      {ticketForm.productImageUrl ? (
+                        <Image
+                          src={optimizeImageUrl(ticketForm.productImageUrl, 100)}
+                          alt={ticketForm.productName}
+                          fill
+                          className="object-cover"
+                          sizes="40px"
+                        />
+                      ) : null}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-gold block">
+                        Attached Product
+                      </span>
+                      <p className="text-xs font-semibold text-beige truncate">{ticketForm.productName}</p>
+                    </div>
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                  </div>
+                )}
               </div>
 
               <div>
@@ -1357,24 +1696,28 @@ function AccountContent() {
                 </label>
                 <input
                   type="text"
-                  placeholder="Brief summary of your request"
+                  placeholder="Brief summary of the issue (e.g. Stitch defect near collar / Size M feels tight)"
                   value={ticketForm.subject}
                   onChange={(e) => setTicketForm({ ...ticketForm, subject: e.target.value })}
                   required
+                  minLength={3}
+                  maxLength={200}
                   className="w-full bg-surface-2 border border-border rounded-xl px-3 py-2 text-xs text-beige focus:outline-none focus:border-gold"
                 />
               </div>
 
               <div>
                 <label className="text-xs font-semibold text-beige-muted block mb-1">
-                  Detailed Message
+                  Detailed Issue Description
                 </label>
                 <textarea
                   rows={4}
-                  placeholder="Please describe how our concierge team can assist you..."
+                  placeholder="Describe what happened with the product or order and how you would like our support team to resolve it..."
                   value={ticketForm.message}
                   onChange={(e) => setTicketForm({ ...ticketForm, message: e.target.value })}
                   required
+                  minLength={5}
+                  maxLength={2000}
                   className="w-full bg-surface-2 border border-border rounded-xl px-3 py-2 text-xs text-beige focus:outline-none focus:border-gold resize-none"
                 />
               </div>
@@ -1387,9 +1730,147 @@ function AccountContent() {
                 className="flex items-center gap-2 text-xs"
               >
                 <Send className="w-4 h-4" />
-                {submittingTicket ? 'Submitting...' : 'Submit Support Ticket'}
+                {submittingTicket ? 'Sending to Support Team...' : 'Submit Support Ticket'}
               </Button>
             </form>
+          </div>
+
+          {/* Customer's Raised Support Tickets & Support Team Replies */}
+          <div className="bg-surface border border-border rounded-2xl p-6 sm:p-8 space-y-5">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h3 className="font-serif text-xl font-bold text-beige flex items-center gap-2">
+                  <MessageSquare className="w-5 h-5 text-gold" />
+                  My Support Tickets ({tickets.length})
+                </h3>
+                <p className="text-xs text-beige-muted mt-0.5">
+                  Track status updates and direct responses from our Concierge &amp; Support Team.
+                </p>
+              </div>
+              <Button variant="outline" size="sm" onClick={fetchOrdersAndReviews} className="text-xs">
+                Refresh Status
+              </Button>
+            </div>
+
+            {loadingTickets ? (
+              <div className="h-28 rounded-xl bg-surface-2 animate-pulse" />
+            ) : tickets.length === 0 ? (
+              <div className="p-8 rounded-xl bg-surface-2/60 border border-border text-center text-xs text-beige-muted">
+                No support tickets submitted yet. Use the form above if you need assistance with any item or order.
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {tickets.map((tkt) => {
+                  const statusTone =
+                    tkt.status === 'Resolved'
+                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                      : tkt.status === 'InReview'
+                      ? 'bg-sky-50 text-sky-700 border-sky-200'
+                      : tkt.status === 'Closed'
+                      ? 'bg-surface-2 text-beige-muted border-border'
+                      : 'bg-amber-50 text-amber-800 border-amber-200'
+
+                  return (
+                    <div
+                      key={tkt.id}
+                      className="rounded-2xl border border-border bg-surface-2/40 p-4 sm:p-5 space-y-3"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-mono text-xs font-bold text-gold">
+                            {tkt.ticketNumber}
+                          </span>
+                          <span className={`text-[10px] font-bold uppercase px-2.5 py-0.5 rounded-full border ${statusTone}`}>
+                            {tkt.status === 'InReview' ? 'In Review' : tkt.status}
+                          </span>
+                          <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded bg-surface border border-border text-beige-muted">
+                            {tkt.priority} Priority
+                          </span>
+                        </div>
+                        <span className="text-[11px] text-beige-muted font-mono">
+                          {formatDate(tkt.createdAt)}
+                        </span>
+                      </div>
+
+                      {tkt.productName && (
+                        <div className="flex items-center gap-3 p-2.5 rounded-xl bg-surface border border-border">
+                          <div className="relative w-10 h-10 rounded-lg overflow-hidden bg-surface-2 flex-shrink-0 border border-border">
+                            {tkt.productImageUrl ? (
+                              <Image
+                                src={optimizeImageUrl(tkt.productImageUrl, 100)}
+                                alt={tkt.productName}
+                                fill
+                                className="object-cover"
+                                sizes="40px"
+                              />
+                            ) : null}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            {tkt.productSlug ? (
+                              <Link
+                                href={`/products/${tkt.productSlug}`}
+                                className="text-xs font-semibold text-beige hover:text-gold transition-colors truncate block"
+                              >
+                                {tkt.productName}
+                              </Link>
+                            ) : (
+                              <p className="text-xs font-semibold text-beige truncate">{tkt.productName}</p>
+                            )}
+                            <p className="text-[11px] text-beige-muted">
+                              {tkt.category} • <span className="text-gold font-medium">{tkt.issueType}</span>
+                              {tkt.orderNumber ? ` • Order ${tkt.orderNumber}` : ''}
+                            </p>
+                          </div>
+                        </div>
+                      )}
+
+                      {!tkt.productName && (
+                        <p className="text-[11px] text-beige-muted">
+                          {tkt.category} • <span className="text-gold font-medium">{tkt.issueType}</span>
+                          {tkt.orderNumber ? ` • Order ${tkt.orderNumber}` : ''}
+                        </p>
+                      )}
+
+                      <div>
+                        <h4 className="text-sm font-bold text-beige">{tkt.subject}</h4>
+                        <p className="text-xs text-beige-muted mt-1 leading-relaxed">{tkt.message}</p>
+                      </div>
+
+                      {tkt.adminResponse && (
+                        <div className="rounded-xl bg-emerald-50/70 border border-emerald-200 p-3.5 space-y-1.5">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-800 flex items-center gap-1.5">
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                              Support Team Resolution
+                              {tkt.reviewedByAdminName ? ` (${tkt.reviewedByAdminName})` : ''}
+                            </span>
+                            {tkt.resolvedAt && (
+                              <span className="text-[10px] font-mono text-emerald-700">
+                                {formatDate(tkt.resolvedAt)}
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-xs text-emerald-950 leading-relaxed">{tkt.adminResponse}</p>
+                        </div>
+                      )}
+
+                      {tkt.status !== 'Closed' && (
+                        <div className="flex justify-end pt-1">
+                          <button
+                            type="button"
+                            disabled={closingTicketId === tkt.id}
+                            onClick={() => handleCloseTicket(tkt.id)}
+                            className="text-[11px] font-medium text-beige-muted hover:text-beige border border-border rounded-lg px-2.5 py-1 hover:bg-surface transition-colors disabled:opacity-50"
+                          >
+                            {closingTicketId === tkt.id ? 'Closing...' : 'Close Ticket'}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
           </div>
 
           {/* Frequently Asked Questions */}

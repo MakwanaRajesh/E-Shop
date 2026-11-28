@@ -290,6 +290,34 @@ export interface MyReview {
   createdAt: string
 }
 
+export type SupportTicketStatus = 'Open' | 'InReview' | 'Resolved' | 'Closed'
+export type SupportTicketPriority = 'Low' | 'Normal' | 'High' | 'Urgent'
+
+export interface SupportTicket {
+  id: string
+  ticketNumber: string
+  userId: string
+  customerName: string
+  customerEmail: string
+  orderId?: string | null
+  orderNumber?: string | null
+  productId?: string | null
+  productName?: string | null
+  productSlug?: string | null
+  productImageUrl?: string | null
+  category: string
+  issueType: string
+  subject: string
+  message: string
+  status: SupportTicketStatus
+  priority: SupportTicketPriority
+  adminResponse?: string | null
+  reviewedByAdminName?: string | null
+  createdAt: string
+  updatedAt: string
+  resolvedAt?: string | null
+}
+
 export interface CreateReviewRequest {
   productId: string
   rating: number
