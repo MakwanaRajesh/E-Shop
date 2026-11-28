@@ -871,14 +871,27 @@ public class AdminController(
             return BadRequest(new { message = "Administrator accounts cannot be suspended via this endpoint." });
 
         user.IsActive = !user.IsActive;
+        var sessionIds = new List<Guid>();
         if (!user.IsActive)
         {
             user.RefreshToken = null;
             user.RefreshTokenExpiry = null;
+
+            var now = DateTime.UtcNow;
+            var activeSessions = await _db.UserSessions
+                .Where(s => s.UserId == id && s.RevokedAt == null)
+                .ToListAsync();
+            foreach (var s in activeSessions)
+            {
+                s.RevokedAt = now;
+                sessionIds.Add(s.Id);
+            }
         }
         _db.Users.Update(user);
         await _db.SaveChangesAsync();
         _cache.Remove($"user-auth:{id}");
+        foreach (var sid in sessionIds)
+            _cache.Remove($"user-auth:{id}:{sid}");
 
         return Ok(new { message = $"User is now {(user.IsActive ? "Active" : "Suspended / Blocked")}.", isActive = user.IsActive });
     }

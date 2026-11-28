@@ -49,6 +49,8 @@ import {
   Check,
   MapPin,
   ArrowRight,
+  ArrowLeft,
+  Download,
   Wallet,
 } from 'lucide-react'
 import { useAuthStore } from '@/store/auth'
@@ -64,6 +66,7 @@ import toast, { Toaster } from 'react-hot-toast'
 import { AuthModal } from '@/components/auth/AuthModal'
 import type { DashboardStats, Order, ProductListItem, Category, SupportTicket } from '@/types'
 import { formatCurrency, formatDate } from '@/lib/utils'
+import { generateTaxInvoicePdfBlob } from '@/lib/invoicePdf'
 
 const safeStr = (s?: string | null) => (s ?? '').toLowerCase().trim()
 const isValidImageUrl = (url?: string | null) =>
@@ -331,9 +334,15 @@ function AdminContent() {
         if (!verified) {
           setPortalError('Access denied: Administrator privileges are verified server-side.')
         }
-      } catch {
+      } catch (err: any) {
         if (!cancelled) {
+          const code = err?.statusCode ?? 0
           setServerVerifiedAdmin(false)
+          if (code !== 401 && code !== 403) {
+            setPortalError(
+              err?.message ?? 'Unable to verify administrator session right now. Please click Retry.',
+            )
+          }
         }
       } finally {
         if (!cancelled) setRoleCheckLoading(false)
@@ -1019,6 +1028,223 @@ function AdminContent() {
       toast.error(err?.response?.data?.message ?? err?.message ?? 'Failed to process refund')
     } finally {
       setProcessingReturnId(null)
+    }
+  }
+
+  // Close Tax Invoice or Inspect Order cleanly on Escape key
+  React.useEffect(() => {
+    if (!showInvoiceModal && !inspectOrder) return
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (showInvoiceModal) setShowInvoiceModal(false)
+        else if (inspectOrder) setInspectOrder(null)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [showInvoiceModal, inspectOrder])
+
+  const buildTaxInvoiceHtml = (ord: Order) => {
+    const esc = (v?: string | number | null) =>
+      String(v ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;')
+
+    const total = ord.totalAmount ?? ord.total ?? 0
+    const taxable = total / 1.18
+    const cgst = (total * 0.09) / 1.18
+    const sgst = (total * 0.09) / 1.18
+    const itemRows = (ord.items ?? [])
+      .map((item, idx) => {
+        const netRate = item.unitPrice / 1.18
+        const gstLine = (item.unitPrice - netRate) * item.quantity
+        const slug = item.product?.slug || (item as any).productSlug || ''
+        return `
+          <tr>
+            <td>${idx + 1}</td>
+            <td>
+              <strong>${esc(item.productName)}</strong>
+              ${slug ? `<div class="sku">SKU: ${esc(slug)}</div>` : ''}
+            </td>
+            <td class="mono">6205 / 9102</td>
+            <td class="center">${item.quantity}</td>
+            <td class="right mono">${esc(formatCurrency(netRate))}</td>
+            <td class="right mono">${esc(formatCurrency(gstLine))}</td>
+            <td class="right mono bold">${esc(formatCurrency(item.totalPrice))}</td>
+          </tr>`
+      })
+      .join('')
+
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Tax Invoice INV-${esc(ord.orderNumber)} - NEXUS Luxury Atelier</title>
+  <style>
+    @page { size: A4; margin: 14mm; }
+    * { box-sizing: border-box; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; color: #111111; background: #ffffff; margin: 0; padding: 24px; line-height: 1.5; }
+    .invoice-box { max-width: 820px; margin: 0 auto; border: 1px solid #d6d3d1; border-radius: 12px; padding: 28px; }
+    .header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; border-bottom: 2px solid #C5A059; padding-bottom: 18px; margin-bottom: 18px; }
+    .brand { font-family: Georgia, serif; font-size: 24px; font-weight: 700; letter-spacing: 1px; margin: 0; color: #111111; }
+    .tagline { font-size: 12px; color: #57534e; margin: 4px 0 8px; }
+    .meta { font-size: 12px; color: #44403c; }
+    .mono { font-family: Consolas, monospace; }
+    .badge { display: inline-block; background: #faf5ea; border: 1px solid #C5A059; color: #7a5d24; padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 700; text-transform: uppercase; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 18px; }
+    .card { border: 1px solid #e7e5e4; border-radius: 8px; padding: 14px; font-size: 12px; background: #faf8f5; }
+    .card-title { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: #9a7b38; margin: 0 0 6px; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 18px; font-size: 12px; }
+    th { background: #f5f2eb; text-align: left; padding: 9px 10px; border-bottom: 1px solid #d6d3d1; font-size: 10px; text-transform: uppercase; color: #57534e; }
+    td { padding: 10px; border-bottom: 1px solid #e7e5e4; vertical-align: top; }
+    .sku { font-size: 10px; color: #78716c; font-family: Consolas, monospace; margin-top: 2px; }
+    .right { text-align: right; }
+    .center { text-align: center; }
+    .bold { font-weight: 700; }
+    .totals { display: flex; justify-content: flex-end; }
+    .totals-box { width: 300px; font-size: 12px; }
+    .totals-row { display: flex; justify-content: space-between; padding: 4px 0; color: #57534e; }
+    .totals-row.final { border-top: 2px solid #111111; margin-top: 6px; padding-top: 8px; font-size: 15px; font-weight: 700; color: #111111; }
+    .footer { border-top: 1px solid #e7e5e4; margin-top: 22px; padding-top: 12px; font-size: 11px; color: #57534e; display: flex; justify-content: space-between; align-items: center; }
+  </style>
+</head>
+<body>
+  <div class="invoice-box">
+    <div class="header">
+      <div>
+        <h1 class="brand">NEXUS LUXURY ATELIER</h1>
+        <p class="tagline">High-End Couture, Horology &amp; Fine Living</p>
+        <div class="meta">
+          <div>2 Maruti Chock, Rajkot, Gujarat, 360005, India</div>
+          <div>Email: nexustech1003@gmail.com | Helpline: +91 12345 67890</div>
+          <div class="mono bold">GSTIN: 24AAACN1234F1Z5 &bull; CIN: U74999GJ2026PTC109842</div>
+        </div>
+      </div>
+      <div class="right">
+        <div class="badge">Tax Invoice / Bill of Supply</div>
+        <div class="meta mono" style="margin-top:8px;">
+          <div>Invoice #: <strong>INV-${esc(ord.orderNumber)}</strong></div>
+          <div>Order Date: ${esc(formatDate(ord.createdAt))}</div>
+          <div>Place of Supply: Gujarat (State Code: 24)</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <div class="card-title">Billed &amp; Shipped To</div>
+        <div style="font-weight:700;font-size:13px;">${esc(ord.shippingName)}</div>
+        <div style="margin-top:4px;color:#44403c;">
+          ${esc(ord.shippingAddressLine1)}${ord.shippingAddressLine2 ? `, ${esc(ord.shippingAddressLine2)}` : ''}<br/>
+          ${esc(ord.shippingCity)}, ${esc(ord.shippingState)} - ${esc(ord.shippingPinCode)}
+        </div>
+        <div class="mono" style="margin-top:6px;">Mobile: ${esc(ord.shippingPhone)}</div>
+      </div>
+      <div class="card">
+        <div class="card-title">Payment &amp; Logistics Info</div>
+        <div class="totals-row"><span>Payment Mode:</span><strong>${esc(ord.paymentMethod)}</strong></div>
+        <div class="totals-row"><span>Payment Status:</span><strong>${esc(ord.paymentStatus)}</strong></div>
+        <div class="totals-row"><span>Courier Tracking:</span><span class="mono">${esc(ord.trackingNumber || 'Pending Courier Dispatch')}</span></div>
+        <div class="totals-row"><span>Order Number:</span><span class="mono">${esc(ord.orderNumber)}</span></div>
+      </div>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Item Description</th>
+          <th>HSN Code</th>
+          <th class="center">Qty</th>
+          <th class="right">Unit Rate</th>
+          <th class="right">GST (18%)</th>
+          <th class="right">Total Amount</th>
+        </tr>
+      </thead>
+      <tbody>${itemRows}</tbody>
+    </table>
+
+    <div class="totals">
+      <div class="totals-box">
+        <div class="totals-row"><span>Taxable Subtotal:</span><span class="mono">${esc(formatCurrency(taxable))}</span></div>
+        <div class="totals-row"><span>CGST (9.0%):</span><span class="mono">${esc(formatCurrency(cgst))}</span></div>
+        <div class="totals-row"><span>SGST (9.0%):</span><span class="mono">${esc(formatCurrency(sgst))}</span></div>
+        <div class="totals-row"><span>Doorstep Delivery Charges:</span><strong>${(ord.shippingCost ?? 0) === 0 ? 'FREE' : esc(formatCurrency(ord.shippingCost ?? 0))}</strong></div>
+        <div class="totals-row"><span>Platform Fee:</span><span class="mono">${esc(formatCurrency(ord.platformFee ?? 0))}</span></div>
+        <div class="totals-row final"><span>Total Invoice Value:</span><span>${esc(formatCurrency(total))}</span></div>
+      </div>
+    </div>
+
+    <div class="footer">
+      <span>Computer generated GST tax invoice issued by NEXUS E-Commerce Retail Pvt. Ltd. No physical signature required.</span>
+      <strong>For NEXUS LUXURY ATELIER</strong>
+    </div>
+  </div>
+</body>
+</html>`
+  }
+
+  const handlePrintInvoice = (ord: Order) => {
+    try {
+      const html = buildTaxInvoiceHtml(ord)
+      const iframe = document.createElement('iframe')
+      iframe.style.position = 'fixed'
+      iframe.style.right = '0'
+      iframe.style.bottom = '0'
+      iframe.style.width = '0'
+      iframe.style.height = '0'
+      iframe.style.border = '0'
+      iframe.setAttribute('aria-hidden', 'true')
+      document.body.appendChild(iframe)
+
+      const doc = iframe.contentDocument || iframe.contentWindow?.document
+      if (!doc || !iframe.contentWindow) {
+        iframe.remove()
+        toast.error('Unable to open print preview in this browser.')
+        return
+      }
+
+      doc.open()
+      doc.write(html)
+      doc.close()
+
+      const cleanup = () => {
+        setTimeout(() => {
+          iframe.remove()
+        }, 400)
+      }
+
+      iframe.contentWindow.onafterprint = cleanup
+      setTimeout(() => {
+        try {
+          iframe.contentWindow?.focus()
+          iframe.contentWindow?.print()
+        } finally {
+          cleanup()
+        }
+      }, 150)
+    } catch {
+      toast.error('Print preview failed. Please use Download Invoice instead.')
+    }
+  }
+
+  const handleDownloadInvoice = (ord: Order) => {
+    try {
+      const pdfBlob = generateTaxInvoicePdfBlob(ord)
+      const url = URL.createObjectURL(pdfBlob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `Tax-Invoice-INV-${ord.orderNumber}.pdf`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      setTimeout(() => URL.revokeObjectURL(url), 1000)
+      toast.success(`Downloaded Tax-Invoice-INV-${ord.orderNumber}.pdf`)
+    } catch {
+      toast.error('Failed to download invoice PDF.')
     }
   }
 
@@ -5500,8 +5726,14 @@ Nexus Linen Shirt | 3499 | 4999 | 15 | NX-M-02 | https://images.unsplash.com/...
 
       {/* ─── MODAL: INSPECT / MANAGE ORDER ────────────────────────────────── */}
       {inspectOrder && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-surface border border-gold/40 rounded-2xl max-w-2xl w-full p-6 sm:p-8 space-y-6 shadow-2xl animate-slide-up my-8">
+        <div
+          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-start justify-center p-4 sm:p-6 overflow-y-auto"
+          onClick={() => setInspectOrder(null)}
+        >
+          <div
+            className="bg-surface border border-gold/40 rounded-2xl max-w-2xl w-full p-6 sm:p-8 space-y-6 shadow-2xl animate-slide-up my-4 sm:my-8"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="flex items-center justify-between border-b border-border pb-3">
               <div>
                 <div className="flex items-center gap-3">
@@ -5793,32 +6025,65 @@ Nexus Linen Shirt | 3499 | 4999 | 15 | NX-M-02 | https://images.unsplash.com/...
 
       {/* ─── MODAL: PRINTABLE TAX INVOICE ───────────────────────────────── */}
       {showInvoiceModal && inspectOrder && (
-        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-surface border border-gold/40 rounded-2xl max-w-3xl w-full p-6 sm:p-10 space-y-6 shadow-2xl animate-slide-up my-8 text-beige print:bg-white print:text-black print:p-0 print:border-none print:shadow-none">
-            {/* Header / Actions toolbar */}
-            <div className="flex items-center justify-between border-b border-border pb-4 print:hidden">
-              <div className="flex items-center gap-2">
-                <FileText className="w-5 h-5 text-gold" />
-                <h3 className="font-serif text-lg font-bold text-beige">Official GST Tax Invoice</h3>
+        <div
+          className="fixed inset-0 z-[60] bg-black/85 backdrop-blur-sm flex items-start justify-center p-4 sm:p-6 overflow-y-auto"
+          onClick={() => setShowInvoiceModal(false)}
+        >
+          <div
+            className="bg-surface border border-gold/40 rounded-2xl max-w-3xl w-full shadow-2xl animate-slide-up my-4 sm:my-8 text-beige overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Sticky Top Header / Actions toolbar */}
+            <div className="sticky top-0 z-10 bg-white/95 backdrop-blur-sm flex flex-wrap items-center justify-between gap-3 border-b border-border px-6 sm:px-8 py-4">
+              <div className="flex items-center gap-2.5">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowInvoiceModal(false)}
+                  className="flex items-center gap-1.5 text-xs font-semibold"
+                >
+                  <ArrowLeft className="w-3.5 h-3.5" />
+                  <span>Back to Order</span>
+                </Button>
+                <div className="flex items-center gap-2 pl-1">
+                  <FileText className="w-4 h-4 text-gold" />
+                  <h3 className="font-serif text-base sm:text-lg font-bold text-beige">Official GST Tax Invoice</h3>
+                </div>
               </div>
               <div className="flex items-center gap-2">
                 <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleDownloadInvoice(inspectOrder)}
+                  className="flex items-center gap-1.5 text-xs font-semibold border-gold/50 text-beige hover:border-gold"
+                >
+                  <Download className="w-3.5 h-3.5 text-gold" />
+                  <span>Download Invoice</span>
+                </Button>
+                <Button
+                  type="button"
                   variant="primary"
                   size="sm"
-                  onClick={() => window.print()}
+                  onClick={() => handlePrintInvoice(inspectOrder)}
                   className="flex items-center gap-1.5 text-xs font-semibold"
                 >
                   <Printer className="w-3.5 h-3.5" />
-                  Print / Save PDF
+                  <span>Print / Save PDF</span>
                 </Button>
                 <button
+                  type="button"
                   onClick={() => setShowInvoiceModal(false)}
+                  aria-label="Close tax invoice"
                   className="w-8 h-8 rounded-full bg-surface-2 flex items-center justify-center text-beige-muted hover:text-beige"
                 >
                   <X className="w-4 h-4" />
                 </button>
               </div>
             </div>
+
+            <div className="p-6 sm:p-8 space-y-6">
 
             {/* Invoice Printable Body */}
             <div className="space-y-6 text-sm bg-surface-2/40 print:bg-transparent p-6 rounded-2xl border border-border print:border-none">
@@ -5991,6 +6256,43 @@ Nexus Linen Shirt | 3499 | 4999 | 15 | NX-M-02 | https://images.unsplash.com/...
                   For NEXUS LUXURY ATELIER
                 </div>
               </div>
+            </div>
+
+            {/* Bottom Back & Action Bar */}
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-border">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setShowInvoiceModal(false)}
+                className="flex items-center gap-1.5 text-xs font-semibold"
+              >
+                <ArrowLeft className="w-3.5 h-3.5" />
+                <span>Back to Order Details</span>
+              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleDownloadInvoice(inspectOrder)}
+                  className="flex items-center gap-1.5 text-xs font-semibold"
+                >
+                  <Download className="w-3.5 h-3.5 text-gold" />
+                  <span>Download Invoice</span>
+                </Button>
+                <Button
+                  type="button"
+                  variant="primary"
+                  size="sm"
+                  onClick={() => handlePrintInvoice(inspectOrder)}
+                  className="flex items-center gap-1.5 text-xs font-semibold"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  <span>Print / Save PDF</span>
+                </Button>
+              </div>
+            </div>
             </div>
           </div>
         </div>

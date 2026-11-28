@@ -156,18 +156,54 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 
                 var sp = context.HttpContext.RequestServices;
                 var cache = sp.GetRequiredService<IMemoryCache>();
-                var cacheKey = $"user-auth:{userId}";
+
+                var sidRaw = context.Principal?.FindFirst(JwtRegisteredClaimNames.Sid)?.Value
+                             ?? context.Principal?.FindFirst(ClaimTypes.Sid)?.Value
+                             ?? context.Principal?.FindFirst("sid")?.Value;
+                var hasSid = Guid.TryParse(sidRaw, out var sessionId) && sessionId != Guid.Empty;
+                var cacheKey = hasSid ? $"user-auth:{userId}:{sessionId}" : $"user-auth:{userId}";
 
                 var authState = await cache.GetOrCreateAsync(cacheKey, async entry =>
                 {
                     entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(20);
                     var db = sp.GetRequiredService<AppDbContext>();
+                    var now = DateTime.UtcNow;
                     var u = await db.Users
                         .AsNoTracking()
                         .Where(x => x.Id == userId)
-                        .Select(x => new { x.IsActive, x.Role, HasSession = x.RefreshToken != null })
+                        .Select(x => new
+                        {
+                            x.IsActive,
+                            x.Role,
+                            HasLegacyToken = x.RefreshToken != null
+                        })
                         .FirstOrDefaultAsync(context.HttpContext.RequestAborted);
-                    return u is null ? null : new AuthSessionSnapshot(u.IsActive, u.Role, u.HasSession);
+                    if (u is null) return null;
+
+                    bool hasSession;
+                    if (hasSid)
+                    {
+                        hasSession = await db.UserSessions
+                            .AsNoTracking()
+                            .AnyAsync(
+                                s => s.Id == sessionId &&
+                                     s.UserId == userId &&
+                                     s.RevokedAt == null &&
+                                     s.ExpiresAt > now,
+                                context.HttpContext.RequestAborted);
+                    }
+                    else
+                    {
+                        hasSession = u.HasLegacyToken || await db.UserSessions
+                            .AsNoTracking()
+                            .AnyAsync(
+                                s => s.UserId == userId &&
+                                     s.RevokedAt == null &&
+                                     s.ExpiresAt > now,
+                                context.HttpContext.RequestAborted);
+                    }
+
+                    return new AuthSessionSnapshot(u.IsActive, u.Role, hasSession);
                 });
 
                 if (authState is null || !authState.IsActive || !authState.HasSession)

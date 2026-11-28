@@ -15,27 +15,31 @@ public class TokenService(IConfiguration configuration)
 {
     private readonly IConfiguration _configuration = configuration;
 
-    /// <summary>Generates a signed JWT access token for the given user.</summary>
-    public string GenerateAccessToken(User user)
+    /// <summary>Generates a signed JWT access token for the given user and session.</summary>
+    public string GenerateAccessToken(User user, Guid? sessionId = null)
     {
         var key = new SymmetricSecurityKey(
             Encoding.UTF8.GetBytes(_configuration["Jwt:Key"]!));
         var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
-        var claims = new[]
+        var claims = new List<Claim>
         {
-            new Claim(JwtRegisteredClaimNames.Sub,  user.Id.ToString()),
-            new Claim(JwtRegisteredClaimNames.Email, user.Email),
-            new Claim(JwtRegisteredClaimNames.Jti,  Guid.NewGuid().ToString()),
-            new Claim(ClaimTypes.NameIdentifier,     user.Id.ToString()),
-            new Claim(ClaimTypes.Email,              user.Email),
-            new Claim(ClaimTypes.Role,               user.Role.ToString()),
-            new Claim("firstName",                   user.FirstName),
-            new Claim("lastName",                    user.LastName),
+            new(JwtRegisteredClaimNames.Sub,  user.Id.ToString()),
+            new(JwtRegisteredClaimNames.Email, user.Email),
+            new(JwtRegisteredClaimNames.Jti,  Guid.NewGuid().ToString()),
+            new(ClaimTypes.NameIdentifier,     user.Id.ToString()),
+            new(ClaimTypes.Email,              user.Email),
+            new(ClaimTypes.Role,               user.Role.ToString()),
+            new("firstName",                   user.FirstName),
+            new("lastName",                    user.LastName),
         };
 
-        var expiryMinutes = int.Parse(
-            _configuration["Jwt:AccessTokenExpiryMinutes"] ?? "15");
+        if (sessionId.HasValue && sessionId.Value != Guid.Empty)
+        {
+            claims.Add(new Claim(JwtRegisteredClaimNames.Sid, sessionId.Value.ToString()));
+        }
+
+        var expiryMinutes = GetAccessTokenExpiryMinutes();
 
         var token = new JwtSecurityToken(
             issuer:             _configuration["Jwt:Issuer"],
@@ -67,7 +71,11 @@ public class TokenService(IConfiguration configuration)
 
     /// <summary>Returns configured refresh token lifetime in days.</summary>
     public int GetRefreshTokenExpiryDays() =>
-        int.TryParse(_configuration["Jwt:RefreshTokenExpiryDays"], out var days) && days > 0 ? days : 7;
+        int.TryParse(_configuration["Jwt:RefreshTokenExpiryDays"], out var days) && days > 0 ? days : 30;
+
+    /// <summary>Returns configured access token lifetime in minutes.</summary>
+    public int GetAccessTokenExpiryMinutes() =>
+        int.TryParse(_configuration["Jwt:AccessTokenExpiryMinutes"], out var mins) && mins > 0 ? mins : 60;
 
     /// <summary>
     /// Validates an (optionally expired) JWT and returns its ClaimsPrincipal.
@@ -106,10 +114,6 @@ public class TokenService(IConfiguration configuration)
     }
 
     /// <summary>Returns the UTC expiry time for a freshly issued access token.</summary>
-    public DateTime GetAccessTokenExpiry()
-    {
-        var expiryMinutes = int.Parse(
-            _configuration["Jwt:AccessTokenExpiryMinutes"] ?? "15");
-        return DateTime.UtcNow.AddMinutes(expiryMinutes);
-    }
+    public DateTime GetAccessTokenExpiry() =>
+        DateTime.UtcNow.AddMinutes(GetAccessTokenExpiryMinutes());
 }

@@ -48,9 +48,10 @@ public class RateLimitingMiddleware(RequestDelegate next, IMemoryCache cache, Se
             return;
         }
 
-        // Determine which limit applies
+        // Apply strict credential-stuffing limit specifically on login/register endpoints
         var path       = context.Request.Path.Value ?? "";
-        var isAuthPath = path.StartsWith("/api/auth", StringComparison.OrdinalIgnoreCase);
+        var isAuthPath = path.Equals("/api/auth/login", StringComparison.OrdinalIgnoreCase) ||
+                         path.Equals("/api/auth/register", StringComparison.OrdinalIgnoreCase);
         var limit      = isAuthPath ? AuthLimit : DefaultLimit;
         var key        = $"rl:{ip}:{(isAuthPath ? "auth" : "default")}";
 

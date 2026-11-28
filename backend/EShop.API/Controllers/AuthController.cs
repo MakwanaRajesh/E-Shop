@@ -1,4 +1,6 @@
+using System.IdentityModel.Tokens.Jwt;
 using System.Net.Mail;
+using System.Security.Claims;
 using System.Text.RegularExpressions;
 using EShop.API.Extensions;
 using EShop.API.Services;
@@ -59,16 +61,10 @@ public class AuthController(
             IsEmailVerified = false
         };
 
-        var refreshToken = _tokenService.GenerateRefreshToken();
-        var refreshDays  = _tokenService.GetRefreshTokenExpiryDays();
-        user.RefreshToken       = TokenService.HashRefreshToken(refreshToken);
-        user.RefreshTokenExpiry = DateTime.UtcNow.AddDays(refreshDays);
-
-        await _db.Users.AddAsync(user);
-        await _uow.SaveChangesAsync();
+        var (refreshToken, sessionId) = await CreateUserSessionAsync(user);
         _cache.Remove($"user-auth:{user.Id}");
 
-        var accessToken = _tokenService.GenerateAccessToken(user);
+        var accessToken = _tokenService.GenerateAccessToken(user, sessionId);
         return Ok(BuildAuthResponse(user, accessToken, refreshToken));
     }
 
@@ -101,15 +97,10 @@ public class AuthController(
 
         _securityMonitor.ResetFailedLogins(email);
 
-        var refreshToken = _tokenService.GenerateRefreshToken();
-        var refreshDays  = _tokenService.GetRefreshTokenExpiryDays();
-        user.RefreshToken       = TokenService.HashRefreshToken(refreshToken);
-        user.RefreshTokenExpiry = DateTime.UtcNow.AddDays(refreshDays);
-        _db.Users.Update(user);
-        await _uow.SaveChangesAsync();
+        var (refreshToken, sessionId) = await CreateUserSessionAsync(user);
         _cache.Remove($"user-auth:{user.Id}");
 
-        var accessToken = _tokenService.GenerateAccessToken(user);
+        var accessToken = _tokenService.GenerateAccessToken(user, sessionId);
         return Ok(BuildAuthResponse(user, accessToken, refreshToken));
     }
 
@@ -121,27 +112,60 @@ public class AuthController(
             return Unauthorized(new { message = "Refresh token is required." });
 
         var hashedToken = TokenService.HashRefreshToken(req.RefreshToken);
-        var user = await _db.Users.FirstOrDefaultAsync(u => u.RefreshToken == hashedToken);
-        if (user is null || !user.RefreshTokenExpiry.HasValue || user.RefreshTokenExpiry.Value < DateTime.UtcNow)
+        var now = DateTime.UtcNow;
+
+        // 1. Primary multi-device session lookup
+        var session = await _db.UserSessions
+            .Include(s => s.User)
+            .FirstOrDefaultAsync(s => s.TokenHash == hashedToken);
+
+        if (session is not null)
+        {
+            if (session.RevokedAt.HasValue || session.ExpiresAt < now)
+                return Unauthorized(new { message = "Session expired or revoked. Please sign in again." });
+
+            if (!session.User.IsActive)
+                return Unauthorized(new { message = "Account is disabled. Please contact support." });
+
+            var newRefreshToken = _tokenService.GenerateRefreshToken();
+            var refreshDays     = _tokenService.GetRefreshTokenExpiryDays();
+
+            session.TokenHash  = TokenService.HashRefreshToken(newRefreshToken);
+            session.ExpiresAt  = now.AddDays(refreshDays);
+            session.LastUsedAt = now;
+            session.UserAgent  = GetUserAgentSnapshot() ?? session.UserAgent;
+            session.IpAddress  = HttpContext.Connection.RemoteIpAddress?.ToString() ?? session.IpAddress;
+
+            session.User.RefreshToken       = session.TokenHash;
+            session.User.RefreshTokenExpiry = session.ExpiresAt;
+
+            _db.UserSessions.Update(session);
+            _db.Users.Update(session.User);
+            await _uow.SaveChangesAsync();
+
+            _cache.Remove($"user-auth:{session.UserId}");
+            _cache.Remove($"user-auth:{session.UserId}:{session.Id}");
+
+            var newAccessToken = _tokenService.GenerateAccessToken(session.User, session.Id);
+            return Ok(BuildAuthResponse(session.User, newAccessToken, newRefreshToken));
+        }
+
+        // 2. Seamless upgrade for legacy single-token sessions created before UserSessions table
+        var legacyUser = await _db.Users.FirstOrDefaultAsync(u => u.RefreshToken == hashedToken);
+        if (legacyUser is null || !legacyUser.RefreshTokenExpiry.HasValue || legacyUser.RefreshTokenExpiry.Value < now)
         {
             return Unauthorized(new { message = "Refresh token is invalid or has expired." });
         }
 
-        if (!user.IsActive)
-        {
+        if (!legacyUser.IsActive)
             return Unauthorized(new { message = "Account is disabled. Please contact support." });
-        }
 
-        var newAccessToken  = _tokenService.GenerateAccessToken(user);
-        var newRefreshToken = _tokenService.GenerateRefreshToken();
-        var refreshDays     = _tokenService.GetRefreshTokenExpiryDays();
-        user.RefreshToken       = TokenService.HashRefreshToken(newRefreshToken);
-        user.RefreshTokenExpiry = DateTime.UtcNow.AddDays(refreshDays);
-        _db.Users.Update(user);
-        await _uow.SaveChangesAsync();
-        _cache.Remove($"user-auth:{user.Id}");
+        var (upgradedRefresh, upgradedSessionId) = await CreateUserSessionAsync(legacyUser, alreadyTrackedUser: true);
+        _cache.Remove($"user-auth:{legacyUser.Id}");
+        _cache.Remove($"user-auth:{legacyUser.Id}:{upgradedSessionId}");
 
-        return Ok(BuildAuthResponse(user, newAccessToken, newRefreshToken));
+        var upgradedAccess = _tokenService.GenerateAccessToken(legacyUser, upgradedSessionId);
+        return Ok(BuildAuthResponse(legacyUser, upgradedAccess, upgradedRefresh));
     }
 
     // ── POST /api/auth/logout ─────────────────────────────────────────────────
@@ -152,14 +176,65 @@ public class AuthController(
         var userId = User.GetUserId();
         if (userId == Guid.Empty) return Unauthorized();
 
+        var sidRaw = User.FindFirst(JwtRegisteredClaimNames.Sid)?.Value
+                     ?? User.FindFirst(ClaimTypes.Sid)?.Value
+                     ?? User.FindFirst("sid")?.Value;
+
+        if (Guid.TryParse(sidRaw, out var sessionId) && sessionId != Guid.Empty)
+        {
+            var session = await _db.UserSessions.FirstOrDefaultAsync(s => s.Id == sessionId && s.UserId == userId);
+            if (session is not null && session.RevokedAt is null)
+            {
+                session.RevokedAt = DateTime.UtcNow;
+                _db.UserSessions.Update(session);
+                await _uow.SaveChangesAsync();
+            }
+            _cache.Remove($"user-auth:{userId}:{sessionId}");
+        }
+        else
+        {
+            var user = await _db.Users.FindAsync(userId);
+            if (user is not null)
+            {
+                user.RefreshToken       = null;
+                user.RefreshTokenExpiry = null;
+                _db.Users.Update(user);
+                await _uow.SaveChangesAsync();
+            }
+        }
+        _cache.Remove($"user-auth:{userId}");
+
+        return NoContent();
+    }
+
+    // ── POST /api/auth/logout-all ─────────────────────────────────────────────
+    [Authorize]
+    [HttpPost("logout-all")]
+    public async Task<IActionResult> LogoutAllDevices()
+    {
+        var userId = User.GetUserId();
+        if (userId == Guid.Empty) return Unauthorized();
+
+        var now = DateTime.UtcNow;
+        var activeSessions = await _db.UserSessions
+            .Where(s => s.UserId == userId && s.RevokedAt == null)
+            .ToListAsync();
+
+        foreach (var s in activeSessions)
+        {
+            s.RevokedAt = now;
+            _cache.Remove($"user-auth:{userId}:{s.Id}");
+        }
+
         var user = await _db.Users.FindAsync(userId);
         if (user is not null)
         {
             user.RefreshToken       = null;
             user.RefreshTokenExpiry = null;
             _db.Users.Update(user);
-            await _uow.SaveChangesAsync();
         }
+
+        await _uow.SaveChangesAsync();
         _cache.Remove($"user-auth:{userId}");
 
         return NoContent();
@@ -244,6 +319,61 @@ public class AuthController(
             ExpiresAt:    _tokenService.GetAccessTokenExpiry(),
             User:         MapUserDto(user)
         );
+
+    private async Task<(string RefreshToken, Guid SessionId)> CreateUserSessionAsync(
+        User user,
+        bool alreadyTrackedUser = false)
+    {
+        var refreshToken = _tokenService.GenerateRefreshToken();
+        var refreshDays  = _tokenService.GetRefreshTokenExpiryDays();
+        var now          = DateTime.UtcNow;
+        var hash         = TokenService.HashRefreshToken(refreshToken);
+
+        if (user.Id == Guid.Empty)
+            user.Id = Guid.NewGuid();
+
+        user.RefreshToken       = hash;
+        user.RefreshTokenExpiry = now.AddDays(refreshDays);
+
+        if (!alreadyTrackedUser && _db.Entry(user).State == EntityState.Detached)
+            await _db.Users.AddAsync(user);
+        else if (alreadyTrackedUser)
+            _db.Users.Update(user);
+
+        var session = new UserSession
+        {
+            Id         = Guid.NewGuid(),
+            UserId     = user.Id,
+            TokenHash  = hash,
+            ExpiresAt  = now.AddDays(refreshDays),
+            LastUsedAt = now,
+            UserAgent  = GetUserAgentSnapshot(),
+            IpAddress  = HttpContext.Connection.RemoteIpAddress?.ToString()
+        };
+        await _db.UserSessions.AddAsync(session);
+
+        // Keep at most 10 concurrent device sessions per user
+        var existingActive = await _db.UserSessions
+            .Where(s => s.UserId == user.Id && s.RevokedAt == null)
+            .OrderByDescending(s => s.LastUsedAt ?? s.CreatedAt)
+            .ToListAsync();
+
+        if (existingActive.Count >= 10)
+        {
+            foreach (var stale in existingActive.Skip(9))
+                stale.RevokedAt = now;
+        }
+
+        await _uow.SaveChangesAsync();
+        return (refreshToken, session.Id);
+    }
+
+    private string? GetUserAgentSnapshot()
+    {
+        var ua = Request.Headers.UserAgent.ToString();
+        if (string.IsNullOrWhiteSpace(ua)) return null;
+        return ua[..Math.Min(256, ua.Length)];
+    }
 
     private static UserDto MapUserDto(User user) =>
         new(user.Id, user.FirstName, user.LastName, user.Email,

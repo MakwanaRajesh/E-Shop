@@ -7,6 +7,7 @@ namespace EShop.Infrastructure.Data;
 public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options)
 {
     public DbSet<User> Users => Set<User>();
+    public DbSet<UserSession> UserSessions => Set<UserSession>();
     public DbSet<Category> Categories => Set<Category>();
     public DbSet<Product> Products => Set<Product>();
     public DbSet<ProductImage> ProductImages => Set<ProductImage>();
@@ -35,6 +36,21 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(u => u.LastName).HasMaxLength(100).IsRequired();
             e.Property(u => u.PasswordHash).IsRequired();
             e.Property(u => u.Role).HasConversion<string>();
+        });
+
+        // ── UserSession ───────────────────────────────────────────────────
+        modelBuilder.Entity<UserSession>(e =>
+        {
+            e.HasKey(s => s.Id);
+            e.HasIndex(s => s.TokenHash);
+            e.HasIndex(s => new { s.UserId, s.RevokedAt, s.ExpiresAt });
+            e.Property(s => s.TokenHash).HasMaxLength(256).IsRequired();
+            e.Property(s => s.UserAgent).HasMaxLength(256);
+            e.Property(s => s.IpAddress).HasMaxLength(64);
+            e.HasOne(s => s.User)
+             .WithMany()
+             .HasForeignKey(s => s.UserId)
+             .OnDelete(DeleteBehavior.Cascade);
         });
 
         // ── Category ──────────────────────────────────────────────────────
