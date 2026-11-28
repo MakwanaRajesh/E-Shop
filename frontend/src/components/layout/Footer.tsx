@@ -1,6 +1,5 @@
 import Link from 'next/link'
 import { Sparkles, Mail, Phone, MapPin, Instagram, Twitter, Facebook, Youtube } from 'lucide-react'
-import { SecurityBadge } from '@/components/ui/SecurityBadge'
 
 const QUICK_LINKS = [
   { label: 'Home', href: '/' },
@@ -19,7 +18,7 @@ const CUSTOMER_LINKS = [
 ]
 
 const SOCIAL_LINKS = [
-  { icon: Instagram, href: '#', label: 'Instagram' },
+  { icon: Instagram, href: 'https://www.instagram.com/rajesh_1oo3/', label: 'Instagram' },
   { icon: Twitter, href: '#', label: 'Twitter' },
   { icon: Facebook, href: '#', label: 'Facebook' },
   { icon: Youtube, href: '#', label: 'YouTube' },
@@ -47,16 +46,20 @@ export function Footer() {
               Curating the finest sartorial garments and fine living essentials. Uncompromising quality, certified craftsmanship, and white-glove doorstep delivery.
             </p>
             <div className="flex items-center gap-2.5 pt-1">
-              {SOCIAL_LINKS.map(({ icon: Icon, href, label }) => (
-                <a
-                  key={label}
-                  href={href}
-                  aria-label={label}
-                  className="w-8 h-8 rounded-full border border-[#262422] bg-[#1C1917] flex items-center justify-center text-[#A8A29E] hover:text-[#C5A059] hover:border-[#C5A059]/50 transition-colors duration-200"
-                >
-                  <Icon className="w-3.5 h-3.5" />
-                </a>
-              ))}
+              {SOCIAL_LINKS.map(({ icon: Icon, href, label }) => {
+                const isExternal = href.startsWith('http')
+                return (
+                  <a
+                    key={label}
+                    href={href}
+                    aria-label={label}
+                    {...(isExternal ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
+                    className="w-8 h-8 rounded-full border border-[#262422] bg-[#1C1917] flex items-center justify-center text-[#A8A29E] hover:text-[#C5A059] hover:border-[#C5A059]/50 transition-colors duration-200"
+                  >
+                    <Icon className="w-3.5 h-3.5" />
+                  </a>
+                )
+              })}
             </div>
           </div>
 
@@ -127,11 +130,10 @@ export function Footer() {
 
       {/* Bottom bar */}
       <div className="border-t border-[#1C1917] bg-[#0A0A0A]">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5 flex flex-col lg:flex-row items-center justify-between gap-4">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5 flex flex-col sm:flex-row items-center justify-between gap-3">
           <p className="text-xs text-[#78716C]">
             © {new Date().getFullYear()} NEXUS Luxury Store. Atelier Obsidian & Champagne Gold Edition.
           </p>
-          <SecurityBadge variant="footer" />
           <div className="flex items-center gap-5">
             <Link href="/privacy" className="text-xs text-[#78716C] hover:text-[#C5A059] transition-colors">
               Privacy Policy

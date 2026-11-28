@@ -5,6 +5,7 @@ import type { ProductListItem } from '@/types'
 interface RecentlyViewedState {
   items: ProductListItem[]
   addProduct: (product: ProductListItem) => void
+  removeBySlug: (slug: string) => void
   clear: () => void
 }
 
@@ -19,6 +20,14 @@ export const useRecentlyViewedStore = create<RecentlyViewedState>()(
         if (!product?.id) return
         const filtered = get().items.filter((item) => item.id !== product.id)
         set({ items: [product, ...filtered].slice(0, MAX_RECENTLY_VIEWED) })
+      },
+
+      removeBySlug: (slug: string) => {
+        if (!slug) return
+        const filtered = get().items.filter((item) => item.slug !== slug)
+        if (filtered.length !== get().items.length) {
+          set({ items: filtered })
+        }
       },
 
       clear: () => set({ items: [] }),

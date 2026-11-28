@@ -3,7 +3,7 @@
 import React from 'react'
 import Image from 'next/image'
 import Link from 'next/link'
-import { notFound, useRouter } from 'next/navigation'
+import { useRouter } from 'next/navigation'
 import {
   Star,
   Heart,
@@ -20,6 +20,7 @@ import {
   X,
   Check,
   Info,
+  PackageX,
 } from 'lucide-react'
 import * as Accordion from '@radix-ui/react-accordion'
 import { Button } from '@/components/ui/Button'
@@ -28,7 +29,13 @@ import { StatusBadge } from '@/components/ui/StatusBadge'
 import { ProductDetailSkeleton } from '@/components/ui/Skeleton'
 import { ProductCard } from '@/components/product/ProductCard'
 import api from '@/lib/api'
-import { buildCatalogKey, fetchWithCatalogCache, invalidateFrontendCatalogCache, peekCatalogCache } from '@/lib/catalogCache'
+import {
+  buildCatalogKey,
+  fetchWithCatalogCache,
+  invalidateFrontendCatalogCache,
+  peekCatalogCache,
+  removeCatalogCacheKey,
+} from '@/lib/catalogCache'
 import type { Product, ProductListItem, Review, ReviewEligibility } from '@/types'
 import { cn, formatCurrency, getStockStatus, calculateDiscount, formatRelativeDate, optimizeImageUrl } from '@/lib/utils'
 import { useAuthStore } from '@/store/auth'
@@ -226,6 +233,9 @@ export default function ProductDetailPage({ params }: Props) {
   const loadMoreRef = React.useRef<HTMLDivElement | null>(null)
   const [reviews, setReviews] = React.useState<Review[]>([])
   const [isLoading, setIsLoading] = React.useState(true)
+  const [loadError, setLoadError] = React.useState<'not_found' | 'network' | null>(null)
+  const [fallbackProducts, setFallbackProducts] = React.useState<ProductListItem[]>([])
+  const [reloadNonce, setReloadNonce] = React.useState(0)
   const [selectedImageIdx, setSelectedImageIdx] = React.useState(0)
   const [selectedVariantId, setSelectedVariantId] = React.useState<string | undefined>()
   const [quantity, setQuantity] = React.useState(1)
@@ -251,7 +261,11 @@ export default function ProductDetailPage({ params }: Props) {
   const { addItem } = useCartStore()
   const { isInWishlist, addItem: addToWishlist, removeItem: removeFromWishlist } = useWishlistStore()
   const { open: openAuthModal } = useAuthModalStore()
-  const { items: recentlyViewed, addProduct: addRecentlyViewed } = useRecentlyViewedStore()
+  const {
+    items: recentlyViewed,
+    addProduct: addRecentlyViewed,
+    removeBySlug: removeRecentlyViewedBySlug,
+  } = useRecentlyViewedStore()
 
   // Write Review state (Verified buyers who ordered this product only)
   const [reviewEligibility, setReviewEligibility] = React.useState<ReviewEligibility | null>(null)
@@ -460,7 +474,11 @@ export default function ProductDetailPage({ params }: Props) {
 
     const fetchProduct = async () => {
       const detailKey = `/api/products/${slug}`
-      const cached = peekCatalogCache<Product>(detailKey)
+      const forceRefresh = reloadNonce > 0
+      const cached = forceRefresh ? null : peekCatalogCache<Product>(detailKey)
+
+      setLoadError(null)
+      setFallbackProducts([])
 
       if (cached?.data && active) {
         applyProductState(cached.data)
@@ -468,20 +486,56 @@ export default function ProductDetailPage({ params }: Props) {
         void loadSecondarySections(cached.data)
         if (cached.isFresh) return
       } else {
+        setProduct(null)
         setIsLoading(true)
       }
 
       try {
-        const productData = await fetchWithCatalogCache<Product>(detailKey, async () => {
-          const res = await api.get<Product>(detailKey)
-          return res.data
-        })
+        const productData = await fetchWithCatalogCache<Product>(
+          detailKey,
+          async () => {
+            const res = await api.get<Product>(detailKey)
+            return res.data
+          },
+          { force: forceRefresh },
+        )
         if (!active) return
         applyProductState(productData)
+        setLoadError(null)
         setIsLoading(false)
         void loadSecondarySections(productData)
-      } catch {
-        if (active && !cached?.data) notFound()
+      } catch (err: unknown) {
+        if (!active) return
+        const apiErr = err as { statusCode?: number; response?: { status?: number } }
+        const status = apiErr?.statusCode ?? apiErr?.response?.status ?? 0
+
+        if (status === 404 || status === 400) {
+          removeCatalogCacheKey(detailKey)
+          removeRecentlyViewedBySlug(slug)
+          setProduct(null)
+          setLoadError('not_found')
+
+          try {
+            const recKey = buildCatalogKey('/api/products', { page: 1, pageSize: 4, sortBy: 'popular' })
+            const recRes = await fetchWithCatalogCache<{ data?: ProductListItem[]; items?: ProductListItem[] }>(
+              recKey,
+              async () => {
+                const r = await api.get<{ data?: ProductListItem[]; items?: ProductListItem[] }>('/api/products', {
+                  params: { page: 1, pageSize: 4, sortBy: 'popular' },
+                })
+                return r.data
+              },
+            )
+            if (active) {
+              setFallbackProducts((recRes.items ?? recRes.data ?? []).slice(0, 4))
+            }
+          } catch {
+            /* ignore recommendation fallback failure */
+          }
+        } else if (!cached?.data) {
+          setProduct(null)
+          setLoadError('network')
+        }
       } finally {
         if (active) setIsLoading(false)
       }
@@ -491,7 +545,7 @@ export default function ProductDetailPage({ params }: Props) {
     return () => {
       active = false
     }
-  }, [slug])
+  }, [slug, reloadNonce, removeRecentlyViewedBySlug])
 
   const loadNextMoreProducts = React.useCallback(async () => {
     if (loadingMore || !hasMoreProducts || !product) return
@@ -588,7 +642,81 @@ export default function ProductDetailPage({ params }: Props) {
     )
   }
 
-  if (!product) return null
+  if (!product) {
+    const isNetworkIssue = loadError === 'network'
+    return (
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-14 space-y-14">
+        <div className="max-w-xl mx-auto bg-surface border border-border rounded-2xl p-8 sm:p-10 text-center space-y-5 shadow-lg">
+          <div className="w-16 h-16 rounded-2xl bg-gold/10 border border-gold/30 flex items-center justify-center mx-auto text-gold">
+            {isNetworkIssue ? <RefreshCw className="w-8 h-8" /> : <PackageX className="w-8 h-8" />}
+          </div>
+
+          <div className="space-y-2">
+            <span className="inline-block text-[11px] font-mono font-bold uppercase tracking-widest text-gold bg-gold/10 border border-gold/25 px-3 py-1 rounded-full">
+              {isNetworkIssue ? 'Connection Issue' : 'Item Unavailable'}
+            </span>
+            <h1 className="font-serif text-2xl sm:text-3xl font-bold text-beige">
+              {isNetworkIssue
+                ? 'Unable to Load This Product'
+                : 'This Product Has Been Removed or Discontinued'}
+            </h1>
+            <p className="text-sm text-beige-muted leading-relaxed">
+              {isNetworkIssue
+                ? 'We could not reach the catalog server to load this item. Please retry in a moment.'
+                : 'The link you opened points to an older or removed product that is no longer available in our active catalog.'}
+            </p>
+          </div>
+
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-1">
+            {isNetworkIssue ? (
+              <Button
+                variant="primary"
+                size="md"
+                onClick={() => setReloadNonce((n) => n + 1)}
+              >
+                <RefreshCw className="w-4 h-4 mr-1.5" />
+                Retry Loading Product
+              </Button>
+            ) : (
+              <Button variant="primary" size="md" asChild>
+                <Link href="/products">Explore Active Collection</Link>
+              </Button>
+            )}
+            <Button variant="outline" size="md" asChild>
+              <Link href="/">Return Home</Link>
+            </Button>
+          </div>
+        </div>
+
+        {fallbackProducts.length > 0 && (
+          <section>
+            <div className="flex items-center justify-between mb-6 gap-4">
+              <div>
+                <p className="text-xs text-gold uppercase tracking-widest font-semibold mb-1">
+                  Recommended For You
+                </p>
+                <h2 className="font-serif text-2xl font-bold text-beige">
+                  Available in Our Active Collection
+                </h2>
+              </div>
+              <Link
+                href="/products"
+                className="text-xs font-semibold text-gold hover:underline flex items-center gap-1 whitespace-nowrap"
+              >
+                <span>View Full Catalog</span>
+                <ChevronRight className="w-3.5 h-3.5" />
+              </Link>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+              {fallbackProducts.map((item, idx) => (
+                <ProductCard key={item.id} product={item} priority={idx < 4} />
+              ))}
+            </div>
+          </section>
+        )}
+      </div>
+    )
+  }
 
   const currentImage = product.images?.[selectedImageIdx]
   const stockCount = product.stock ?? product.stockQuantity ?? 0

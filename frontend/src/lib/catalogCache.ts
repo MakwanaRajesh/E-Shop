@@ -79,6 +79,18 @@ export function setCatalogCache<T>(key: string, data: T): void {
   }
 }
 
+export function removeCatalogCacheKey(key: string): void {
+  MEMORY_CACHE.delete(key)
+  IN_FLIGHT.delete(key)
+  if (typeof window !== 'undefined') {
+    try {
+      sessionStorage.removeItem(STORAGE_PREFIX + key)
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
 export async function fetchWithCatalogCache<T>(
   key: string,
   fetcher: () => Promise<T>,
