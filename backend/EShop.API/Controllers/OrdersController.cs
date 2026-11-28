@@ -510,13 +510,77 @@ public class OrdersController(
         if (payoutAccount is { Length: > 200 })
             payoutAccount = payoutAccount[..200];
 
+        var selectedItems = (req.SelectedOrderItemIds is { Count: > 0 })
+            ? order.Items.Where(i => req.SelectedOrderItemIds.Contains(i.Id) || req.SelectedOrderItemIds.Contains(i.ProductId)).ToList()
+            : order.Items.ToList();
+
+        if (selectedItems.Count == 0)
+            return BadRequest(new { message = "Please select at least one item from your order to return." });
+
+        decimal calculatedRefund = order.TotalAmount;
+        string? itemsPrefix = null;
+        if (selectedItems.Count < order.Items.Count)
+        {
+            var selectedRaw = selectedItems.Sum(i => i.TotalPrice);
+            var netOrderGoods = Math.Max(0m, order.TotalAmount - order.ShippingCost - order.PlatformFee);
+            var ratio = order.SubTotal > 0m ? netOrderGoods / order.SubTotal : 1m;
+            calculatedRefund = Math.Clamp(Math.Round(selectedRaw * ratio, 2), 1m, order.TotalAmount);
+            itemsPrefix = $"[Returning {selectedItems.Count}/{order.Items.Count} item(s): {string.Join(", ", selectedItems.Select(i => $"{i.ProductName} x{i.Quantity}"))}]";
+        }
+        else if (order.Items.Count > 0)
+        {
+            itemsPrefix = $"[Full Order ({order.Items.Count} item(s)): {string.Join(", ", selectedItems.Select(i => $"{i.ProductName} x{i.Quantity}"))}]";
+        }
+
+        var userNotes = string.IsNullOrWhiteSpace(req.Notes) ? string.Empty : req.Notes.Trim();
+        var combinedNotes = string.IsNullOrWhiteSpace(itemsPrefix)
+            ? userNotes
+            : string.IsNullOrWhiteSpace(userNotes) ? itemsPrefix : $"{itemsPrefix} {userNotes}";
+
         order.ReturnStatus          = ReturnStatus.Requested;
         order.ReturnReason          = reason;
-        order.ReturnCustomerNotes   = string.IsNullOrWhiteSpace(req.Notes) ? null : req.Notes.Trim()[..Math.Min(1000, req.Notes.Trim().Length)];
+        order.ReturnCustomerNotes   = string.IsNullOrWhiteSpace(combinedNotes)
+            ? null
+            : combinedNotes[..Math.Min(1000, combinedNotes.Length)];
         order.ReturnRequestedAt     = DateTime.UtcNow;
-        order.RefundAmount          = order.TotalAmount;
+        order.RefundAmount          = calculatedRefund;
         order.RefundMethod          = normalizedMethod;
         order.CustomerRefundAccount = payoutAccount;
+        order.UpdatedAt             = DateTime.UtcNow;
+
+        _db.Orders.Update(order);
+        await _uow.SaveChangesAsync();
+
+        return Ok(MapOrderDto(order));
+    }
+
+    // ── POST /api/orders/{id}/return/cancel ───────────────────────────────────
+    [HttpPost("{id:guid}/return/cancel")]
+    public async Task<IActionResult> CancelReturnRequest(Guid id)
+    {
+        var userId = User.GetUserId();
+        if (userId == Guid.Empty) return Unauthorized();
+
+        var order = await _db.Orders
+            .Include(o => o.Items)
+                .ThenInclude(i => i.Product)
+            .FirstOrDefaultAsync(o => o.Id == id && o.UserId == userId);
+
+        if (order is null) return NotFound(new { message = "Order not found." });
+
+        if (order.ReturnStatus != ReturnStatus.Requested)
+            return BadRequest(new { message = "Only pending return requests awaiting pickup approval can be withdrawn." });
+
+        order.ReturnStatus          = ReturnStatus.None;
+        order.ReturnReason          = null;
+        order.ReturnCustomerNotes   = null;
+        order.ReturnAdminNotes      = null;
+        order.ReturnPickupTracking  = null;
+        order.ReturnRequestedAt     = null;
+        order.RefundAmount          = null;
+        order.RefundMethod          = null;
+        order.CustomerRefundAccount = null;
+        order.UpdatedAt             = DateTime.UtcNow;
 
         _db.Orders.Update(order);
         await _uow.SaveChangesAsync();

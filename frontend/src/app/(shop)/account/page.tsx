@@ -33,6 +33,7 @@ import {
   RotateCcw,
   CreditCard,
   ShieldCheck,
+  Download,
 } from 'lucide-react'
 import { useAuthStore } from '@/store/auth'
 import { useCartStore } from '@/store/cart'
@@ -44,6 +45,7 @@ import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Input } from '@/components/ui/Input'
 import api from '@/lib/api'
 import { invalidateFrontendCatalogCache } from '@/lib/catalogCache'
+import { generateTaxInvoicePdfBlob } from '@/lib/invoicePdf'
 import toast from 'react-hot-toast'
 import type { Order, OrderItem, Address, MyReview, SupportTicket, ProductListItem } from '@/types'
 import { cn, formatCurrency, formatDate, formatRelativeDate, optimizeImageUrl } from '@/lib/utils'
@@ -52,11 +54,13 @@ function AccountContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const orderSuccessParam = searchParams.get('orderSuccess')
+  const tabParam = searchParams.get('tab')
+  const filterParam = searchParams.get('filter')
 
   const { user, isAuthenticated, logout, updateUser } = useAuthStore()
   const { open: openAuthModal } = useAuthModalStore()
 
-  const [activeTab, setActiveTab] = React.useState<'orders' | 'addresses' | 'profile' | 'support'>('orders')
+  const [activeTab, setActiveTab] = React.useState<'orders' | 'returns' | 'addresses' | 'profile' | 'support'>('orders')
   const [orders, setOrders] = React.useState<Order[]>([])
   const [myReviewsByProduct, setMyReviewsByProduct] = React.useState<Record<string, MyReview>>({})
   const [loadingOrders, setLoadingOrders] = React.useState(true)
@@ -71,8 +75,10 @@ function AccountContent() {
     notes: '',
     refundMethodPreference: 'RazorpayOriginalSource',
     refundAccountDetails: '',
+    selectedOrderItemIds: [] as string[],
   })
   const [submittingReturn, setSubmittingReturn] = React.useState(false)
+  const [cancellingReturnId, setCancellingReturnId] = React.useState<string | null>(null)
 
   // Delivered item rating & review composer state
   const [activeReviewKey, setActiveReviewKey] = React.useState<string | null>(null)
@@ -80,7 +86,6 @@ function AccountContent() {
   const [reviewTitle, setReviewTitle] = React.useState('')
   const [reviewComment, setReviewComment] = React.useState('')
   const [submittingReviewKey, setSubmittingReviewKey] = React.useState<string | null>(null)
-  const [deletingReviewId, setDeletingReviewId] = React.useState<string | null>(null)
 
   // Addresses state
   const [addresses, setAddresses] = React.useState<Address[]>([])
@@ -166,6 +171,26 @@ function AccountContent() {
     }
   }, [user])
 
+  // Sync tab & filter from URL query params
+  React.useEffect(() => {
+    if (tabParam && ['orders', 'returns', 'addresses', 'profile', 'support'].includes(tabParam)) {
+      setActiveTab(tabParam as any)
+    }
+    if (filterParam && ['all', 'delivered', 'active', 'returns', 'cancelled'].includes(filterParam)) {
+      setOrderStatusFilter(filterParam as any)
+    }
+  }, [tabParam, filterParam])
+
+  // Escape key closes Return modal
+  React.useEffect(() => {
+    if (!returnOrderTarget) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setReturnOrderTarget(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [returnOrderTarget])
+
   // Fetch orders, user reviews & support tickets
   const fetchOrdersAndReviews = React.useCallback(async () => {
     if (!isAuthenticated) return
@@ -232,6 +257,42 @@ function AccountContent() {
     return s === 'cancelled' || s === 'refunded'
   }).length
   const activeOrdersCount = orders.length - deliveredOrdersCount - cancelledOrdersCount
+
+  const getOrderDeliveredAnchor = (order: Order) => order.deliveredAt ?? order.updatedAt
+  const getReturnWindowDeadline = (order: Order) => {
+    const anchor = getOrderDeliveredAnchor(order)
+    return anchor ? new Date(new Date(anchor).getTime() + 7 * 24 * 60 * 60 * 1000) : null
+  }
+  const isOrderEligibleForReturn = (order: Order) => {
+    const s = String(order.status ?? '').toLowerCase()
+    const rs = String(order.returnStatus ?? 'None').toLowerCase()
+    const deadline = getReturnWindowDeadline(order)
+    return s === 'delivered' && rs === 'none' && !!deadline && deadline >= new Date()
+  }
+  const eligibleReturnOrders = orders.filter(isOrderEligibleForReturn)
+  const returnHistoryOrders = orders.filter(
+    (o) =>
+      (o.returnStatus && String(o.returnStatus).toLowerCase() !== 'none') ||
+      String(o.status).toLowerCase() === 'refunded' ||
+      String(o.paymentStatus).toLowerCase().includes('refund'),
+  )
+
+  const handleDownloadOrderInvoice = (order: Order) => {
+    try {
+      const pdfBlob = generateTaxInvoicePdfBlob(order)
+      const url = URL.createObjectURL(pdfBlob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `Tax-Invoice-INV-${order.orderNumber}.pdf`
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      setTimeout(() => URL.revokeObjectURL(url), 1000)
+      toast.success(`Downloaded Tax-Invoice-INV-${order.orderNumber}.pdf`)
+    } catch {
+      toast.error('Unable to generate PDF invoice')
+    }
+  }
 
   const filteredOrders = React.useMemo(() => {
     const q = orderSearch.trim().toLowerCase()
@@ -323,12 +384,17 @@ function AccountContent() {
       notes: '',
       refundMethodPreference: isCod ? 'UpiTransfer' : 'RazorpayOriginalSource',
       refundAccountDetails: '',
+      selectedOrderItemIds: (order.items ?? []).map((i) => i.id),
     })
   }
 
   const handleSubmitReturnRequest = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!returnOrderTarget) return
+    if (returnForm.selectedOrderItemIds.length === 0) {
+      toast.error('Please select at least one item to return.')
+      return
+    }
     setSubmittingReturn(true)
     try {
       await api.post(`/api/orders/${returnOrderTarget.id}/return`, {
@@ -336,14 +402,30 @@ function AccountContent() {
         notes: returnForm.notes.trim() || null,
         refundMethodPreference: returnForm.refundMethodPreference,
         refundAccountDetails: returnForm.refundAccountDetails.trim() || null,
+        selectedOrderItemIds: returnForm.selectedOrderItemIds,
       })
-      toast.success('7-day doorstep return requested! Our concierge team will approve pickup shortly.')
+      toast.success('7-day doorstep return requested! Track approval and refund below.')
       setReturnOrderTarget(null)
+      setActiveTab('returns')
       await fetchOrdersAndReviews()
     } catch (err: unknown) {
       toast.error((err as { message?: string })?.message ?? 'Failed to submit return request')
     } finally {
       setSubmittingReturn(false)
+    }
+  }
+
+  const handleCancelReturnRequest = async (orderId: string) => {
+    if (!confirm('Withdraw this pending return request? You can still submit a return within the 7-day window.')) return
+    setCancellingReturnId(orderId)
+    try {
+      await api.post(`/api/orders/${orderId}/return/cancel`)
+      toast.success('Return request withdrawn.')
+      await fetchOrdersAndReviews()
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message ?? err?.message ?? 'Failed to withdraw return request')
+    } finally {
+      setCancellingReturnId(null)
     }
   }
 
@@ -390,25 +472,6 @@ function AccountContent() {
       toast.error(err?.response?.data?.message ?? err?.message ?? 'Unable to submit review')
     } finally {
       setSubmittingReviewKey(null)
-    }
-  }
-
-  const handleDeleteDeliveredReview = async (reviewId: string, productId: string) => {
-    if (!confirm('Delete your rating & review for this item?')) return
-    setDeletingReviewId(reviewId)
-    try {
-      await api.delete(`/api/reviews/${reviewId}`)
-      setMyReviewsByProduct((prev) => {
-        const next = { ...prev }
-        delete next[productId]
-        return next
-      })
-      invalidateFrontendCatalogCache()
-      toast.success('Review removed')
-    } catch (err: any) {
-      toast.error(err?.response?.data?.message ?? 'Failed to delete review')
-    } finally {
-      setDeletingReviewId(null)
     }
   }
 
@@ -666,6 +729,28 @@ function AccountContent() {
           My Orders ({orders.length})
         </button>
         <button
+          onClick={() => setActiveTab('returns')}
+          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
+            activeTab === 'returns'
+              ? 'bg-gold text-background shadow-md shadow-gold/20'
+              : 'text-beige-muted hover:text-beige hover:bg-surface-2'
+          }`}
+        >
+          <RotateCcw className="w-4 h-4" />
+          <span>Returns &amp; Refunds</span>
+          {(eligibleReturnOrders.length > 0 || returnHistoryOrders.length > 0) && (
+            <span
+              className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
+                activeTab === 'returns'
+                  ? 'bg-background/20 text-background'
+                  : 'bg-gold/15 text-gold border border-gold/30'
+              }`}
+            >
+              {returnHistoryOrders.length > 0 ? returnHistoryOrders.length : eligibleReturnOrders.length}
+            </span>
+          )}
+        </button>
+        <button
           onClick={() => setActiveTab('addresses')}
           className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
             activeTab === 'addresses'
@@ -859,16 +944,25 @@ function AccountContent() {
                             className="h-8 px-3 rounded-lg bg-[#111111] hover:bg-[#C5A059] text-white hover:text-[#111111] flex items-center gap-1.5 text-[11px] font-semibold transition-colors shadow-sm"
                           >
                             <RotateCcw className="w-3.5 h-3.5" />
-                            <span>Request 7-Day Return</span>
+                            <span>Request Return</span>
                           </button>
                         )}
+                        <button
+                          type="button"
+                          onClick={() => handleDownloadOrderInvoice(order)}
+                          className="h-8 px-2.5 rounded-lg bg-surface border border-gold/40 hover:bg-gold/10 flex items-center gap-1.5 text-[11px] font-semibold text-gold transition-colors"
+                          title="Download GST Tax Invoice PDF"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          <span className="hidden sm:inline">Invoice PDF</span>
+                        </button>
                         <button
                           type="button"
                           onClick={() => setExpandedOrderId(isExpanded ? null : order.id)}
                           aria-label={isExpanded ? 'Hide price and delivery details' : 'View price and delivery details'}
                           className="h-8 px-2.5 rounded-lg bg-surface border border-border hover:border-gold/40 flex items-center gap-1.5 text-[11px] font-medium text-beige-muted hover:text-beige transition-colors"
                         >
-                          <span>{isExpanded ? 'Less' : 'Invoice & Track'}</span>
+                          <span>{isExpanded ? 'Less' : 'Details & Track'}</span>
                           {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
                         </button>
                       </div>
@@ -1022,11 +1116,30 @@ function AccountContent() {
                               </span>
                             )}
                           </div>
-                          {order.refundReference && (
-                            <span className="font-mono font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded">
-                              Ref: {order.refundReference}
-                            </span>
-                          )}
+                          <div className="flex items-center gap-2">
+                            {order.refundReference && (
+                              <span className="font-mono font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded">
+                                Ref: {order.refundReference}
+                              </span>
+                            )}
+                            {returnStatusNorm === 'requested' && (
+                              <button
+                                type="button"
+                                disabled={cancellingReturnId === order.id}
+                                onClick={() => handleCancelReturnRequest(order.id)}
+                                className="text-[11px] font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 px-2.5 py-0.5 rounded-lg transition-colors disabled:opacity-50"
+                              >
+                                {cancellingReturnId === order.id ? 'Withdrawing...' : 'Withdraw Request'}
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => setActiveTab('returns')}
+                              className="text-[11px] font-semibold text-gold hover:underline"
+                            >
+                              Returns Desk →
+                            </button>
+                          </div>
                         </div>
 
                         {order.returnAdminNotes && (
@@ -1146,12 +1259,12 @@ function AccountContent() {
                                           <span>{formatRelativeDate(existingReview.createdAt)}</span>
                                           <button
                                             type="button"
-                                            disabled={deletingReviewId === existingReview.id}
-                                            onClick={() => handleDeleteDeliveredReview(existingReview.id, item.productId)}
-                                            className="text-beige-muted hover:text-error transition-colors disabled:opacity-50"
-                                            title="Delete your review"
+                                            onClick={() => handleDownloadOrderInvoice(order)}
+                                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-gold/15 border border-gold/40 text-gold hover:bg-gold hover:text-background font-semibold transition-colors"
+                                            title="Download your official GST Tax Invoice PDF"
                                           >
-                                            {deletingReviewId === existingReview.id ? 'Removing...' : 'Delete'}
+                                            <Download className="w-3.5 h-3.5" />
+                                            <span>Download Invoice</span>
                                           </button>
                                         </div>
                                       </div>
@@ -1268,6 +1381,37 @@ function AccountContent() {
                           )
                         })}
                       </div>
+
+                      {canRequestReturn && returnWindowDeadline && (
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pt-3 border-t border-border/70 text-xs">
+                          <div className="flex items-center gap-2 text-beige-muted">
+                            <RotateCcw className="w-4 h-4 text-gold flex-shrink-0" />
+                            <span>
+                              Need an exchange or refund?{' '}
+                              <strong className="text-beige">7-Day Doorstep Return</strong> open until{' '}
+                              <strong className="text-gold">{formatDate(returnWindowDeadline.toISOString())}</strong>.
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2 self-start sm:self-auto">
+                            <button
+                              type="button"
+                              onClick={() => handleDownloadOrderInvoice(order)}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border hover:border-gold text-beige hover:text-gold text-[11px] font-semibold transition-colors"
+                            >
+                              <Download className="w-3.5 h-3.5" />
+                              Download Invoice
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleOpenReturnModal(order)}
+                              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-[#111111] hover:bg-[#C5A059] text-white hover:text-[#111111] text-[11px] font-semibold transition-colors shadow-sm"
+                            >
+                              <RotateCcw className="w-3.5 h-3.5" />
+                              Request Return &amp; Refund
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
 
                     {/* Expandable Price Breakdown & Shipping Details */}
@@ -1275,9 +1419,19 @@ function AccountContent() {
                       <div className="p-5 sm:p-6 pt-0 space-y-5 animate-fade-in bg-surface-2/15 border-t border-border/60">
                         {/* Order Price Summary */}
                         <div className="bg-surface border border-border rounded-xl p-4 space-y-2 text-xs mt-5">
-                          <span className="text-[11px] font-bold uppercase tracking-wider text-gold block">
-                            Payment Summary
-                          </span>
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-[11px] font-bold uppercase tracking-wider text-gold">
+                              Payment Summary
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleDownloadOrderInvoice(order)}
+                              className="inline-flex items-center gap-1 text-[11px] font-semibold text-gold hover:underline"
+                            >
+                              <Download className="w-3.5 h-3.5" />
+                              Download GST Tax Invoice PDF
+                            </button>
+                          </div>
                           <div className="flex justify-between text-beige-muted">
                             <span>Subtotal</span>
                             <span className="text-beige font-medium">{formatCurrency(order.subTotal ?? order.subtotal ?? 0)}</span>
@@ -1368,7 +1522,306 @@ function AccountContent() {
         </div>
       )}
 
-      {/* ─── TAB 2: SAVED ADDRESSES ────────────────────────────────────────── */}
+      {/* ─── TAB 2: RETURNS & REFUNDS HUB ──────────────────────────────────── */}
+      {activeTab === 'returns' && (
+        <div className="space-y-8">
+          {/* Concierge Return Policy Overview & KPIs */}
+          <div className="bg-surface border border-border rounded-2xl p-5 sm:p-7 flex flex-col lg:flex-row lg:items-center justify-between gap-5 shadow-sm">
+            <div className="space-y-1.5">
+              <span className="inline-flex items-center gap-1.5 text-[11px] font-mono font-bold uppercase tracking-widest text-gold">
+                <RotateCcw className="w-3.5 h-3.5" />
+                7-Day Concierge Return &amp; Refund Guarantee
+              </span>
+              <h2 className="font-serif text-2xl sm:text-3xl font-bold text-beige">
+                Request Returns &amp; Track Refunds
+              </h2>
+              <p className="text-xs sm:text-sm text-beige-muted max-w-2xl leading-relaxed">
+                Select any delivered order within 7 days of delivery to schedule a complimentary doorstep pickup, track warehouse quality checks, and monitor your refund reference ID in real time.
+              </p>
+            </div>
+            <div className="grid grid-cols-3 gap-3 text-center shrink-0">
+              <div className="bg-surface-2 border border-border rounded-xl px-4 py-3">
+                <span className="text-[10px] font-bold uppercase text-beige-muted block">Eligible Now</span>
+                <span className="font-serif text-xl font-bold text-gold">{eligibleReturnOrders.length}</span>
+              </div>
+              <div className="bg-surface-2 border border-border rounded-xl px-4 py-3">
+                <span className="text-[10px] font-bold uppercase text-beige-muted block">Active Cases</span>
+                <span className="font-serif text-xl font-bold text-beige">
+                  {returnHistoryOrders.filter((o) => !['refundcompleted', 'rejected'].includes(String(o.returnStatus ?? '').toLowerCase())).length}
+                </span>
+              </div>
+              <div className="bg-surface-2 border border-border rounded-xl px-4 py-3">
+                <span className="text-[10px] font-bold uppercase text-beige-muted block">Refunded</span>
+                <span className="font-serif text-xl font-bold text-emerald-700">
+                  {returnHistoryOrders.filter((o) => String(o.returnStatus ?? '').toLowerCase() === 'refundcompleted' || String(o.paymentStatus ?? '').toLowerCase() === 'refunded').length}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Section A: Delivered Orders Eligible to Request a Return */}
+          <div className="space-y-4">
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="font-serif text-xl font-bold text-beige flex items-center gap-2">
+                <Package className="w-5 h-5 text-gold" />
+                Eligible Orders to Return ({eligibleReturnOrders.length})
+              </h3>
+              <span className="text-xs text-beige-muted">Within 7 days of doorstep delivery</span>
+            </div>
+
+            {eligibleReturnOrders.length > 0 ? (
+              <div className="grid grid-cols-1 gap-4">
+                {eligibleReturnOrders.map((order) => {
+                  const deadline = getReturnWindowDeadline(order)
+                  const daysLeft = deadline
+                    ? Math.max(0, Math.ceil((deadline.getTime() - Date.now()) / (1000 * 60 * 60 * 24)))
+                    : 0
+                  return (
+                    <div
+                      key={order.id}
+                      className="bg-surface border border-border hover:border-gold/40 rounded-2xl p-5 space-y-4 transition-all shadow-sm"
+                    >
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border pb-3.5">
+                        <div className="space-y-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-mono text-sm font-bold text-gold">{order.orderNumber}</span>
+                            <StatusBadge status={order.status} size="sm" />
+                            <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-full">
+                              {daysLeft === 0 ? 'Closes today' : `${daysLeft} day${daysLeft === 1 ? '' : 's'} left`} (until {deadline ? formatDate(deadline.toISOString()) : ''})
+                            </span>
+                          </div>
+                          <p className="text-xs text-beige-muted">
+                            Delivered {formatDate(order.deliveredAt ?? order.updatedAt)} • Paid {formatCurrency(order.totalAmount ?? 0)} ({order.paymentMethod === (1 as any) || String(order.paymentMethod).toLowerCase().includes('cash') ? 'COD' : 'Razorpay'})
+                          </p>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleDownloadOrderInvoice(order)}
+                            className="h-9 px-3 rounded-xl bg-surface-2 border border-border hover:border-gold text-beige text-xs font-semibold inline-flex items-center gap-1.5 transition-colors"
+                          >
+                            <Download className="w-3.5 h-3.5 text-gold" />
+                            Invoice PDF
+                          </button>
+                          <Button
+                            type="button"
+                            variant="primary"
+                            size="sm"
+                            onClick={() => handleOpenReturnModal(order)}
+                            className="bg-[#111111] hover:bg-[#C5A059] text-white hover:text-[#111111] font-semibold text-xs flex items-center gap-1.5"
+                          >
+                            <RotateCcw className="w-3.5 h-3.5" />
+                            Request Return &amp; Refund
+                          </Button>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                        {(order.items ?? []).map((item) => (
+                          <div
+                            key={item.id}
+                            className="flex items-center gap-3 p-2.5 rounded-xl bg-surface-2/60 border border-border text-xs"
+                          >
+                            <div className="relative w-11 h-11 rounded-lg overflow-hidden bg-surface border border-border flex-shrink-0">
+                              {item.productImageUrl ? (
+                                <Image
+                                  src={optimizeImageUrl(item.productImageUrl, 120)}
+                                  alt={item.productName ?? 'Product'}
+                                  fill
+                                  className="object-cover"
+                                  sizes="44px"
+                                />
+                              ) : null}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="font-semibold text-beige truncate">{item.productName}</p>
+                              <p className="text-[11px] text-beige-muted">
+                                Qty {item.quantity} • {formatCurrency(item.totalPrice ?? 0)}
+                              </p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            ) : (
+              <div className="bg-surface border border-border rounded-2xl p-8 text-center space-y-3">
+                <RotateCcw className="w-10 h-10 text-gold/40 mx-auto" />
+                <h4 className="font-serif text-lg font-bold text-beige">No Return-Eligible Delivered Orders Right Now</h4>
+                <p className="text-xs text-beige-muted max-w-md mx-auto">
+                  Returns automatically unlock as soon as an order is marked <strong>Delivered</strong> and remain open for 7 days from delivery. If you need assistance with an older order or damaged parcel, our support team is ready to help.
+                </p>
+                <div className="flex flex-wrap justify-center gap-2.5 pt-1">
+                  <Button variant="outline" size="sm" onClick={() => setActiveTab('orders')} className="text-xs">
+                    Check My Orders
+                  </Button>
+                  <Button variant="primary" size="sm" onClick={() => setActiveTab('support')} className="text-xs">
+                    Contact VIP Support
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Section B: Active Return Pickups & Completed Refunds */}
+          <div className="space-y-4">
+            <h3 className="font-serif text-xl font-bold text-beige flex items-center gap-2">
+              <CreditCard className="w-5 h-5 text-gold" />
+              Submitted Returns &amp; Refund Ledger ({returnHistoryOrders.length})
+            </h3>
+
+            {returnHistoryOrders.length > 0 ? (
+              <div className="space-y-4">
+                {returnHistoryOrders.map((order) => {
+                  const rsNorm = String(order.returnStatus ?? 'None').toLowerCase()
+                  const psNorm = String(order.paymentStatus ?? '').toLowerCase()
+                  const orderCancelled = String(order.status ?? '').toLowerCase() === 'cancelled'
+                  const returnStep = getReturnStep(order.returnStatus)
+                  const isSettled = rsNorm === 'refundcompleted' || psNorm === 'refunded' || psNorm === 'partiallyrefunded'
+
+                  return (
+                    <div
+                      key={order.id}
+                      className="bg-surface border border-amber-500/35 rounded-2xl p-5 sm:p-6 space-y-4 shadow-sm"
+                    >
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border pb-3.5">
+                        <div className="space-y-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-mono text-sm font-bold text-gold">{order.orderNumber}</span>
+                            <StatusBadge status={order.returnStatus ?? order.paymentStatus} size="sm" />
+                            <StatusBadge status={order.paymentStatus} size="sm" />
+                            <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded bg-surface-2 border border-border text-beige-muted">
+                              {orderCancelled ? 'Pre-Dispatch Cancellation Refund' : '7-Day Doorstep Return'}
+                            </span>
+                          </div>
+                          <p className="text-xs text-beige-muted">
+                            Requested: <strong className="text-beige">{formatDate(order.returnRequestedAt ?? order.updatedAt)}</strong>
+                            {order.refundMethod && (
+                              <> • Refund via <strong className="text-beige">{order.refundMethod}</strong></>
+                            )}
+                            {order.customerRefundAccount && (
+                              <> ({order.customerRefundAccount})</>
+                            )}
+                          </p>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-mono font-bold text-sm text-beige mr-1">
+                            {formatCurrency(order.refundAmount ?? order.totalAmount ?? 0)}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleDownloadOrderInvoice(order)}
+                            className="h-8 px-2.5 rounded-lg bg-surface-2 border border-border hover:border-gold text-beige text-[11px] font-semibold inline-flex items-center gap-1"
+                          >
+                            <Download className="w-3.5 h-3.5 text-gold" />
+                            Invoice
+                          </button>
+                          {rsNorm === 'requested' && (
+                            <button
+                              type="button"
+                              disabled={cancellingReturnId === order.id}
+                              onClick={() => handleCancelReturnRequest(order.id)}
+                              className="h-8 px-3 rounded-lg bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 text-[11px] font-semibold transition-colors disabled:opacity-50"
+                            >
+                              {cancellingReturnId === order.id ? 'Withdrawing...' : 'Withdraw Request'}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {!orderCancelled && returnStep >= 0 ? (
+                        <div className="grid grid-cols-5 gap-2 text-center">
+                          {[
+                            { label: 'Requested', min: 0, date: order.returnRequestedAt },
+                            { label: 'Pickup Approved', min: 1, date: order.returnApprovedAt },
+                            { label: 'Picked Up', min: 2, date: order.returnPickedUpAt },
+                            { label: 'QC Passed', min: 3, date: order.returnReceivedAt },
+                            { label: 'Refund Paid', min: 4, date: order.refundedAt },
+                          ].map((st) => {
+                            const done = returnStep >= st.min
+                            return (
+                              <div key={st.label} className="space-y-1">
+                                <div className={`h-2 rounded-full ${done ? 'bg-emerald-500' : 'bg-surface-2 border border-border'}`} />
+                                <span className={`block text-[10px] font-semibold ${done ? 'text-emerald-700' : 'text-beige-muted'}`}>
+                                  {st.label}
+                                </span>
+                                {st.date && done && (
+                                  <span className="block text-[9px] font-mono text-beige-muted">
+                                    {new Date(st.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
+                                  </span>
+                                )}
+                              </div>
+                            )
+                          })}
+                        </div>
+                      ) : orderCancelled ? (
+                        <div className="grid grid-cols-2 gap-3 text-center">
+                          {[
+                            { label: 'Cancellation Refund Queued', done: true },
+                            { label: isSettled ? 'Refund Settled' : 'Pending Concierge Payout', done: isSettled },
+                          ].map((st) => (
+                            <div key={st.label} className="space-y-1">
+                              <div className={`h-2 rounded-full ${st.done ? 'bg-emerald-500' : 'bg-amber-300'}`} />
+                              <span className={`block text-[10px] font-semibold ${st.done ? 'text-emerald-700' : 'text-amber-700'}`}>
+                                {st.label}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
+
+                      <div className="bg-surface-2/60 border border-border rounded-xl p-3.5 text-xs space-y-1.5">
+                        {order.returnReason && (
+                          <p className="text-beige-muted">
+                            <strong className="text-beige">Reason:</strong> {order.returnReason}
+                          </p>
+                        )}
+                        {order.returnCustomerNotes && (
+                          <p className="text-beige-muted">
+                            <strong className="text-beige">Details:</strong> {order.returnCustomerNotes}
+                          </p>
+                        )}
+                        {order.returnPickupTracking && (
+                          <p className="text-beige-muted">
+                            <strong className="text-beige">Reverse Pickup Tracking:</strong>{' '}
+                            <span className="font-mono text-gold font-bold">{order.returnPickupTracking}</span>
+                          </p>
+                        )}
+                        {order.refundReference && (
+                          <p className="text-emerald-800">
+                            <strong>Refund UTR / Reference:</strong>{' '}
+                            <span className="font-mono font-bold bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded">
+                              {order.refundReference}
+                            </span>
+                            {order.refundedAt && (
+                              <span className="text-beige-muted ml-2">Settled {formatDate(order.refundedAt)}</span>
+                            )}
+                          </p>
+                        )}
+                        {order.returnAdminNotes && (
+                          <p className="text-beige bg-surface border border-border rounded-lg px-3 py-2 mt-1">
+                            <strong className="text-gold">Concierge Update:</strong> {order.returnAdminNotes}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            ) : (
+              <div className="bg-surface border border-border rounded-2xl p-6 text-center text-xs text-beige-muted">
+                You have no submitted return requests or refund transactions yet.
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ─── TAB 3: SAVED ADDRESSES ────────────────────────────────────────── */}
       {activeTab === 'addresses' && (
         <div className="space-y-6">
           <div className="flex items-center justify-between">
@@ -2106,10 +2559,15 @@ function AccountContent() {
 
       {/* ── 7-Day Doorstep Return & Refund Modal ── */}
       {returnOrderTarget && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+        <div
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setReturnOrderTarget(null)
+          }}
+          className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-start justify-center p-4 sm:p-6 overflow-y-auto"
+        >
           <form
             onSubmit={handleSubmitReturnRequest}
-            className="bg-surface border border-gold/40 rounded-2xl max-w-lg w-full p-6 sm:p-7 space-y-5 shadow-2xl animate-slide-up my-8"
+            className="bg-surface border border-gold/40 rounded-2xl max-w-lg w-full p-6 sm:p-7 space-y-5 shadow-2xl animate-slide-up my-auto"
           >
             <div className="flex items-start justify-between border-b border-border pb-3 gap-3">
               <div>
@@ -2123,27 +2581,94 @@ function AccountContent() {
               <button
                 type="button"
                 onClick={() => setReturnOrderTarget(null)}
+                aria-label="Close return modal"
                 className="w-8 h-8 rounded-full bg-surface-2 flex items-center justify-center text-beige-muted hover:text-beige"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <div className="bg-surface-2/70 border border-border rounded-xl p-3.5 text-xs space-y-1">
-              <div className="flex justify-between">
-                <span className="text-beige-muted">Refundable Order Value</span>
-                <span className="font-bold text-beige">{formatCurrency(returnOrderTarget.totalAmount ?? 0)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-beige-muted">Original Payment</span>
-                <span className="font-semibold text-gold uppercase">
-                  {returnOrderTarget.paymentMethod === (1 as any) ||
-                  String(returnOrderTarget.paymentMethod).toLowerCase().includes('cash')
-                    ? 'Cash on Delivery'
-                    : 'Razorpay Online'}
-                </span>
-              </div>
-            </div>
+            {(() => {
+              const allItems = returnOrderTarget.items ?? []
+              const chosen = allItems.filter((it) => returnForm.selectedOrderItemIds.includes(it.id))
+              const totalOrdAmt = returnOrderTarget.totalAmount ?? 0
+              const subAmt = returnOrderTarget.subTotal ?? returnOrderTarget.subtotal ?? 0
+              const shipAmt = returnOrderTarget.shippingCost ?? 0
+              const platAmt = returnOrderTarget.platformFee ?? 0
+              let estRefund = totalOrdAmt
+              if (allItems.length > 0 && chosen.length > 0 && chosen.length < allItems.length) {
+                const rawSel = chosen.reduce((acc, it) => acc + (it.totalPrice ?? 0), 0)
+                const netGoods = Math.max(0, totalOrdAmt - shipAmt - platAmt)
+                const ratio = subAmt > 0 ? netGoods / subAmt : 1
+                estRefund = Math.min(totalOrdAmt, Math.max(1, Math.round(rawSel * ratio * 100) / 100))
+              } else if (chosen.length === 0) {
+                estRefund = 0
+              }
+              return (
+                <>
+                  <div className="bg-surface-2/70 border border-border rounded-xl p-3.5 text-xs space-y-1">
+                    <div className="flex justify-between">
+                      <span className="text-beige-muted">Estimated Refund Value</span>
+                      <span className="font-bold text-emerald-700 font-mono">{formatCurrency(estRefund)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-beige-muted">Original Payment</span>
+                      <span className="font-semibold text-gold uppercase">
+                        {returnOrderTarget.paymentMethod === (1 as any) ||
+                        String(returnOrderTarget.paymentMethod).toLowerCase().includes('cash')
+                          ? 'Cash on Delivery'
+                          : 'Razorpay Online'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {allItems.length > 0 && (
+                    <div className="space-y-2 text-xs">
+                      <label className="font-semibold text-beige block">
+                        Select Item(s) to Return ({chosen.length} of {allItems.length} selected)
+                      </label>
+                      <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+                        {allItems.map((it) => {
+                          const checked = returnForm.selectedOrderItemIds.includes(it.id)
+                          return (
+                            <label
+                              key={it.id}
+                              className={`flex items-center gap-2.5 p-2.5 rounded-xl border cursor-pointer transition-colors ${
+                                checked ? 'border-gold bg-gold/10' : 'border-border bg-surface-2/40 hover:border-gold/40'
+                              }`}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={(e) => {
+                                  const isChecked = e.target.checked
+                                  setReturnForm((prev) => ({
+                                    ...prev,
+                                    selectedOrderItemIds: isChecked
+                                      ? [...prev.selectedOrderItemIds, it.id]
+                                      : prev.selectedOrderItemIds.filter((id) => id !== it.id),
+                                  }))
+                                }}
+                                className="rounded border-border text-gold focus:ring-gold"
+                              />
+                              <div className="min-w-0 flex-1">
+                                <p className="font-semibold text-beige truncate">{it.productName}</p>
+                                <p className="text-[11px] text-beige-muted">
+                                  Qty {it.quantity} {it.variantName ? `• ${it.variantName}` : ''}
+                                </p>
+                              </div>
+                              <span className="font-mono font-bold text-beige shrink-0">
+                                {formatCurrency(it.totalPrice ?? 0)}
+                              </span>
+                            </label>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </>
+              )
+            })()}
 
             <div className="space-y-3.5 text-xs">
               <div>

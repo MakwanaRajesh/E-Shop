@@ -398,11 +398,21 @@ public class AdminController(
 
         switch (action)
         {
+            case "savenotes" or "update":
+                order.UpdatedAt = now;
+                break;
+
             case "approve":
                 if (order.ReturnStatus != ReturnStatus.Requested)
                     return BadRequest(new { message = "Only Requested returns can be approved." });
-                order.ReturnStatus     = ReturnStatus.Approved;
+                order.ReturnStatus       = ReturnStatus.Approved;
                 order.ReturnApprovedAt ??= now;
+                if (string.IsNullOrWhiteSpace(order.ReturnPickupTracking))
+                {
+                    var suffix = order.OrderNumber.Length >= 6 ? order.OrderNumber[^6..] : Guid.NewGuid().ToString("N")[..6].ToUpperInvariant();
+                    order.ReturnPickupTracking = $"REV-PKP-{suffix}";
+                }
+                order.UpdatedAt = now;
                 break;
 
             case "reject":
@@ -411,6 +421,7 @@ public class AdminController(
                 if (string.IsNullOrWhiteSpace(req.AdminNotes))
                     return BadRequest(new { message = "Please provide a clear rejection reason for the customer." });
                 order.ReturnStatus = ReturnStatus.Rejected;
+                order.UpdatedAt    = now;
                 break;
 
             case "markpickedup" or "pickedup":
@@ -418,7 +429,13 @@ public class AdminController(
                     return BadRequest(new { message = "Order must be Approved before marking picked up." });
                 order.ReturnApprovedAt ??= now;
                 order.ReturnPickedUpAt ??= now;
+                if (string.IsNullOrWhiteSpace(order.ReturnPickupTracking))
+                {
+                    var suffix = order.OrderNumber.Length >= 6 ? order.OrderNumber[^6..] : Guid.NewGuid().ToString("N")[..6].ToUpperInvariant();
+                    order.ReturnPickupTracking = $"REV-PKP-{suffix}";
+                }
                 order.ReturnStatus     = ReturnStatus.PickedUp;
+                order.UpdatedAt        = now;
                 break;
 
             case "markreceived" or "received" or "qcpassed":
@@ -428,6 +445,7 @@ public class AdminController(
                 order.ReturnPickedUpAt ??= now;
                 order.ReturnReceivedAt ??= now;
                 order.ReturnStatus     = ReturnStatus.Received;
+                order.UpdatedAt        = now;
 
                 if (req.RestockInventory && !order.ReturnInventoryRestocked && order.Status != OrderStatus.Cancelled)
                 {
@@ -446,9 +464,13 @@ public class AdminController(
         if (order.ReturnInventoryRestocked)
             _catalogCache.InvalidateProducts();
 
+        var stepMessage = action is "savenotes" or "update"
+            ? $"Pickup & notes saved for {order.OrderNumber}."
+            : $"Return status updated to {order.ReturnStatus}.";
+
         return Ok(new
         {
-            message = $"Return status updated to {order.ReturnStatus}.",
+            message = stepMessage,
             order   = MapAdminOrderSummary(order)
         });
     }
@@ -549,6 +571,7 @@ public class AdminController(
         order.RefundMethod     = method;
         order.RefundReference  = refundReference;
         order.RefundedAt       = now;
+        order.UpdatedAt        = now;
 
         _db.Orders.Update(order);
         await _db.SaveChangesAsync();

@@ -44,9 +44,12 @@ export default function ReturnsPage() {
 
       <div className="flex flex-wrap items-center gap-3">
         <Button variant="primary" size="md" asChild>
-          <Link href="/account">Raise a Return Ticket</Link>
+          <Link href="/account?tab=returns">Request a 7-Day Return</Link>
         </Button>
         <Button variant="outline" size="md" asChild>
+          <Link href="/account?tab=orders">My Orders &amp; Invoices</Link>
+        </Button>
+        <Button variant="ghost" size="md" asChild>
           <Link href="/products">Continue Shopping</Link>
         </Button>
       </div>

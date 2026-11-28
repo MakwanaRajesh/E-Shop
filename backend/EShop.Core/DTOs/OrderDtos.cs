@@ -98,7 +98,8 @@ public record RequestReturnDto(
     string Reason,
     string? Notes = null,
     string? RefundMethodPreference = null,
-    string? RefundAccountDetails = null
+    string? RefundAccountDetails = null,
+    List<Guid>? SelectedOrderItemIds = null
 );
 
 public record OrderItemDto(

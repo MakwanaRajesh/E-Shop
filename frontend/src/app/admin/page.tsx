@@ -170,6 +170,7 @@ function AdminContent() {
     >
   >({})
   const [processingReturnId, setProcessingReturnId] = React.useState<string | null>(null)
+  const [showOverridePayoutFor, setShowOverridePayoutFor] = React.useState<Record<string, boolean>>({})
   const [products, setProducts] = React.useState<ProductListItem[]>([])
   const [categories, setCategories] = React.useState<Category[]>([])
   const [coupons, setCoupons] = React.useState<CouponDto[]>([])
@@ -980,24 +981,61 @@ function AdminContent() {
     }
   }
 
+  const handleDownloadAdminInvoice = (ord: Order) => {
+    try {
+      const pdfBlob = generateTaxInvoicePdfBlob(ord)
+      const url = URL.createObjectURL(pdfBlob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `Tax-Invoice-INV-${ord.orderNumber}.pdf`
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      setTimeout(() => URL.revokeObjectURL(url), 1000)
+      toast.success(`Downloaded Tax-Invoice-INV-${ord.orderNumber}.pdf`)
+    } catch {
+      toast.error('Unable to generate PDF invoice')
+    }
+  }
+
+  const handleCopyText = async (text: string, label = 'Copied') => {
+    try {
+      await navigator.clipboard.writeText(text)
+      toast.success(`${label}: ${text}`)
+    } catch {
+      toast.error('Clipboard permission unavailable')
+    }
+  }
+
   const handleReturnStepAction = async (
     ord: Order,
-    action: 'Approve' | 'Reject' | 'MarkPickedUp' | 'MarkReceived',
+    action: 'SaveNotes' | 'Approve' | 'Reject' | 'MarkPickedUp' | 'MarkReceived',
   ) => {
     const draft = getReturnDraft(ord)
     if (action === 'Reject' && !draft.adminNotes.trim()) {
-      toast.error('Please write a clear rejection reason in Admin Notes first.')
+      toast.error('Please write or pick a clear decline reason in Admin Notes first.')
       return
     }
     setProcessingReturnId(ord.id)
     try {
-      const res = await api.patch<{ message?: string }>(`/api/admin/returns/${ord.id}/step`, {
+      const res = await api.patch<{ message?: string; order?: Order }>(`/api/admin/returns/${ord.id}/step`, {
         action,
         adminNotes: draft.adminNotes.trim() || null,
         pickupTracking: draft.pickupTracking.trim() || null,
         restockInventory: draft.restockInventory,
       })
       toast.success(res.data?.message ?? `Return updated (${action})`)
+      const updatedOrd = res.data?.order
+      setReturnDrafts((prev) => {
+        const next = { ...prev }
+        delete next[ord.id]
+        return next
+      })
+      if (updatedOrd) {
+        setReturnsOrders((prev) => prev.map((item) => (item.id === ord.id ? updatedOrd : item)))
+        setOrders((prev) => prev.map((item) => (item.id === ord.id ? updatedOrd : item)))
+        setInspectOrder((prev) => (prev && prev.id === ord.id ? updatedOrd : prev))
+      }
       await fetchAllData()
     } catch (err: any) {
       toast.error(err?.response?.data?.message ?? err?.message ?? 'Failed to update return step')
@@ -1015,7 +1053,7 @@ function AdminContent() {
     }
     setProcessingReturnId(ord.id)
     try {
-      const res = await api.post<{ message?: string }>(`/api/admin/returns/${ord.id}/refund`, {
+      const res = await api.post<{ message?: string; order?: Order }>(`/api/admin/returns/${ord.id}/refund`, {
         refundAmount: parsedAmt,
         refundMethod: draft.refundMethod,
         refundReference: draft.refundReference.trim() || null,
@@ -1023,6 +1061,18 @@ function AdminContent() {
         adminNotes: draft.adminNotes.trim() || null,
       })
       toast.success(res.data?.message ?? 'Refund payment completed cleanly!')
+      const updatedOrd = res.data?.order
+      setReturnDrafts((prev) => {
+        const next = { ...prev }
+        delete next[ord.id]
+        return next
+      })
+      setShowOverridePayoutFor((prev) => ({ ...prev, [ord.id]: false }))
+      if (updatedOrd) {
+        setReturnsOrders((prev) => prev.map((item) => (item.id === ord.id ? updatedOrd : item)))
+        setOrders((prev) => prev.map((item) => (item.id === ord.id ? updatedOrd : item)))
+        setInspectOrder((prev) => (prev && prev.id === ord.id ? updatedOrd : prev))
+      }
       await fetchAllData()
     } catch (err: any) {
       toast.error(err?.response?.data?.message ?? err?.message ?? 'Failed to process refund')
@@ -1949,6 +1999,43 @@ function AdminContent() {
               </div>
 
               {/* 4 KPI Hero Cards */}
+              {(returnsSummary.requestedCount > 0 || returnsSummary.pendingPayoutCount > 0) && (
+                <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-amber-950 shadow-sm">
+                  <div className="flex items-start gap-3 text-xs">
+                    <RotateCcw className="w-4 h-4 text-amber-700 mt-0.5 flex-shrink-0" />
+                    <div>
+                      <p className="font-bold text-sm">
+                        Action Required on Returns &amp; Refunds Desk
+                      </p>
+                      <p className="text-amber-800 mt-0.5">
+                        {returnsSummary.requestedCount > 0 && (
+                          <span>
+                            <strong>{returnsSummary.requestedCount}</strong> customer return request(s) awaiting pickup review
+                          </span>
+                        )}
+                        {returnsSummary.requestedCount > 0 && returnsSummary.pendingPayoutCount > 0 && ' • '}
+                        {returnsSummary.pendingPayoutCount > 0 && (
+                          <span>
+                            <strong>{returnsSummary.pendingPayoutCount}</strong> verified order(s) ready for refund settlement ({formatCurrency(returnsSummary.pendingPayoutAmount)})
+                          </span>
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    onClick={() => {
+                      setReturnFilter(returnsSummary.requestedCount > 0 ? 'requested' : 'payout')
+                      setActiveTab('returns')
+                    }}
+                    className="bg-[#111111] hover:bg-[#C5A059] text-white hover:text-[#111111] font-semibold text-xs shrink-0"
+                  >
+                    Handle Returns Queue →
+                  </Button>
+                </div>
+              )}
+
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
                 <div className="bg-white border border-[#E7E5E4] rounded-2xl p-5 shadow-sm space-y-2">
                   <div className="flex items-center justify-between">
@@ -3337,7 +3424,11 @@ function AdminContent() {
                   const isCompleted = rsNorm === 'refundcompleted' || psNorm === 'refunded' || psNorm === 'partiallyrefunded'
                   const isRejected = rsNorm === 'rejected'
                   const isCod = safeStr(ord.paymentMethod).includes('cash')
+                  const isCancellationRefund =
+                    safeStr(ord.status) === 'cancelled' ||
+                    (rsNorm === 'refundinitiated' && safeStr(ord.returnReason).toLowerCase().includes('cancelled'))
                   const busy = processingReturnId === ord.id
+                  const overridePayoutOpen = !!showOverridePayoutFor[ord.id]
                   const stepIdx =
                     rsNorm === 'refundcompleted'
                       ? 4
@@ -3351,53 +3442,141 @@ function AdminContent() {
                       ? 0
                       : -1
 
+                  const deliveredAnchor = ord.deliveredAt ? new Date(ord.deliveredAt) : null
+                  const requestedAnchor = ord.returnRequestedAt ? new Date(ord.returnRequestedAt) : null
+                  const returnDayDelta =
+                    deliveredAnchor && requestedAnchor
+                      ? Math.max(0, Math.round((requestedAnchor.getTime() - deliveredAnchor.getTime()) / (1000 * 60 * 60 * 24)))
+                      : null
+
+                  const stageGuidance =
+                    isCancellationRefund
+                      ? 'Order cancelled before dispatch — verify refund method & complete customer payout.'
+                      : rsNorm === 'requested'
+                      ? 'Step 1: Verify 7-day policy eligibility and customer reason, then approve reverse pickup or decline.'
+                      : rsNorm === 'approved'
+                      ? 'Step 2: Reverse pickup scheduled — confirm once courier collects parcel from customer doorstep.'
+                      : rsNorm === 'pickedup'
+                      ? 'Step 3: Parcel in reverse transit — perform warehouse quality check & choose inventory restock.'
+                      : 'Step 4: QC passed — release & record refund payment to customer settlement account.'
+
+                  const canDirectSettle =
+                    isCancellationRefund ||
+                    rsNorm === 'received' ||
+                    rsNorm === 'refundinitiated' ||
+                    psNorm === 'refundinitiated' ||
+                    overridePayoutOpen
+
                   return (
                     <div
                       key={ord.id}
                       className="bg-white border border-[#E7E5E4] rounded-2xl p-5 sm:p-6 shadow-sm space-y-5"
                     >
                       {/* Top row */}
-                      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-4">
-                        <div className="flex flex-wrap items-center gap-2.5">
-                          <span className="font-mono text-base font-bold text-gold">{ord.orderNumber}</span>
-                          <StatusBadge status={ord.returnStatus ?? ord.paymentStatus} size="sm" />
-                          <StatusBadge status={ord.paymentStatus} size="sm" />
-                          <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-surface-2 border border-border text-beige-muted uppercase">
-                            {isCod ? 'COD Order' : 'Razorpay Online'}
-                          </span>
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border pb-4">
+                        <div className="space-y-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-mono text-base font-bold text-gold">{ord.orderNumber}</span>
+                            <StatusBadge status={ord.returnStatus ?? ord.paymentStatus} size="sm" />
+                            <StatusBadge status={ord.paymentStatus} size="sm" />
+                            <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-surface-2 border border-border text-beige-muted uppercase">
+                              {isCod ? 'COD Order' : 'Razorpay Online'}
+                            </span>
+                            <span
+                              className={`text-[10px] font-mono px-2 py-0.5 rounded border uppercase font-semibold ${
+                                isCancellationRefund
+                                  ? 'bg-rose-50 border-rose-200 text-rose-800'
+                                  : 'bg-amber-50 border-amber-200 text-amber-800'
+                              }`}
+                            >
+                              {isCancellationRefund ? 'Cancellation Refund' : '7-Day Doorstep Return'}
+                            </span>
+                          </div>
+                          <div className="text-[11px] text-beige-muted flex flex-wrap items-center gap-x-3 gap-y-0.5">
+                            <span>
+                              Requested: <strong className="text-beige">{formatDate(ord.returnRequestedAt ?? ord.updatedAt ?? ord.createdAt)}</strong>
+                            </span>
+                            {deliveredAnchor && !isCancellationRefund && (
+                              <span>
+                                Delivered: <strong className="text-beige">{formatDate(ord.deliveredAt)}</strong>
+                                {returnDayDelta !== null && (
+                                  <span className="ml-1 text-emerald-700 font-semibold">(Day {returnDayDelta} of 7)</span>
+                                )}
+                              </span>
+                            )}
+                          </div>
                         </div>
-                        <div className="text-right text-xs text-beige-muted">
-                          Requested:{' '}
-                          <strong className="text-beige">
-                            {formatDate(ord.returnRequestedAt ?? ord.updatedAt ?? ord.createdAt)}
-                          </strong>
+
+                        <div className="flex flex-wrap items-center gap-2 self-start sm:self-center">
+                          <button
+                            type="button"
+                            onClick={() => handleDownloadAdminInvoice(ord)}
+                            className="h-8 px-2.5 rounded-lg bg-surface-2 border border-border hover:border-gold text-beige text-[11px] font-semibold inline-flex items-center gap-1.5 transition-colors"
+                          >
+                            <Download className="w-3.5 h-3.5 text-gold" />
+                            Invoice PDF
+                          </button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleOpenInspectOrder(ord)}
+                            className="text-[11px] font-semibold py-1 px-2.5"
+                          >
+                            Inspect Order
+                          </Button>
                         </div>
                       </div>
 
-                      {/* 5-step Return Progress Strip */}
-                      {stepIdx >= 0 && (
-                        <div className="grid grid-cols-5 gap-2 text-center">
+                      {/* Step Audit Progress Strip */}
+                      {isCancellationRefund ? (
+                        <div className="grid grid-cols-2 gap-3 text-center">
                           {[
-                            { label: '1. Requested', idx: 0 },
-                            { label: '2. Approved', idx: 1 },
-                            { label: '3. Picked Up', idx: 2 },
-                            { label: '4. QC Passed', idx: 3 },
-                            { label: '5. Refund Settled', idx: 4 },
+                            { label: '1. Pre-Dispatch Cancelled & Stock Restored', done: true, date: ord.cancelledAt ?? ord.returnRequestedAt },
+                            { label: '2. Refund Payment Settled', done: isCompleted, date: ord.refundedAt },
                           ].map((st) => (
                             <div key={st.label} className="space-y-1">
-                              <div className={`h-2 rounded-full ${stepIdx >= st.idx ? 'bg-[#C5A059]' : 'bg-surface-2 border border-border'}`} />
-                              <span className={`block text-[10px] font-semibold ${stepIdx >= st.idx ? 'text-[#111111]' : 'text-beige-muted'}`}>
+                              <div className={`h-2 rounded-full ${st.done ? 'bg-emerald-600' : 'bg-amber-300'}`} />
+                              <span className={`block text-[10px] font-semibold ${st.done ? 'text-emerald-800' : 'text-amber-800'}`}>
                                 {st.label}
                               </span>
+                              {st.date && (
+                                <span className="block text-[9px] font-mono text-beige-muted">{formatDate(st.date)}</span>
+                              )}
                             </div>
                           ))}
                         </div>
-                      )}
+                      ) : stepIdx >= 0 ? (
+                        <div className="grid grid-cols-5 gap-2 text-center">
+                          {[
+                            { label: '1. Requested', idx: 0, date: ord.returnRequestedAt },
+                            { label: '2. Approved', idx: 1, date: ord.returnApprovedAt },
+                            { label: '3. Picked Up', idx: 2, date: ord.returnPickedUpAt },
+                            { label: '4. QC Passed', idx: 3, date: ord.returnReceivedAt },
+                            { label: '5. Refund Settled', idx: 4, date: ord.refundedAt },
+                          ].map((st) => {
+                            const done = stepIdx >= st.idx
+                            return (
+                              <div key={st.label} className="space-y-1">
+                                <div className={`h-2 rounded-full ${done ? 'bg-[#C5A059]' : 'bg-surface-2 border border-border'}`} />
+                                <span className={`block text-[10px] font-semibold ${done ? 'text-[#111111]' : 'text-beige-muted'}`}>
+                                  {st.label}
+                                </span>
+                                {st.date && done && (
+                                  <span className="block text-[9px] font-mono text-beige-muted">
+                                    {new Date(st.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
+                                  </span>
+                                )}
+                              </div>
+                            )
+                          })}
+                        </div>
+                      ) : null}
 
                       {/* Grid: Details vs Payout / Action Desk */}
                       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
                         <div className="lg:col-span-6 space-y-3 text-xs">
-                          <div className="p-3.5 rounded-xl bg-surface-2/60 border border-border space-y-1">
+                          <div className="p-3.5 rounded-xl bg-surface-2/60 border border-border space-y-1.5">
                             <p className="font-bold text-beige">
                               Customer: {ord.customerName ?? ord.shippingName} ({ord.customerEmail ?? ord.shippingPhone})
                             </p>
@@ -3406,14 +3585,40 @@ function AdminContent() {
                             </p>
                             {ord.returnCustomerNotes && (
                               <p className="text-beige-muted">
-                                <strong className="text-beige">Customer Note:</strong> {ord.returnCustomerNotes}
+                                <strong className="text-beige">Customer Note / Items:</strong> {ord.returnCustomerNotes}
                               </p>
                             )}
-                            {ord.customerRefundAccount && (
-                              <p className="text-emerald-800 font-mono font-semibold pt-1">
-                                Customer Payout Account: {ord.customerRefundAccount}
+                            {ord.returnPickupTracking && (
+                              <p className="text-beige-muted">
+                                <strong className="text-beige">Reverse Pickup Tracking:</strong>{' '}
+                                <span className="font-mono font-bold text-gold">{ord.returnPickupTracking}</span>
                               </p>
                             )}
+                            <div className="pt-1.5 mt-1.5 border-t border-border/70 flex flex-wrap items-center justify-between gap-2">
+                              <div>
+                                <span className="text-[10px] uppercase font-semibold text-beige-muted block">
+                                  Requested Payout Preference
+                                </span>
+                                <span className="font-semibold text-beige">
+                                  {ord.refundMethod || (isCod ? 'UpiTransfer' : 'RazorpayOriginalSource')}
+                                </span>
+                                {ord.customerRefundAccount && (
+                                  <span className="ml-2 font-mono font-bold text-emerald-800">
+                                    ({ord.customerRefundAccount})
+                                  </span>
+                                )}
+                              </div>
+                              {ord.customerRefundAccount && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleCopyText(ord.customerRefundAccount!, 'Copied Payout Account')}
+                                  className="inline-flex items-center gap-1 px-2 py-1 rounded bg-white border border-border hover:border-gold text-[11px] font-semibold text-beige transition-colors"
+                                >
+                                  <Copy className="w-3 h-3 text-gold" />
+                                  Copy Account
+                                </button>
+                              )}
+                            </div>
                           </div>
 
                           <div className="space-y-1.5">
@@ -3478,102 +3683,180 @@ function AdminContent() {
                             <>
                               <div className="flex items-center justify-between">
                                 <span className="font-bold uppercase tracking-wider text-gold">
-                                  Concierge Return &amp; Refund Actions
+                                  Concierge Return &amp; Refund Desk
                                 </span>
                                 <span className="font-mono font-bold text-beige">
-                                  Order Total: {formatCurrency(ord.totalAmount ?? ord.total ?? 0)}
+                                  Order Paid: {formatCurrency(ord.totalAmount ?? ord.total ?? 0)}
                                 </span>
                               </div>
 
-                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                                <div>
-                                  <label className="text-[10px] font-semibold uppercase text-beige-muted block mb-1">
-                                    Pickup Tracking ID
-                                  </label>
-                                  <input
-                                    type="text"
-                                    value={draft.pickupTracking}
-                                    onChange={(e) => updateDraft({ pickupTracking: e.target.value })}
-                                    placeholder="e.g. REV-PKP-4821"
-                                    className="w-full bg-white border border-border rounded-lg px-2.5 py-1.5 font-mono text-beige focus:outline-none focus:border-gold"
-                                  />
-                                </div>
-                                <div>
-                                  <label className="text-[10px] font-semibold uppercase text-beige-muted block mb-1">
-                                    Admin Note / QC Decision
-                                  </label>
-                                  <input
-                                    type="text"
-                                    value={draft.adminNotes}
-                                    onChange={(e) => updateDraft({ adminNotes: e.target.value })}
-                                    placeholder="Pickup scheduled / QC intact / reason..."
-                                    className="w-full bg-white border border-border rounded-lg px-2.5 py-1.5 text-beige focus:outline-none focus:border-gold"
-                                  />
-                                </div>
+                              <div className="p-2.5 rounded-lg bg-white border border-border text-[11px] text-beige">
+                                {stageGuidance}
                               </div>
 
-                              {/* Step transition buttons */}
-                              <div className="flex flex-wrap gap-2">
-                                {rsNorm === 'requested' && (
-                                  <>
-                                    <Button
-                                      type="button"
-                                      size="sm"
-                                      variant="primary"
-                                      disabled={busy}
-                                      onClick={() => handleReturnStepAction(ord, 'Approve')}
-                                      className="text-xs bg-[#111111] hover:bg-[#C5A059] text-white hover:text-[#111111]"
-                                    >
-                                      1. Approve Pickup
-                                    </Button>
-                                    <Button
-                                      type="button"
-                                      size="sm"
-                                      variant="outline"
-                                      disabled={busy}
-                                      onClick={() => handleReturnStepAction(ord, 'Reject')}
-                                      className="text-xs border-rose-300 text-rose-700 hover:bg-rose-50"
-                                    >
-                                      Decline Return
-                                    </Button>
-                                  </>
-                                )}
-                                {rsNorm === 'approved' && (
-                                  <Button
-                                    type="button"
-                                    size="sm"
-                                    variant="primary"
-                                    disabled={busy}
-                                    onClick={() => handleReturnStepAction(ord, 'MarkPickedUp')}
-                                    className="text-xs"
-                                  >
-                                    2. Confirm Picked Up
-                                  </Button>
-                                )}
-                                {(rsNorm === 'approved' || rsNorm === 'pickedup') && (
-                                  <Button
-                                    type="button"
-                                    size="sm"
-                                    variant="outline"
-                                    disabled={busy}
-                                    onClick={() => handleReturnStepAction(ord, 'MarkReceived')}
-                                    className="text-xs border-purple-300 text-purple-800 hover:bg-purple-50"
-                                  >
-                                    3. Pass Warehouse QC &amp; Receive
-                                  </Button>
-                                )}
-                              </div>
+                              {!isCancellationRefund && (
+                                <>
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                                    <div>
+                                      <label className="text-[10px] font-semibold uppercase text-beige-muted block mb-1">
+                                        Pickup Tracking ID
+                                      </label>
+                                      <input
+                                        type="text"
+                                        value={draft.pickupTracking}
+                                        onChange={(e) => updateDraft({ pickupTracking: e.target.value })}
+                                        placeholder="Auto-assigned on Approve"
+                                        className="w-full bg-white border border-border rounded-lg px-2.5 py-1.5 font-mono text-beige focus:outline-none focus:border-gold"
+                                      />
+                                    </div>
+                                    <div>
+                                      <label className="text-[10px] font-semibold uppercase text-beige-muted block mb-1">
+                                        Admin Note / QC Decision
+                                      </label>
+                                      <input
+                                        type="text"
+                                        value={draft.adminNotes}
+                                        onChange={(e) => updateDraft({ adminNotes: e.target.value })}
+                                        placeholder="Pickup scheduled / QC intact / decline reason..."
+                                        className="w-full bg-white border border-border rounded-lg px-2.5 py-1.5 text-beige focus:outline-none focus:border-gold"
+                                      />
+                                    </div>
+                                  </div>
+
+                                  {rsNorm === 'requested' && (
+                                    <div className="flex flex-wrap items-center gap-1.5">
+                                      <span className="text-[10px] text-beige-muted font-semibold mr-1">Quick Notes:</span>
+                                      {[
+                                        'Pickup approved for doorstep collection',
+                                        'Missing original tags / worn item',
+                                        'Returned outside 7-day condition policy',
+                                      ].map((preset) => (
+                                        <button
+                                          key={preset}
+                                          type="button"
+                                          onClick={() => updateDraft({ adminNotes: preset })}
+                                          className="text-[10px] px-2 py-0.5 rounded bg-white border border-border hover:border-gold text-beige-muted hover:text-beige transition-colors"
+                                        >
+                                          {preset}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  )}
+
+                                  {/* Primary guided step transitions */}
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    {rsNorm === 'requested' && (
+                                      <>
+                                        <Button
+                                          type="button"
+                                          size="sm"
+                                          variant="primary"
+                                          disabled={busy}
+                                          onClick={() => handleReturnStepAction(ord, 'Approve')}
+                                          className="text-xs bg-[#111111] hover:bg-[#C5A059] text-white hover:text-[#111111]"
+                                        >
+                                          1. Approve Pickup
+                                        </Button>
+                                        <Button
+                                          type="button"
+                                          size="sm"
+                                          variant="outline"
+                                          disabled={busy}
+                                          onClick={() => handleReturnStepAction(ord, 'Reject')}
+                                          className="text-xs border-rose-300 text-rose-700 hover:bg-rose-50"
+                                        >
+                                          Decline Return
+                                        </Button>
+                                      </>
+                                    )}
+                                    {rsNorm === 'approved' && (
+                                      <>
+                                        <Button
+                                          type="button"
+                                          size="sm"
+                                          variant="primary"
+                                          disabled={busy}
+                                          onClick={() => handleReturnStepAction(ord, 'MarkPickedUp')}
+                                          className="text-xs bg-[#111111] hover:bg-[#C5A059] text-white hover:text-[#111111]"
+                                        >
+                                          2. Confirm Courier Picked Up
+                                        </Button>
+                                        <Button
+                                          type="button"
+                                          size="sm"
+                                          variant="outline"
+                                          disabled={busy}
+                                          onClick={() => handleReturnStepAction(ord, 'SaveNotes')}
+                                          className="text-xs"
+                                        >
+                                          Save Tracking / Note
+                                        </Button>
+                                      </>
+                                    )}
+                                    {rsNorm === 'pickedup' && (
+                                      <div className="w-full space-y-2 pt-1">
+                                        <label className="inline-flex items-center gap-2 text-[11px] text-beige cursor-pointer">
+                                          <input
+                                            type="checkbox"
+                                            checked={draft.restockInventory}
+                                            disabled={ord.returnInventoryRestocked}
+                                            onChange={(e) => updateDraft({ restockInventory: e.target.checked })}
+                                            className="rounded border-border text-gold focus:ring-gold"
+                                          />
+                                          <span>
+                                            {ord.returnInventoryRestocked
+                                              ? 'Inventory already restocked'
+                                              : 'Restock returned item(s) to live catalog during QC'}
+                                          </span>
+                                        </label>
+                                        <div className="flex flex-wrap gap-2">
+                                          <Button
+                                            type="button"
+                                            size="sm"
+                                            variant="primary"
+                                            disabled={busy}
+                                            onClick={() => handleReturnStepAction(ord, 'MarkReceived')}
+                                            className="text-xs bg-purple-700 hover:bg-purple-800 text-white"
+                                          >
+                                            3. Complete Warehouse QC &amp; Receive
+                                          </Button>
+                                          <Button
+                                            type="button"
+                                            size="sm"
+                                            variant="outline"
+                                            disabled={busy}
+                                            onClick={() => handleReturnStepAction(ord, 'SaveNotes')}
+                                            className="text-xs"
+                                          >
+                                            Save Note
+                                          </Button>
+                                        </div>
+                                      </div>
+                                    )}
+                                    {(rsNorm === 'approved' || rsNorm === 'pickedup') && (
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setShowOverridePayoutFor((prev) => ({
+                                            ...prev,
+                                            [ord.id]: !prev[ord.id],
+                                          }))
+                                        }
+                                        className="text-[11px] font-semibold text-gold hover:underline ml-auto"
+                                      >
+                                        {overridePayoutOpen ? 'Hide Direct Payout' : 'Direct Payout Override →'}
+                                      </button>
+                                    )}
+                                  </div>
+                                </>
+                              )}
 
                               {/* Refund Payment Panel */}
-                              {(rsNorm === 'approved' ||
-                                rsNorm === 'pickedup' ||
-                                rsNorm === 'received' ||
-                                rsNorm === 'refundinitiated' ||
-                                psNorm === 'refundinitiated') && (
+                              {canDirectSettle && (
                                 <div className="border-t border-border pt-3 space-y-2.5">
                                   <span className="text-[11px] font-bold text-emerald-800 uppercase flex items-center gap-1.5">
                                     <Wallet className="w-3.5 h-3.5 text-emerald-600" />
-                                    Settle Return Refund Payment
+                                    {isCancellationRefund ? 'Settle Cancellation Refund Payout' : 'Settle Return Refund Payment'}
                                   </span>
                                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                                     <div>
@@ -3618,6 +3901,21 @@ function AdminContent() {
                                       />
                                     </div>
                                   </div>
+
+                                  {isCancellationRefund && (
+                                    <div>
+                                      <label className="text-[10px] font-semibold uppercase text-beige-muted block mb-1">
+                                        Settlement Note (Optional)
+                                      </label>
+                                      <input
+                                        type="text"
+                                        value={draft.adminNotes}
+                                        onChange={(e) => updateDraft({ adminNotes: e.target.value })}
+                                        placeholder="Refunded to customer payment source..."
+                                        className="w-full bg-white border border-border rounded-lg px-2.5 py-1.5 text-beige focus:outline-none focus:border-gold"
+                                      />
+                                    </div>
+                                  )}
 
                                   <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
                                     <label className="inline-flex items-center gap-2 text-[11px] text-beige cursor-pointer">
@@ -5912,21 +6210,44 @@ Nexus Linen Shirt | 3499 | 4999 | 15 | NX-M-02 | https://images.unsplash.com/...
                     )}
 
                     {inspectOrder.returnStatus && safeStr(inspectOrder.returnStatus) !== 'none' && (
-                      <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 flex items-center justify-between gap-2 text-xs text-amber-900">
-                        <span>
-                          Return Workflow Active: <strong>{inspectOrder.returnStatus}</strong>
-                          {inspectOrder.refundReference ? ` • Ref ${inspectOrder.refundReference}` : ''}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setInspectOrder(null)
-                            setActiveTab('returns')
-                          }}
-                          className="font-bold text-gold hover:underline shrink-0"
-                        >
-                          Open Returns Desk →
-                        </button>
+                      <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-amber-900">
+                        <div className="space-y-1">
+                          <div>
+                            Return Workflow Active: <strong>{inspectOrder.returnStatus}</strong>
+                            {inspectOrder.refundReference ? ` • Ref ${inspectOrder.refundReference}` : ''}
+                          </div>
+                          {inspectOrder.returnReason && (
+                            <div className="text-[11px] text-amber-800">
+                              Reason: <strong>{inspectOrder.returnReason}</strong>
+                              {inspectOrder.refundAmount ? ` • Est. Refund ${formatCurrency(inspectOrder.refundAmount)}` : ''}
+                              {inspectOrder.customerRefundAccount ? ` • Payout: ${inspectOrder.customerRefundAccount}` : ''}
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          {safeStr(inspectOrder.returnStatus) === 'requested' && (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="primary"
+                              disabled={processingReturnId === inspectOrder.id}
+                              onClick={() => handleReturnStepAction(inspectOrder, 'Approve')}
+                              className="text-[11px] bg-[#111111] hover:bg-[#C5A059] text-white hover:text-[#111111]"
+                            >
+                              Approve Pickup
+                            </Button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setInspectOrder(null)
+                              setActiveTab('returns')
+                            }}
+                            className="font-bold text-gold hover:underline shrink-0"
+                          >
+                            Open Returns Desk →
+                          </button>
+                        </div>
                       </div>
                     )}
 
