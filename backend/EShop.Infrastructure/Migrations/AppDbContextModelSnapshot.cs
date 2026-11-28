@@ -260,11 +260,26 @@ namespace EShop.Infrastructure.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<string>("CancellationReason")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("CancelledAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("ConfirmedAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("CouponCode")
+                        .HasColumnType("text");
+
+                    b.Property<string>("CourierName")
                         .HasColumnType("text");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CustomerRefundAccount")
+                        .HasColumnType("text");
 
                     b.Property<DateTime?>("DeliveredAt")
                         .HasColumnType("timestamp with time zone");
@@ -279,6 +294,9 @@ namespace EShop.Infrastructure.Migrations
                     b.Property<string>("OrderNumber")
                         .IsRequired()
                         .HasColumnType("text");
+
+                    b.Property<DateTime?>("OutForDeliveryAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<DateTime?>("PaidAt")
                         .HasColumnType("timestamp with time zone");
@@ -298,8 +316,57 @@ namespace EShop.Infrastructure.Migrations
                         .HasPrecision(18, 2)
                         .HasColumnType("numeric(18,2)");
 
+                    b.Property<DateTime?>("ProcessingAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("RazorpayOrderId")
                         .HasColumnType("text");
+
+                    b.Property<decimal?>("RefundAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<string>("RefundMethod")
+                        .HasColumnType("text");
+
+                    b.Property<string>("RefundReference")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("RefundedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ReturnAdminNotes")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("ReturnApprovedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ReturnCustomerNotes")
+                        .HasColumnType("text");
+
+                    b.Property<bool>("ReturnInventoryRestocked")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("ReturnPickedUpAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ReturnPickupTracking")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ReturnReason")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("ReturnReceivedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("ReturnRequestedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ReturnStatus")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text")
+                        .HasDefaultValue("None");
 
                     b.Property<DateTime?>("ShippedAt")
                         .HasColumnType("timestamp with time zone");
@@ -368,6 +435,8 @@ namespace EShop.Infrastructure.Migrations
 
                     b.HasIndex("OrderNumber")
                         .IsUnique();
+
+                    b.HasIndex("ReturnStatus");
 
                     b.HasIndex("UserId");
 

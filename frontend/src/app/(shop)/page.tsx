@@ -117,8 +117,8 @@ const WHY_CHOOSE_US = [
   },
   {
     icon: RefreshCw,
-    title: 'Hassle-Free 30-Day Returns',
-    description: 'Complimentary doorstep return pickups and instant exchanges.',
+    title: 'Hassle-Free 7-Day Returns',
+    description: 'Complimentary doorstep return pickups within 7 days of delivery and fast refund settlement.',
   },
 ]
 
@@ -284,7 +284,7 @@ export default function HomePage() {
             {[
               { value: '100%', label: 'Quality Checked' },
               { value: '₹999+', label: 'Free Delivery' },
-              { value: '30-Day', label: 'Doorstep Returns' },
+              { value: '7-Day', label: 'Doorstep Returns' },
               { value: '24/7', label: 'VIP Concierge' },
             ].map((stat) => (
               <div key={stat.label} className="text-center">

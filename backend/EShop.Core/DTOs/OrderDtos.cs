@@ -68,7 +68,37 @@ public record OrderDto(
     DateTime? PaidAt,
     DateTime? ShippedAt,
     DateTime? DeliveredAt,
-    List<OrderItemDto> Items
+    List<OrderItemDto> Items,
+    string? CourierName = null,
+    DateTime? ConfirmedAt = null,
+    DateTime? ProcessingAt = null,
+    DateTime? OutForDeliveryAt = null,
+    DateTime? CancelledAt = null,
+    string? CancellationReason = null,
+    ReturnStatus ReturnStatus = ReturnStatus.None,
+    string? ReturnReason = null,
+    string? ReturnCustomerNotes = null,
+    string? ReturnAdminNotes = null,
+    string? ReturnPickupTracking = null,
+    DateTime? ReturnRequestedAt = null,
+    DateTime? ReturnApprovedAt = null,
+    DateTime? ReturnPickedUpAt = null,
+    DateTime? ReturnReceivedAt = null,
+    bool ReturnInventoryRestocked = false,
+    decimal? RefundAmount = null,
+    string? RefundMethod = null,
+    string? CustomerRefundAccount = null,
+    string? RefundReference = null,
+    DateTime? RefundedAt = null
+);
+
+public record CancelOrderRequest(string? Reason = null);
+
+public record RequestReturnDto(
+    string Reason,
+    string? Notes = null,
+    string? RefundMethodPreference = null,
+    string? RefundAccountDetails = null
 );
 
 public record OrderItemDto(

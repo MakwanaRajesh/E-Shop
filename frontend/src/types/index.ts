@@ -191,14 +191,40 @@ export interface Address {
 
 export type OrderStatus =
   | 'pending'
+  | 'payment_pending'
+  | 'paymentpending'
   | 'confirmed'
   | 'processing'
   | 'shipped'
+  | 'out_for_delivery'
+  | 'outfordelivery'
   | 'delivered'
   | 'cancelled'
   | 'refunded'
+  | string
 
-export type PaymentStatus = 'pending' | 'paid' | 'failed' | 'refunded'
+export type PaymentStatus =
+  | 'pending'
+  | 'paid'
+  | 'completed'
+  | 'failed'
+  | 'refund_initiated'
+  | 'refundinitiated'
+  | 'partially_refunded'
+  | 'partiallyrefunded'
+  | 'refunded'
+  | string
+
+export type ReturnStatus =
+  | 'None'
+  | 'Requested'
+  | 'Approved'
+  | 'PickedUp'
+  | 'Received'
+  | 'RefundInitiated'
+  | 'RefundCompleted'
+  | 'Rejected'
+  | string
 
 export interface OrderItem {
   id: string
@@ -219,6 +245,8 @@ export interface Order {
   id: string
   orderNumber: string
   userId?: string
+  customerName?: string
+  customerEmail?: string
   status: OrderStatus
   paymentStatus: PaymentStatus
   paymentMethod?: string
@@ -241,12 +269,33 @@ export interface Order {
   total?: number
   totalAmount?: number
   notes?: string
+  courierName?: string
   trackingNumber?: string
   createdAt: string
+  confirmedAt?: string
+  processingAt?: string
   paidAt?: string
   shippedAt?: string
+  outForDeliveryAt?: string
   deliveredAt?: string
+  cancelledAt?: string
+  cancellationReason?: string
   updatedAt?: string
+  returnStatus?: ReturnStatus
+  returnReason?: string
+  returnCustomerNotes?: string
+  returnAdminNotes?: string
+  returnPickupTracking?: string
+  returnRequestedAt?: string
+  returnApprovedAt?: string
+  returnPickedUpAt?: string
+  returnReceivedAt?: string
+  returnInventoryRestocked?: boolean
+  refundAmount?: number
+  refundMethod?: string
+  customerRefundAccount?: string
+  refundReference?: string
+  refundedAt?: string
 }
 
 // ─── Review ───────────────────────────────────────────────────────────────────
@@ -401,6 +450,12 @@ export interface RecentOrderDto {
   createdAt: string
 }
 
+export interface DailyRevenuePoint {
+  dateLabel: string
+  revenue: number
+  orderCount: number
+}
+
 export interface DashboardStats {
   totalOrders: number
   pendingOrders: number
@@ -411,4 +466,15 @@ export interface DashboardStats {
   revenueToday: number
   revenueThisMonth: number
   recentOrders: RecentOrderDto[]
+  totalRefunded?: number
+  netRevenue?: number
+  confirmedOrders?: number
+  processingOrders?: number
+  shippedOrders?: number
+  deliveredOrders?: number
+  cancelledOrders?: number
+  activeReturns?: number
+  pendingRefundsCount?: number
+  pendingRefundsAmount?: number
+  revenueSeries?: DailyRevenuePoint[]
 }

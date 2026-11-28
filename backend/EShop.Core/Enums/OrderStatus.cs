@@ -18,7 +18,21 @@ public enum PaymentStatus
     Pending,
     Completed,
     Failed,
+    RefundInitiated,
+    PartiallyRefunded,
     Refunded
+}
+
+public enum ReturnStatus
+{
+    None,
+    Requested,
+    Approved,
+    PickedUp,
+    Received,
+    RefundInitiated,
+    RefundCompleted,
+    Rejected
 }
 
 public enum PaymentMethod

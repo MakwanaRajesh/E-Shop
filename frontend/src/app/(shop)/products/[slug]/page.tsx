@@ -1081,24 +1081,24 @@ export default function ProductDetailPage({ params }: Props) {
           </div>
 
           {/* CTAs */}
-          <div className="flex flex-col sm:flex-row gap-3">
+          <div className="grid grid-cols-2 sm:flex sm:items-center gap-2.5 sm:gap-3 pt-1">
             <Button
               type="button"
               variant="primary"
               size="lg"
-              className="w-full sm:flex-1 h-12 min-h-[48px] shrink-0 rounded-xl bg-[#111111] hover:bg-[#1C1917] text-white font-semibold shadow-sm"
+              className="w-full sm:flex-1 h-12 min-h-[48px] px-2.5 sm:px-6 text-[13px] sm:text-sm rounded-xl bg-[#111111] hover:bg-[#1C1917] text-white font-semibold shadow-sm"
               onClick={() => handleAddToCart(false)}
               isLoading={isAddingToCart}
               disabled={effectiveStock === 0}
             >
-              <ShoppingCart className="w-5 h-5" />
+              <ShoppingCart className="w-4 h-4 sm:w-5 sm:h-5 shrink-0" />
               <span>{effectiveStock === 0 ? 'Out of Stock' : 'Add to Cart'}</span>
             </Button>
             <Button
               type="button"
               variant="primary"
               size="lg"
-              className="w-full sm:flex-1 h-12 min-h-[48px] shrink-0 rounded-xl bg-[#C5A059] hover:bg-[#B08D46] text-[#111111] font-bold shadow-sm"
+              className="w-full sm:flex-1 h-12 min-h-[48px] px-2.5 sm:px-6 text-[13px] sm:text-sm rounded-xl bg-[#C5A059] hover:bg-[#B08D46] text-[#111111] font-bold shadow-sm"
               onClick={() => handleAddToCart(true)}
               isLoading={isAddingToCart}
               disabled={effectiveStock === 0}
@@ -1111,27 +1111,30 @@ export default function ProductDetailPage({ params }: Props) {
               size="lg"
               onClick={handleWishlist}
               aria-label={inWishlist ? 'Remove from wishlist' : 'Add to wishlist'}
-              className="w-full sm:w-auto h-12 min-h-[48px] shrink-0 px-4 rounded-xl border border-[#E7E5E4] bg-white hover:border-[#C5A059]"
+              className="col-span-2 sm:col-span-1 w-full sm:w-12 h-11 sm:h-12 min-h-[44px] sm:min-h-[48px] px-4 sm:px-0 shrink-0 rounded-xl border border-[#E7E5E4] bg-white hover:border-[#C5A059]"
             >
               <Heart
-                className={cn('w-5 h-5 transition-colors', inWishlist ? 'fill-error text-error' : 'text-beige-muted hover:text-error')}
+                className={cn('w-4 h-4 sm:w-5 sm:h-5 transition-colors', inWishlist ? 'fill-error text-error' : 'text-beige-muted hover:text-error')}
               />
+              <span className="text-xs font-semibold text-[#111111] sm:hidden">
+                {inWishlist ? 'Saved in Wishlist' : 'Save to Wishlist'}
+              </span>
             </Button>
           </div>
 
           {/* Trust badges */}
-          <div className="grid grid-cols-3 gap-3 pt-2">
+          <div className="grid grid-cols-3 gap-2 sm:gap-3 pt-2">
             {[
               { icon: Truck, text: 'Free Delivery ₹999+ & 1st Order' },
               { icon: ShieldCheck, text: '100% Quality Checked' },
-              { icon: RefreshCw, text: '30-Day Returns' },
+              { icon: RefreshCw, text: '7-Day Returns' },
             ].map(({ icon: Icon, text }) => (
               <div
                 key={text}
-                className="flex flex-col items-center gap-1.5 p-3 rounded-lg bg-surface-2 border border-border text-center"
+                className="flex flex-col items-center gap-1.5 p-2.5 sm:p-3 rounded-lg bg-surface-2 border border-border text-center"
               >
                 <Icon className="w-4 h-4 text-gold" />
-                <span className="text-xs text-beige-muted">{text}</span>
+                <span className="text-[11px] sm:text-xs text-beige-muted leading-snug">{text}</span>
               </div>
             ))}
           </div>
@@ -1362,7 +1365,7 @@ export default function ProductDetailPage({ params }: Props) {
           {/* Section 5: Shipping, Returns & Concierge */}
           <Accordion.Item value="shipping" className="border-b border-border">
             <Accordion.Trigger className="flex w-full items-center justify-between py-4 text-left font-serif text-base font-medium text-beige hover:text-gold transition-colors [&[data-state=open]>svg]:rotate-180">
-              <span>Complimentary White-Glove Shipping & 30-Day Returns</span>
+              <span>Complimentary White-Glove Shipping & 7-Day Returns</span>
               <ChevronRight className="w-4 h-4 text-beige-muted transition-transform duration-200 rotate-90" />
             </Accordion.Trigger>
             <Accordion.Content className="pb-5 text-beige-muted text-sm leading-relaxed space-y-3">
@@ -1379,10 +1382,10 @@ export default function ProductDetailPage({ params }: Props) {
                 <div className="bg-surface-2/40 border border-border p-3.5 rounded-xl space-y-1">
                   <div className="flex items-center gap-2 text-gold font-semibold">
                     <RefreshCw className="w-4 h-4" />
-                    <span>30-Day Doorstep Exchange & Returns</span>
+                    <span>7-Day Doorstep Exchange &amp; Returns</span>
                   </div>
                   <p className="text-beige-muted">
-                    If the size or fit isn&rsquo;t perfect, our courier will collect it directly from your doorstep with zero friction and instant credit.
+                    Within 7 days of delivery, our courier will collect eligible items directly from your doorstep for a smooth exchange or refund settlement.
                   </p>
                 </div>
               </div>

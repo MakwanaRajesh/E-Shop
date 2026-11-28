@@ -1,5 +1,10 @@
+using System.Net.Http.Headers;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using EShop.API.Services;
 using EShop.Core.DTOs;
+using EShop.Core.Entities;
 using EShop.Core.Enums;
 using EShop.Infrastructure.Data;
 using EShop.Infrastructure.Services;
@@ -17,38 +22,101 @@ public class AdminController(
     AppDbContext db,
     SecurityMonitorService securityMonitor,
     CatalogCacheService catalogCache,
-    IMemoryCache cache) : ControllerBase
+    IMemoryCache cache,
+    IConfiguration configuration,
+    IHttpClientFactory httpClientFactory) : ControllerBase
 {
-    private readonly AppDbContext           _db              = db;
-    private readonly SecurityMonitorService _securityMonitor = securityMonitor;
-    private readonly CatalogCacheService    _catalogCache    = catalogCache;
-    private readonly IMemoryCache           _cache           = cache;
+    private readonly AppDbContext           _db                = db;
+    private readonly SecurityMonitorService _securityMonitor   = securityMonitor;
+    private readonly CatalogCacheService    _catalogCache      = catalogCache;
+    private readonly IMemoryCache           _cache             = cache;
+    private readonly IConfiguration         _configuration     = configuration;
+    private readonly IHttpClientFactory     _httpClientFactory = httpClientFactory;
 
     // ── GET /api/admin/dashboard ──────────────────────────────────────────────
     [HttpGet("dashboard")]
     public async Task<IActionResult> GetDashboard()
     {
-        var now           = DateTime.UtcNow;
-        var todayStart    = now.Date;
-        var monthStart    = new DateTime(now.Year, now.Month, 1, 0, 0, 0, DateTimeKind.Utc);
+        var now        = DateTime.UtcNow;
+        var todayStart = now.Date;
+        var monthStart = new DateTime(now.Year, now.Month, 1, 0, 0, 0, DateTimeKind.Utc);
+        var sevenDaysAgo = todayStart.AddDays(-6);
 
-        var totalOrders     = await _db.Orders.CountAsync();
-        var pendingOrders   = await _db.Orders.CountAsync(o => o.Status == OrderStatus.Pending || o.Status == OrderStatus.PaymentPending);
+        var totalOrders      = await _db.Orders.CountAsync();
+        var pendingOrders    = await _db.Orders.CountAsync(o => o.Status == OrderStatus.Pending || o.Status == OrderStatus.PaymentPending);
+        var confirmedOrders  = await _db.Orders.CountAsync(o => o.Status == OrderStatus.Confirmed);
+        var processingOrders = await _db.Orders.CountAsync(o => o.Status == OrderStatus.Processing);
+        var shippedOrders    = await _db.Orders.CountAsync(o => o.Status == OrderStatus.Shipped || o.Status == OrderStatus.OutForDelivery);
+        var deliveredOrders  = await _db.Orders.CountAsync(o => o.Status == OrderStatus.Delivered);
+        var cancelledOrders  = await _db.Orders.CountAsync(o => o.Status == OrderStatus.Cancelled);
+
         var totalProducts   = await _db.Products.CountAsync(p => p.IsActive);
         var lowStock        = await _db.Products.CountAsync(p => p.IsActive && p.TrackInventory && p.Stock <= 5);
         var totalCustomers  = await _db.Users.CountAsync(u => u.Role == UserRole.Customer && u.IsActive);
 
-        var totalRevenue    = await _db.Orders
-            .Where(o => o.PaymentStatus == PaymentStatus.Completed)
-            .SumAsync(o => (decimal?)o.TotalAmount) ?? 0;
+        var activeReturns = await _db.Orders.CountAsync(o =>
+            o.ReturnStatus == ReturnStatus.Requested ||
+            o.ReturnStatus == ReturnStatus.Approved ||
+            o.ReturnStatus == ReturnStatus.PickedUp ||
+            o.ReturnStatus == ReturnStatus.Received ||
+            o.ReturnStatus == ReturnStatus.RefundInitiated);
 
-        var revenueToday    = await _db.Orders
+        var pendingRefundRows = await _db.Orders
+            .AsNoTracking()
+            .Where(o =>
+                o.PaymentStatus == PaymentStatus.RefundInitiated ||
+                o.ReturnStatus == ReturnStatus.Received ||
+                o.ReturnStatus == ReturnStatus.RefundInitiated)
+            .Select(o => new { o.RefundAmount, o.TotalAmount })
+            .ToListAsync();
+
+        var pendingRefundsCount  = pendingRefundRows.Count;
+        var pendingRefundsAmount = pendingRefundRows.Sum(r => r.RefundAmount ?? r.TotalAmount);
+
+        var grossRevenue = await _db.Orders
+            .Where(o =>
+                o.PaymentStatus == PaymentStatus.Completed ||
+                o.PaymentStatus == PaymentStatus.RefundInitiated ||
+                o.PaymentStatus == PaymentStatus.PartiallyRefunded ||
+                o.PaymentStatus == PaymentStatus.Refunded)
+            .SumAsync(o => (decimal?)o.TotalAmount) ?? 0m;
+
+        var totalRefunded = await _db.Orders
+            .Where(o =>
+                o.PaymentStatus == PaymentStatus.Refunded ||
+                o.PaymentStatus == PaymentStatus.PartiallyRefunded ||
+                o.ReturnStatus == ReturnStatus.RefundCompleted)
+            .SumAsync(o => (decimal?)(o.RefundAmount ?? o.TotalAmount)) ?? 0m;
+
+        var netRevenue = Math.Max(0m, grossRevenue - totalRefunded);
+
+        var revenueToday = await _db.Orders
             .Where(o => o.PaymentStatus == PaymentStatus.Completed && o.PaidAt >= todayStart)
-            .SumAsync(o => (decimal?)o.TotalAmount) ?? 0;
+            .SumAsync(o => (decimal?)o.TotalAmount) ?? 0m;
 
         var revenueThisMonth = await _db.Orders
             .Where(o => o.PaymentStatus == PaymentStatus.Completed && o.PaidAt >= monthStart)
-            .SumAsync(o => (decimal?)o.TotalAmount) ?? 0;
+            .SumAsync(o => (decimal?)o.TotalAmount) ?? 0m;
+
+        var recentOrdersWindow = await _db.Orders
+            .AsNoTracking()
+            .Where(o => o.CreatedAt >= sevenDaysAgo && o.Status != OrderStatus.Cancelled)
+            .Select(o => new { o.CreatedAt, o.TotalAmount })
+            .ToListAsync();
+
+        var revenueSeries = Enumerable.Range(0, 7)
+            .Select(offset =>
+            {
+                var day = sevenDaysAgo.AddDays(offset);
+                var dayNext = day.AddDays(1);
+                var matches = recentOrdersWindow.Where(r => r.CreatedAt >= day && r.CreatedAt < dayNext).ToList();
+                return new DailyRevenuePointDto(
+                    DateLabel: day.ToString("dd MMM"),
+                    Revenue:   matches.Sum(m => m.TotalAmount),
+                    OrderCount: matches.Count
+                );
+            })
+            .ToList();
 
         var recentOrders = await _db.Orders
             .AsNoTracking()
@@ -64,15 +132,26 @@ public class AdminController(
             .ToListAsync();
 
         return Ok(new DashboardStats(
-            TotalOrders:      totalOrders,
-            PendingOrders:    pendingOrders,
-            TotalProducts:    totalProducts,
-            LowStockProducts: lowStock,
-            TotalCustomers:   totalCustomers,
-            TotalRevenue:     totalRevenue,
-            RevenueToday:     revenueToday,
-            RevenueThisMonth: revenueThisMonth,
-            RecentOrders:     recentOrders
+            TotalOrders:          totalOrders,
+            PendingOrders:        pendingOrders,
+            TotalProducts:        totalProducts,
+            LowStockProducts:     lowStock,
+            TotalCustomers:       totalCustomers,
+            TotalRevenue:         grossRevenue,
+            RevenueToday:         revenueToday,
+            RevenueThisMonth:     revenueThisMonth,
+            RecentOrders:         recentOrders,
+            TotalRefunded:        totalRefunded,
+            NetRevenue:           netRevenue,
+            ConfirmedOrders:      confirmedOrders,
+            ProcessingOrders:     processingOrders,
+            ShippedOrders:        shippedOrders,
+            DeliveredOrders:      deliveredOrders,
+            CancelledOrders:      cancelledOrders,
+            ActiveReturns:        activeReturns,
+            PendingRefundsCount:  pendingRefundsCount,
+            PendingRefundsAmount: pendingRefundsAmount,
+            RevenueSeries:        revenueSeries
         ));
     }
 
@@ -90,12 +169,27 @@ public class AdminController(
             .AsNoTracking()
             .Include(o => o.User)
             .Include(o => o.Items)
+                .ThenInclude(i => i.Product)
             .AsQueryable();
 
-        if (!string.IsNullOrWhiteSpace(status) &&
-            Enum.TryParse<OrderStatus>(status, true, out var parsedStatus))
+        if (!string.IsNullOrWhiteSpace(status))
         {
-            query = query.Where(o => o.Status == parsedStatus);
+            if (string.Equals(status, "returns", StringComparison.OrdinalIgnoreCase))
+            {
+                query = query.Where(o =>
+                    o.ReturnStatus == ReturnStatus.Requested ||
+                    o.ReturnStatus == ReturnStatus.Approved ||
+                    o.ReturnStatus == ReturnStatus.PickedUp ||
+                    o.ReturnStatus == ReturnStatus.Received ||
+                    o.ReturnStatus == ReturnStatus.RefundInitiated ||
+                    o.ReturnStatus == ReturnStatus.RefundCompleted ||
+                    o.ReturnStatus == ReturnStatus.Rejected ||
+                    o.PaymentStatus == PaymentStatus.RefundInitiated);
+            }
+            else if (Enum.TryParse<OrderStatus>(status, true, out var parsedStatus))
+            {
+                query = query.Where(o => o.Status == parsedStatus);
+            }
         }
 
         query = query.OrderByDescending(o => o.CreatedAt);
@@ -108,42 +202,7 @@ public class AdminController(
             .Take(pageSize)
             .ToListAsync();
 
-        var dtos = orders.Select(o => new
-        {
-            o.Id,
-            o.OrderNumber,
-            CustomerName         = $"{o.User.FirstName} {o.User.LastName}",
-            CustomerEmail        = o.User.Email,
-            o.Status,
-            o.PaymentStatus,
-            o.PaymentMethod,
-            o.SubTotal,
-            o.ShippingCost,
-            o.PlatformFee,
-            o.Discount,
-            o.TotalAmount,
-            o.CreatedAt,
-            ItemCount            = o.Items.Count,
-            ShippingName         = o.ShippingName,
-            ShippingPhone        = o.ShippingPhone,
-            ShippingAddressLine1 = o.ShippingAddressLine1,
-            ShippingAddressLine2 = o.ShippingAddressLine2,
-            ShippingCity         = o.ShippingCity,
-            ShippingState        = o.ShippingState,
-            ShippingPinCode      = o.ShippingPinCode,
-            TrackingNumber       = o.TrackingNumber,
-            Items                = o.Items.Select(i => new
-            {
-                i.Id,
-                i.ProductId,
-                i.ProductName,
-                i.ProductImageUrl,
-                i.VariantName,
-                i.Quantity,
-                i.UnitPrice,
-                i.TotalPrice
-            }).ToList()
-        });
+        var dtos = orders.Select(MapAdminOrderSummary);
 
         return Ok(new { Items = dtos, TotalCount = total, Page = page, PageSize = pageSize, TotalPages = totalPages });
     }
@@ -161,51 +220,82 @@ public class AdminController(
             return BadRequest(new { message = $"Invalid status '{req.Status}'." });
 
         var previousStatus = order.Status;
+        if (!IsValidOrderTransition(previousStatus, newStatus, out var validationError))
+            return BadRequest(new { message = validationError });
+
+        var now = DateTime.UtcNow;
         order.Status = newStatus;
 
-        // Auto-set timestamps & payment status for COD fulfillment
-        if (newStatus == OrderStatus.Shipped && order.ShippedAt is null)
-            order.ShippedAt = DateTime.UtcNow;
+        if (!string.IsNullOrWhiteSpace(req.CourierName))
+            order.CourierName = req.CourierName.Trim()[..Math.Min(80, req.CourierName.Trim().Length)];
+
+        if (!string.IsNullOrWhiteSpace(req.TrackingNumber))
+            order.TrackingNumber = req.TrackingNumber.Trim()[..Math.Min(80, req.TrackingNumber.Trim().Length)];
+
+        if (newStatus == OrderStatus.Confirmed)
+            order.ConfirmedAt ??= now;
+
+        if (newStatus == OrderStatus.Processing)
+        {
+            order.ConfirmedAt  ??= now;
+            order.ProcessingAt ??= now;
+        }
+
+        if (newStatus == OrderStatus.Shipped)
+        {
+            order.ConfirmedAt  ??= now;
+            order.ProcessingAt ??= now;
+            order.ShippedAt    ??= now;
+        }
+
+        if (newStatus == OrderStatus.OutForDelivery)
+        {
+            order.ConfirmedAt      ??= now;
+            order.ProcessingAt     ??= now;
+            order.ShippedAt        ??= now;
+            order.OutForDeliveryAt ??= now;
+        }
+
         if (newStatus == OrderStatus.Delivered)
         {
-            order.DeliveredAt ??= DateTime.UtcNow;
+            order.ConfirmedAt      ??= now;
+            order.ProcessingAt     ??= now;
+            order.ShippedAt        ??= now;
+            order.OutForDeliveryAt ??= now;
+            order.DeliveredAt      ??= now;
+
             if (order.PaymentMethod == PaymentMethod.CashOnDelivery && order.PaymentStatus != PaymentStatus.Completed)
             {
                 order.PaymentStatus = PaymentStatus.Completed;
-                order.PaidAt ??= DateTime.UtcNow;
+                order.PaidAt ??= now;
             }
         }
-        if (newStatus == OrderStatus.Refunded)
-            order.PaymentStatus = PaymentStatus.Refunded;
 
-        // Restore inventory if transitioning to Cancelled from a non-cancelled status
         if (newStatus == OrderStatus.Cancelled && previousStatus != OrderStatus.Cancelled)
         {
-            foreach (var item in order.Items)
+            order.CancelledAt        = now;
+            order.CancellationReason = string.IsNullOrWhiteSpace(req.Reason)
+                ? "Cancelled by Administrator"
+                : req.Reason.Trim()[..Math.Min(300, req.Reason.Trim().Length)];
+
+            await RestoreOrderInventoryAsync(order);
+
+            if (!string.IsNullOrWhiteSpace(order.CouponCode))
             {
-                if (item.VariantId.HasValue)
-                {
-                    var variant = await _db.ProductVariants.FindAsync(item.VariantId.Value);
-                    if (variant is not null)
-                    {
-                        variant.Stock += item.Quantity;
-                        _db.ProductVariants.Update(variant);
-                    }
-                }
-                else
-                {
-                    var product = await _db.Products.FindAsync(item.ProductId);
-                    if (product is not null)
-                    {
-                        product.Stock += item.Quantity;
-                        _db.Products.Update(product);
-                    }
-                }
+                await _db.Database.ExecuteSqlInterpolatedAsync(
+                    $@"UPDATE ""Coupons"" SET ""UsedCount"" = GREATEST(0, ""UsedCount"" - 1) WHERE ""Code"" = {order.CouponCode}");
+            }
+
+            if (order.PaymentStatus == PaymentStatus.Completed)
+            {
+                order.PaymentStatus     = PaymentStatus.RefundInitiated;
+                order.ReturnStatus      = ReturnStatus.RefundInitiated;
+                order.RefundAmount      = order.TotalAmount;
+                order.RefundMethod      = order.PaymentMethod == PaymentMethod.Razorpay ? "RazorpayOriginalSource" : "UpiTransfer";
+                order.ReturnRequestedAt ??= now;
+                order.ReturnReason      ??= "Prepaid order cancelled by store";
             }
         }
-
-        if (!string.IsNullOrWhiteSpace(req.TrackingNumber))
-            order.TrackingNumber = req.TrackingNumber.Trim();
 
         _db.Orders.Update(order);
         await _db.SaveChangesAsync();
@@ -215,9 +305,262 @@ public class AdminController(
 
         return Ok(new
         {
-            message       = "Order status updated.",
-            status        = newStatus.ToString(),
-            paymentStatus = order.PaymentStatus.ToString()
+            message          = $"Order updated to {newStatus}.",
+            status           = newStatus.ToString(),
+            paymentStatus    = order.PaymentStatus.ToString(),
+            returnStatus     = order.ReturnStatus.ToString(),
+            courierName      = order.CourierName,
+            trackingNumber   = order.TrackingNumber,
+            confirmedAt      = order.ConfirmedAt,
+            processingAt     = order.ProcessingAt,
+            shippedAt        = order.ShippedAt,
+            outForDeliveryAt = order.OutForDeliveryAt,
+            deliveredAt      = order.DeliveredAt,
+            cancelledAt      = order.CancelledAt
+        });
+    }
+
+    // ── GET /api/admin/returns ────────────────────────────────────────────────
+    [HttpGet("returns")]
+    public async Task<IActionResult> GetReturnsQueue([FromQuery] string? filter = "all")
+    {
+        var query = _db.Orders
+            .AsNoTracking()
+            .Include(o => o.User)
+            .Include(o => o.Items)
+                .ThenInclude(i => i.Product)
+            .Where(o =>
+                o.ReturnStatus == ReturnStatus.Requested ||
+                o.ReturnStatus == ReturnStatus.Approved ||
+                o.ReturnStatus == ReturnStatus.PickedUp ||
+                o.ReturnStatus == ReturnStatus.Received ||
+                o.ReturnStatus == ReturnStatus.RefundInitiated ||
+                o.ReturnStatus == ReturnStatus.RefundCompleted ||
+                o.ReturnStatus == ReturnStatus.Rejected ||
+                o.PaymentStatus == PaymentStatus.RefundInitiated);
+
+        var allReturnOrders = await query
+            .OrderByDescending(o => o.ReturnRequestedAt ?? o.UpdatedAt)
+            .ToListAsync();
+
+        IEnumerable<Order> filtered = allReturnOrders;
+        var normFilter = (filter ?? "all").Trim().ToLowerInvariant();
+        if (normFilter == "requested")
+            filtered = allReturnOrders.Where(o => o.ReturnStatus == ReturnStatus.Requested);
+        else if (normFilter == "pickup")
+            filtered = allReturnOrders.Where(o => o.ReturnStatus == ReturnStatus.Approved || o.ReturnStatus == ReturnStatus.PickedUp);
+        else if (normFilter == "payout")
+            filtered = allReturnOrders.Where(o => o.ReturnStatus == ReturnStatus.Received || o.ReturnStatus == ReturnStatus.RefundInitiated || o.PaymentStatus == PaymentStatus.RefundInitiated);
+        else if (normFilter == "completed")
+            filtered = allReturnOrders.Where(o => o.ReturnStatus == ReturnStatus.RefundCompleted || o.PaymentStatus == PaymentStatus.Refunded || o.PaymentStatus == PaymentStatus.PartiallyRefunded);
+        else if (normFilter == "rejected")
+            filtered = allReturnOrders.Where(o => o.ReturnStatus == ReturnStatus.Rejected);
+
+        var items = filtered.Select(MapAdminOrderSummary).ToList();
+
+        return Ok(new
+        {
+            Items               = items,
+            RequestedCount      = allReturnOrders.Count(o => o.ReturnStatus == ReturnStatus.Requested),
+            InPickupCount       = allReturnOrders.Count(o => o.ReturnStatus == ReturnStatus.Approved || o.ReturnStatus == ReturnStatus.PickedUp),
+            PendingPayoutCount  = allReturnOrders.Count(o => o.ReturnStatus == ReturnStatus.Received || o.ReturnStatus == ReturnStatus.RefundInitiated || o.PaymentStatus == PaymentStatus.RefundInitiated),
+            PendingPayoutAmount = allReturnOrders
+                .Where(o => o.ReturnStatus == ReturnStatus.Received || o.ReturnStatus == ReturnStatus.RefundInitiated || o.PaymentStatus == PaymentStatus.RefundInitiated)
+                .Sum(o => o.RefundAmount ?? o.TotalAmount),
+            CompletedCount      = allReturnOrders.Count(o => o.ReturnStatus == ReturnStatus.RefundCompleted || o.PaymentStatus == PaymentStatus.Refunded || o.PaymentStatus == PaymentStatus.PartiallyRefunded),
+            TotalRefundedAmount = allReturnOrders
+                .Where(o => o.ReturnStatus == ReturnStatus.RefundCompleted || o.PaymentStatus == PaymentStatus.Refunded || o.PaymentStatus == PaymentStatus.PartiallyRefunded)
+                .Sum(o => o.RefundAmount ?? o.TotalAmount),
+            RejectedCount       = allReturnOrders.Count(o => o.ReturnStatus == ReturnStatus.Rejected)
+        });
+    }
+
+    // ── PATCH /api/admin/returns/{id:guid}/step ───────────────────────────────
+    [HttpPatch("returns/{id:guid}/step")]
+    public async Task<IActionResult> AdvanceReturnStep(Guid id, [FromBody] UpdateReturnStepRequest req)
+    {
+        var order = await _db.Orders
+            .Include(o => o.User)
+            .Include(o => o.Items)
+                .ThenInclude(i => i.Product)
+            .FirstOrDefaultAsync(o => o.Id == id);
+
+        if (order is null) return NotFound(new { message = "Order not found." });
+
+        var action = (req.Action ?? string.Empty).Trim().ToLowerInvariant();
+        var now = DateTime.UtcNow;
+
+        if (!string.IsNullOrWhiteSpace(req.PickupTracking))
+            order.ReturnPickupTracking = req.PickupTracking.Trim()[..Math.Min(100, req.PickupTracking.Trim().Length)];
+
+        if (!string.IsNullOrWhiteSpace(req.AdminNotes))
+            order.ReturnAdminNotes = req.AdminNotes.Trim()[..Math.Min(1000, req.AdminNotes.Trim().Length)];
+
+        switch (action)
+        {
+            case "approve":
+                if (order.ReturnStatus != ReturnStatus.Requested)
+                    return BadRequest(new { message = "Only Requested returns can be approved." });
+                order.ReturnStatus     = ReturnStatus.Approved;
+                order.ReturnApprovedAt ??= now;
+                break;
+
+            case "reject":
+                if (order.ReturnStatus is not (ReturnStatus.Requested or ReturnStatus.Approved))
+                    return BadRequest(new { message = "This return can no longer be rejected." });
+                if (string.IsNullOrWhiteSpace(req.AdminNotes))
+                    return BadRequest(new { message = "Please provide a clear rejection reason for the customer." });
+                order.ReturnStatus = ReturnStatus.Rejected;
+                break;
+
+            case "markpickedup" or "pickedup":
+                if (order.ReturnStatus is not (ReturnStatus.Requested or ReturnStatus.Approved))
+                    return BadRequest(new { message = "Order must be Approved before marking picked up." });
+                order.ReturnApprovedAt ??= now;
+                order.ReturnPickedUpAt ??= now;
+                order.ReturnStatus     = ReturnStatus.PickedUp;
+                break;
+
+            case "markreceived" or "received" or "qcpassed":
+                if (order.ReturnStatus is not (ReturnStatus.Requested or ReturnStatus.Approved or ReturnStatus.PickedUp))
+                    return BadRequest(new { message = "Order must be in return pickup before completing warehouse QC." });
+                order.ReturnApprovedAt ??= now;
+                order.ReturnPickedUpAt ??= now;
+                order.ReturnReceivedAt ??= now;
+                order.ReturnStatus     = ReturnStatus.Received;
+
+                if (req.RestockInventory && !order.ReturnInventoryRestocked && order.Status != OrderStatus.Cancelled)
+                {
+                    await RestoreOrderInventoryAsync(order);
+                    order.ReturnInventoryRestocked = true;
+                }
+                break;
+
+            default:
+                return BadRequest(new { message = $"Unknown return step action '{req.Action}'." });
+        }
+
+        _db.Orders.Update(order);
+        await _db.SaveChangesAsync();
+
+        if (order.ReturnInventoryRestocked)
+            _catalogCache.InvalidateProducts();
+
+        return Ok(new
+        {
+            message = $"Return status updated to {order.ReturnStatus}.",
+            order   = MapAdminOrderSummary(order)
+        });
+    }
+
+    // ── POST /api/admin/returns/{id:guid}/refund ──────────────────────────────
+    [HttpPost("returns/{id:guid}/refund")]
+    public async Task<IActionResult> ProcessReturnRefund(Guid id, [FromBody] ProcessReturnRefundRequest req)
+    {
+        var order = await _db.Orders
+            .Include(o => o.User)
+            .Include(o => o.Items)
+                .ThenInclude(i => i.Product)
+            .FirstOrDefaultAsync(o => o.Id == id);
+
+        if (order is null) return NotFound(new { message = "Order not found." });
+
+        if (order.PaymentStatus == PaymentStatus.Refunded || order.ReturnStatus == ReturnStatus.RefundCompleted)
+            return BadRequest(new { message = "Refund has already been completed for this order." });
+
+        if (order.ReturnStatus == ReturnStatus.Rejected)
+            return BadRequest(new { message = "Cannot issue refund for a rejected return request." });
+
+        var eligibleForRefund =
+            order.ReturnStatus is ReturnStatus.Approved or ReturnStatus.PickedUp or ReturnStatus.Received or ReturnStatus.RefundInitiated ||
+            (order.Status == OrderStatus.Cancelled && order.PaymentStatus is PaymentStatus.Completed or PaymentStatus.RefundInitiated);
+
+        if (!eligibleForRefund)
+            return BadRequest(new { message = "Please approve or verify warehouse receipt of the return before processing the refund payout." });
+
+        var amount = req.RefundAmount ?? order.RefundAmount ?? order.TotalAmount;
+        if (amount <= 0m || amount > order.TotalAmount)
+            return BadRequest(new { message = $"Refund amount must be between ₹1 and ₹{order.TotalAmount:N2}." });
+
+        var method = !string.IsNullOrWhiteSpace(req.RefundMethod)
+            ? req.RefundMethod.Trim()
+            : order.RefundMethod ?? (order.PaymentMethod == PaymentMethod.Razorpay ? "RazorpayOriginalSource" : "UpiTransfer");
+
+        string? refundReference = string.IsNullOrWhiteSpace(req.RefundReference)
+            ? null
+            : req.RefundReference.Trim()[..Math.Min(100, req.RefundReference.Trim().Length)];
+
+        // Execute Razorpay Gateway Refund automatically when using live Razorpay payment & keys
+        if (method == "RazorpayOriginalSource" &&
+            order.PaymentMethod == PaymentMethod.Razorpay &&
+            !string.IsNullOrWhiteSpace(order.PaymentId) &&
+            order.PaymentId.StartsWith("pay_", StringComparison.OrdinalIgnoreCase))
+        {
+            var keyId = _configuration["Razorpay:KeyId"];
+            var keySecret = _configuration["Razorpay:KeySecret"];
+            if (!string.IsNullOrWhiteSpace(keyId) && !string.IsNullOrWhiteSpace(keySecret))
+            {
+                try
+                {
+                    var client = _httpClientFactory.CreateClient();
+                    var creds = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{keyId}:{keySecret}"));
+                    client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", creds);
+                    var rzpResp = await client.PostAsJsonAsync(
+                        $"https://api.razorpay.com/v1/payments/{order.PaymentId}/refund",
+                        new { amount = (long)Math.Round(amount * 100m), speed = "normal", notes = new { order = order.OrderNumber } });
+
+                    if (!rzpResp.IsSuccessStatusCode)
+                    {
+                        var rzpErr = await rzpResp.Content.ReadAsStringAsync();
+                        return StatusCode(502, new { message = $"Razorpay refund gateway rejected the request: {rzpErr}" });
+                    }
+
+                    var json = await rzpResp.Content.ReadFromJsonAsync<JsonElement>();
+                    if (json.TryGetProperty("id", out var rzpIdProp) && !string.IsNullOrWhiteSpace(rzpIdProp.GetString()))
+                        refundReference = rzpIdProp.GetString();
+                }
+                catch (Exception ex)
+                {
+                    return StatusCode(502, new { message = $"Failed to reach Razorpay refund endpoint: {ex.Message}" });
+                }
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(refundReference))
+            refundReference = GenerateRefundReference();
+
+        var now = DateTime.UtcNow;
+        if (!string.IsNullOrWhiteSpace(req.AdminNotes))
+            order.ReturnAdminNotes = req.AdminNotes.Trim()[..Math.Min(1000, req.AdminNotes.Trim().Length)];
+
+        if (req.RestockInventory && !order.ReturnInventoryRestocked && order.Status != OrderStatus.Cancelled)
+        {
+            await RestoreOrderInventoryAsync(order);
+            order.ReturnInventoryRestocked = true;
+        }
+
+        order.ReturnApprovedAt ??= now;
+        order.ReturnPickedUpAt ??= now;
+        order.ReturnReceivedAt ??= now;
+        order.ReturnStatus     = ReturnStatus.RefundCompleted;
+        order.Status           = OrderStatus.Refunded;
+        order.PaymentStatus    = amount < order.TotalAmount ? PaymentStatus.PartiallyRefunded : PaymentStatus.Refunded;
+        order.RefundAmount     = amount;
+        order.RefundMethod     = method;
+        order.RefundReference  = refundReference;
+        order.RefundedAt       = now;
+
+        _db.Orders.Update(order);
+        await _db.SaveChangesAsync();
+
+        if (order.ReturnInventoryRestocked)
+            _catalogCache.InvalidateProducts();
+
+        return Ok(new
+        {
+            message         = $"Refund of ₹{amount:N0} completed ({refundReference}).",
+            refundReference = refundReference,
+            order           = MapAdminOrderSummary(order)
         });
     }
 
@@ -539,7 +882,162 @@ public class AdminController(
 
         return Ok(new { message = $"User is now {(user.IsActive ? "Active" : "Suspended / Blocked")}.", isActive = user.IsActive });
     }
+
+    // ── Private Helpers ───────────────────────────────────────────────────────
+    private async Task RestoreOrderInventoryAsync(Order order)
+    {
+        foreach (var item in order.Items)
+        {
+            if (item.VariantId.HasValue)
+            {
+                var variant = await _db.ProductVariants.FindAsync(item.VariantId.Value);
+                if (variant is not null)
+                {
+                    variant.Stock += item.Quantity;
+                    _db.ProductVariants.Update(variant);
+                }
+            }
+            else
+            {
+                var product = await _db.Products.FindAsync(item.ProductId);
+                if (product is not null)
+                {
+                    product.Stock += item.Quantity;
+                    _db.Products.Update(product);
+                }
+            }
+        }
+    }
+
+    private static bool IsValidOrderTransition(OrderStatus from, OrderStatus to, out string error)
+    {
+        error = string.Empty;
+        if (from == to) return true;
+
+        if (from is OrderStatus.Cancelled or OrderStatus.Refunded)
+        {
+            error = $"Orders in '{from}' status cannot be moved to '{to}'.";
+            return false;
+        }
+
+        if (to == OrderStatus.Refunded)
+        {
+            error = "Use the Returns & Refunds settlement workflow to process refunds accurately.";
+            return false;
+        }
+
+        if (from == OrderStatus.Delivered)
+        {
+            error = "Delivered orders cannot move backwards in fulfillment. Use the Returns & Refunds tab for post-delivery returns.";
+            return false;
+        }
+
+        if (to == OrderStatus.Cancelled)
+        {
+            if (from is OrderStatus.Shipped or OrderStatus.OutForDelivery)
+            {
+                error = "Orders already dispatched or out for delivery cannot be cancelled. Complete delivery or process a return.";
+                return false;
+            }
+            return true;
+        }
+
+        static int Rank(OrderStatus s) => s switch
+        {
+            OrderStatus.PaymentPending => 0,
+            OrderStatus.Pending        => 1,
+            OrderStatus.Confirmed      => 2,
+            OrderStatus.Processing     => 3,
+            OrderStatus.Shipped        => 4,
+            OrderStatus.OutForDelivery => 5,
+            OrderStatus.Delivered      => 6,
+            _                          => -1
+        };
+
+        var fromRank = Rank(from);
+        var toRank = Rank(to);
+        if (toRank < fromRank)
+        {
+            error = $"Invalid step transition: cannot move order backwards from '{from}' to '{to}'.";
+            return false;
+        }
+
+        return true;
+    }
+
+    private static string GenerateRefundReference()
+    {
+        const string chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+        Span<char> code = stackalloc char[6];
+        for (int i = 0; i < code.Length; i++)
+            code[i] = chars[RandomNumberGenerator.GetInt32(chars.Length)];
+        return $"RFND-{DateTime.UtcNow:yyyyMMdd}-{new string(code)}";
+    }
+
+    private static object MapAdminOrderSummary(Order o) => new
+    {
+        o.Id,
+        o.OrderNumber,
+        CustomerName             = $"{o.User.FirstName} {o.User.LastName}".Trim(),
+        CustomerEmail            = o.User.Email,
+        o.Status,
+        o.PaymentStatus,
+        o.PaymentMethod,
+        o.SubTotal,
+        o.ShippingCost,
+        o.PlatformFee,
+        o.Discount,
+        o.TotalAmount,
+        o.CreatedAt,
+        ItemCount                = o.Items.Count,
+        ShippingName             = o.ShippingName,
+        ShippingPhone            = o.ShippingPhone,
+        ShippingAddressLine1     = o.ShippingAddressLine1,
+        ShippingAddressLine2     = o.ShippingAddressLine2,
+        ShippingCity             = o.ShippingCity,
+        ShippingState            = o.ShippingState,
+        ShippingPinCode          = o.ShippingPinCode,
+        CourierName              = o.CourierName,
+        TrackingNumber           = o.TrackingNumber,
+        ConfirmedAt              = o.ConfirmedAt,
+        ProcessingAt             = o.ProcessingAt,
+        PaidAt                   = o.PaidAt,
+        ShippedAt                = o.ShippedAt,
+        OutForDeliveryAt         = o.OutForDeliveryAt,
+        DeliveredAt              = o.DeliveredAt,
+        CancelledAt              = o.CancelledAt,
+        CancellationReason       = o.CancellationReason,
+        ReturnStatus             = o.ReturnStatus,
+        ReturnReason             = o.ReturnReason,
+        ReturnCustomerNotes      = o.ReturnCustomerNotes,
+        ReturnAdminNotes         = o.ReturnAdminNotes,
+        ReturnPickupTracking     = o.ReturnPickupTracking,
+        ReturnRequestedAt        = o.ReturnRequestedAt,
+        ReturnApprovedAt         = o.ReturnApprovedAt,
+        ReturnPickedUpAt         = o.ReturnPickedUpAt,
+        ReturnReceivedAt         = o.ReturnReceivedAt,
+        ReturnInventoryRestocked = o.ReturnInventoryRestocked,
+        RefundAmount             = o.RefundAmount,
+        RefundMethod             = o.RefundMethod,
+        CustomerRefundAccount    = o.CustomerRefundAccount,
+        RefundReference          = o.RefundReference,
+        RefundedAt               = o.RefundedAt,
+        Items                    = o.Items.Select(i => new
+        {
+            i.Id,
+            i.ProductId,
+            i.ProductName,
+            i.ProductImageUrl,
+            i.VariantName,
+            i.Quantity,
+            i.UnitPrice,
+            i.TotalPrice,
+            ProductSlug = i.Product?.Slug
+        }).ToList()
+    };
 }
 
-public record UpdateOrderStatusRequest(string Status, string? TrackingNumber);
+public record UpdateOrderStatusRequest(string Status, string? TrackingNumber = null, string? CourierName = null, string? Reason = null);
+public record UpdateReturnStepRequest(string Action, string? AdminNotes = null, string? PickupTracking = null, bool RestockInventory = false);
+public record ProcessReturnRefundRequest(decimal? RefundAmount = null, string? RefundMethod = null, string? RefundReference = null, bool RestockInventory = true, string? AdminNotes = null);
 public record ResolveAlertRequest(string? Action);

@@ -44,6 +44,12 @@ import {
   PackagePlus,
   Filter,
   MessageSquare,
+  Clock,
+  CreditCard,
+  Check,
+  MapPin,
+  ArrowRight,
+  Wallet,
 } from 'lucide-react'
 import { useAuthStore } from '@/store/auth'
 import { useAuthModalStore } from '@/store/authModal'
@@ -129,12 +135,38 @@ function AdminContent() {
 
   // Navigation state
   const [activeTab, setActiveTab] = React.useState<
-    'overview' | 'products' | 'categories' | 'orders' | 'support' | 'security' | 'coupons' | 'customers' | 'settings'
+    'overview' | 'orders' | 'returns' | 'products' | 'categories' | 'support' | 'security' | 'coupons' | 'customers' | 'settings'
   >('overview')
 
   // Main data states
   const [stats, setStats] = React.useState<DashboardStats | null>(null)
   const [orders, setOrders] = React.useState<Order[]>([])
+  const [returnsOrders, setReturnsOrders] = React.useState<Order[]>([])
+  const [returnsSummary, setReturnsSummary] = React.useState({
+    requestedCount: 0,
+    inPickupCount: 0,
+    pendingPayoutCount: 0,
+    pendingPayoutAmount: 0,
+    completedCount: 0,
+    totalRefundedAmount: 0,
+    rejectedCount: 0,
+  })
+  const [returnFilter, setReturnFilter] = React.useState<'all' | 'requested' | 'pickup' | 'payout' | 'completed' | 'rejected'>('all')
+  const [returnSearch, setReturnSearch] = React.useState('')
+  const [returnDrafts, setReturnDrafts] = React.useState<
+    Record<
+      string,
+      {
+        pickupTracking: string
+        adminNotes: string
+        refundAmount: string
+        refundMethod: string
+        refundReference: string
+        restockInventory: boolean
+      }
+    >
+  >({})
+  const [processingReturnId, setProcessingReturnId] = React.useState<string | null>(null)
   const [products, setProducts] = React.useState<ProductListItem[]>([])
   const [categories, setCategories] = React.useState<Category[]>([])
   const [coupons, setCoupons] = React.useState<CouponDto[]>([])
@@ -247,7 +279,9 @@ function AdminContent() {
 
   // Order status update state
   const [orderStatusUpdate, setOrderStatusUpdate] = React.useState('')
+  const [orderCourierUpdate, setOrderCourierUpdate] = React.useState('NEXUS White-Glove')
   const [orderTrackingUpdate, setOrderTrackingUpdate] = React.useState('')
+  const [orderCancelReason, setOrderCancelReason] = React.useState('')
   const [isUpdatingOrder, setIsUpdatingOrder] = React.useState(false)
 
   // Add Category form state
@@ -318,7 +352,7 @@ function AdminContent() {
     setPortalError(null)
     try {
       const failedEndpoints: string[] = []
-      const [dashRes, ordRes, prodRes, catRes, coupRes, custRes, alertRes, supportRes] = await Promise.all([
+      const [dashRes, ordRes, prodRes, catRes, coupRes, custRes, alertRes, supportRes, returnsRes] = await Promise.all([
         api.get<DashboardStats>('/api/admin/dashboard').catch((e) => {
           failedEndpoints.push(`dashboard (${e?.statusCode || 'network'})`)
           return null
@@ -336,6 +370,7 @@ function AdminContent() {
         api.get<any>('/api/admin/customers?pageSize=100').catch(() => null),
         api.get<any>('/api/admin/security/alerts').catch(() => null),
         api.get<any>('/api/admin/support/tickets?pageSize=100').catch(() => null),
+        api.get<any>('/api/admin/returns').catch(() => null),
       ])
 
       if (failedEndpoints.length > 0) {
@@ -348,6 +383,20 @@ function AdminContent() {
 
       const ordList = ordRes?.data?.items ?? ordRes?.data?.Items ?? ordRes?.data?.data ?? []
       setOrders(Array.isArray(ordList) ? ordList : [])
+
+      if (returnsRes?.data) {
+        const retList = returnsRes.data.items ?? returnsRes.data.Items ?? []
+        setReturnsOrders(Array.isArray(retList) ? retList : [])
+        setReturnsSummary({
+          requestedCount: returnsRes.data.requestedCount ?? returnsRes.data.RequestedCount ?? 0,
+          inPickupCount: returnsRes.data.inPickupCount ?? returnsRes.data.InPickupCount ?? 0,
+          pendingPayoutCount: returnsRes.data.pendingPayoutCount ?? returnsRes.data.PendingPayoutCount ?? 0,
+          pendingPayoutAmount: returnsRes.data.pendingPayoutAmount ?? returnsRes.data.PendingPayoutAmount ?? 0,
+          completedCount: returnsRes.data.completedCount ?? returnsRes.data.CompletedCount ?? 0,
+          totalRefundedAmount: returnsRes.data.totalRefundedAmount ?? returnsRes.data.TotalRefundedAmount ?? 0,
+          rejectedCount: returnsRes.data.rejectedCount ?? returnsRes.data.RejectedCount ?? 0,
+        })
+      }
 
       const prodList = prodRes?.data?.items ?? prodRes?.data?.Items ?? prodRes?.data?.data ?? []
       setProducts(Array.isArray(prodList) ? prodList : [])
@@ -797,54 +846,179 @@ function AdminContent() {
     }
   }
 
+  // Order Fulfillment Step Helpers
+  const getOrderStepInfo = (status?: string) => {
+    const s = (status ?? '').toLowerCase()
+    if (s === 'cancelled') return { step: -1, label: 'Cancelled', nextStatus: null, nextLabel: null }
+    if (s === 'refunded') return { step: -2, label: 'Refunded', nextStatus: null, nextLabel: null }
+    if (s === 'delivered') return { step: 5, label: 'Step 6/6 • Delivered', nextStatus: null, nextLabel: null }
+    if (s === 'outfordelivery' || s === 'out_for_delivery')
+      return { step: 4, label: 'Step 5/6 • Out for Delivery', nextStatus: 'delivered', nextLabel: 'Mark Delivered' }
+    if (s === 'shipped')
+      return { step: 3, label: 'Step 4/6 • Shipped', nextStatus: 'outfordelivery', nextLabel: 'Out for Delivery' }
+    if (s === 'processing')
+      return { step: 2, label: 'Step 3/6 • Packed & QC', nextStatus: 'shipped', nextLabel: 'Dispatch Order' }
+    if (s === 'confirmed')
+      return { step: 1, label: 'Step 2/6 • Confirmed', nextStatus: 'processing', nextLabel: 'Start Packing' }
+    return { step: 0, label: 'Step 1/6 • Pending', nextStatus: 'confirmed', nextLabel: 'Confirm Order' }
+  }
+
+  const getValidNextStatuses = (currentStatus?: string) => {
+    const s = (currentStatus ?? '').toLowerCase()
+    if (s === 'cancelled' || s === 'refunded') return [s]
+    if (s === 'delivered') return ['delivered']
+    if (s === 'outfordelivery' || s === 'out_for_delivery') return ['outfordelivery', 'delivered']
+    if (s === 'shipped') return ['shipped', 'outfordelivery', 'delivered']
+    if (s === 'processing') return ['processing', 'shipped', 'outfordelivery', 'delivered', 'cancelled']
+    if (s === 'confirmed') return ['confirmed', 'processing', 'shipped', 'outfordelivery', 'delivered', 'cancelled']
+    return [s || 'pending', 'confirmed', 'processing', 'shipped', 'cancelled']
+  }
+
   // Inspect & Update Order
   const handleOpenInspectOrder = (order: Order) => {
     setInspectOrder(order)
     setOrderStatusUpdate((order.status ?? 'pending').toString().toLowerCase())
+    setOrderCourierUpdate(order.courierName || 'NEXUS White-Glove')
     setOrderTrackingUpdate(order.trackingNumber ?? '')
+    setOrderCancelReason(order.cancellationReason ?? '')
   }
 
-  const handleSaveOrderStatus = async () => {
-    if (!inspectOrder) return
+  const applyOrderStatusUpdate = async (
+    orderId: string,
+    targetStatus: string,
+    opts?: { courierName?: string; trackingNumber?: string; reason?: string },
+  ) => {
     setIsUpdatingOrder(true)
     try {
-      const res = await api.patch<{ status: string; paymentStatus?: string }>(
-        `/api/admin/orders/${inspectOrder.id}/status`,
-        {
-          status: orderStatusUpdate,
-          trackingNumber: orderTrackingUpdate.trim() || null,
-        }
-      )
-      toast.success(`Order marked as ${orderStatusUpdate}!`)
-      const nextStatus = (res.data?.status ?? orderStatusUpdate) as any
-      const nextPaymentStatus = (res.data?.paymentStatus ?? inspectOrder.paymentStatus) as any
+      const res = await api.patch<any>(`/api/admin/orders/${orderId}/status`, {
+        status: targetStatus,
+        courierName: opts?.courierName?.trim() || null,
+        trackingNumber: opts?.trackingNumber?.trim() || null,
+        reason: opts?.reason?.trim() || null,
+      })
+      toast.success(res.data?.message ?? `Order moved to ${targetStatus}!`)
+      const nextStatus = (res.data?.status ?? targetStatus) as any
+      const nextPaymentStatus = (res.data?.paymentStatus ?? inspectOrder?.paymentStatus) as any
+      const nextReturnStatus = (res.data?.returnStatus ?? inspectOrder?.returnStatus) as any
       setOrders((prev) =>
         prev.map((o) =>
-          o.id === inspectOrder.id
+          o.id === orderId
             ? {
                 ...o,
                 status: nextStatus,
                 paymentStatus: nextPaymentStatus,
-                trackingNumber: orderTrackingUpdate.trim() || undefined,
+                returnStatus: nextReturnStatus,
+                courierName: res.data?.courierName ?? o.courierName,
+                trackingNumber: res.data?.trackingNumber ?? o.trackingNumber,
+                confirmedAt: res.data?.confirmedAt ?? o.confirmedAt,
+                processingAt: res.data?.processingAt ?? o.processingAt,
+                shippedAt: res.data?.shippedAt ?? o.shippedAt,
+                outForDeliveryAt: res.data?.outForDeliveryAt ?? o.outForDeliveryAt,
+                deliveredAt: res.data?.deliveredAt ?? o.deliveredAt,
+                cancelledAt: res.data?.cancelledAt ?? o.cancelledAt,
               }
-            : o
-        )
+            : o,
+        ),
       )
       setInspectOrder((prev) =>
-        prev
+        prev && prev.id === orderId
           ? {
               ...prev,
               status: nextStatus,
               paymentStatus: nextPaymentStatus,
-              trackingNumber: orderTrackingUpdate.trim() || undefined,
+              returnStatus: nextReturnStatus,
+              courierName: res.data?.courierName ?? prev.courierName,
+              trackingNumber: res.data?.trackingNumber ?? prev.trackingNumber,
+              confirmedAt: res.data?.confirmedAt ?? prev.confirmedAt,
+              processingAt: res.data?.processingAt ?? prev.processingAt,
+              shippedAt: res.data?.shippedAt ?? prev.shippedAt,
+              outForDeliveryAt: res.data?.outForDeliveryAt ?? prev.outForDeliveryAt,
+              deliveredAt: res.data?.deliveredAt ?? prev.deliveredAt,
+              cancelledAt: res.data?.cancelledAt ?? prev.cancelledAt,
             }
-          : null
+          : prev,
       )
       fetchAllData()
-    } catch {
-      toast.error('Failed to update order')
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message ?? err?.message ?? 'Failed to update order status')
     } finally {
       setIsUpdatingOrder(false)
+    }
+  }
+
+  const handleSaveOrderStatus = async () => {
+    if (!inspectOrder) return
+    await applyOrderStatusUpdate(inspectOrder.id, orderStatusUpdate, {
+      courierName: orderCourierUpdate,
+      trackingNumber: orderTrackingUpdate,
+      reason: orderCancelReason,
+    })
+  }
+
+  const getReturnDraft = (ord: Order) => {
+    const existing = returnDrafts[ord.id]
+    if (existing) return existing
+    const isCod =
+      ord.paymentMethod === (1 as any) ||
+      String(ord.paymentMethod ?? '').toLowerCase().includes('cash')
+    return {
+      pickupTracking: ord.returnPickupTracking ?? '',
+      adminNotes: ord.returnAdminNotes ?? '',
+      refundAmount: String(ord.refundAmount ?? ord.totalAmount ?? ord.total ?? 0),
+      refundMethod: ord.refundMethod ?? (isCod ? 'UpiTransfer' : 'RazorpayOriginalSource'),
+      refundReference: ord.refundReference ?? '',
+      restockInventory: !ord.returnInventoryRestocked,
+    }
+  }
+
+  const handleReturnStepAction = async (
+    ord: Order,
+    action: 'Approve' | 'Reject' | 'MarkPickedUp' | 'MarkReceived',
+  ) => {
+    const draft = getReturnDraft(ord)
+    if (action === 'Reject' && !draft.adminNotes.trim()) {
+      toast.error('Please write a clear rejection reason in Admin Notes first.')
+      return
+    }
+    setProcessingReturnId(ord.id)
+    try {
+      const res = await api.patch<{ message?: string }>(`/api/admin/returns/${ord.id}/step`, {
+        action,
+        adminNotes: draft.adminNotes.trim() || null,
+        pickupTracking: draft.pickupTracking.trim() || null,
+        restockInventory: draft.restockInventory,
+      })
+      toast.success(res.data?.message ?? `Return updated (${action})`)
+      await fetchAllData()
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message ?? err?.message ?? 'Failed to update return step')
+    } finally {
+      setProcessingReturnId(null)
+    }
+  }
+
+  const handleProcessReturnRefund = async (ord: Order) => {
+    const draft = getReturnDraft(ord)
+    const parsedAmt = parseFloat(draft.refundAmount)
+    if (isNaN(parsedAmt) || parsedAmt <= 0) {
+      toast.error('Enter a valid refund amount.')
+      return
+    }
+    setProcessingReturnId(ord.id)
+    try {
+      const res = await api.post<{ message?: string }>(`/api/admin/returns/${ord.id}/refund`, {
+        refundAmount: parsedAmt,
+        refundMethod: draft.refundMethod,
+        refundReference: draft.refundReference.trim() || null,
+        restockInventory: draft.restockInventory,
+        adminNotes: draft.adminNotes.trim() || null,
+      })
+      toast.success(res.data?.message ?? 'Refund payment completed cleanly!')
+      await fetchAllData()
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message ?? err?.message ?? 'Failed to process refund')
+    } finally {
+      setProcessingReturnId(null)
     }
   }
 
@@ -1126,16 +1300,47 @@ function AdminContent() {
 
   const filteredOrders = React.useMemo(() => {
     return (orders ?? []).filter((o) => {
+      const s = safeStr(o.status)
+      const rs = safeStr(o.returnStatus)
+      const ps = safeStr(o.paymentStatus)
       const matchesStatus =
-        orderStatusFilter === 'all' || safeStr(o.status) === safeStr(orderStatusFilter)
+        orderStatusFilter === 'all'
+          ? true
+          : orderStatusFilter === 'returns'
+          ? (rs && rs !== 'none') || ps.includes('refund') || s === 'refunded'
+          : orderStatusFilter === 'pending'
+          ? s === 'pending' || s === 'paymentpending'
+          : s === safeStr(orderStatusFilter)
       const matchesSearch =
         !orderSearch ||
         safeStr(o.orderNumber).includes(safeStr(orderSearch)) ||
         (o.shippingName && safeStr(o.shippingName).includes(safeStr(orderSearch))) ||
+        (o.customerEmail && safeStr(o.customerEmail).includes(safeStr(orderSearch))) ||
         (o.shippingPhone && o.shippingPhone.includes(orderSearch))
       return matchesStatus && matchesSearch
     })
   }, [orders, orderStatusFilter, orderSearch])
+
+  const filteredReturns = React.useMemo(() => {
+    const q = safeStr(returnSearch)
+    return (returnsOrders ?? []).filter((o) => {
+      const rs = safeStr(o.returnStatus)
+      const ps = safeStr(o.paymentStatus)
+      if (returnFilter === 'requested' && rs !== 'requested') return false
+      if (returnFilter === 'pickup' && rs !== 'approved' && rs !== 'pickedup') return false
+      if (returnFilter === 'payout' && rs !== 'received' && rs !== 'refundinitiated' && ps !== 'refundinitiated') return false
+      if (returnFilter === 'completed' && rs !== 'refundcompleted' && ps !== 'refunded' && ps !== 'partiallyrefunded') return false
+      if (returnFilter === 'rejected' && rs !== 'rejected') return false
+      if (!q) return true
+      return (
+        safeStr(o.orderNumber).includes(q) ||
+        safeStr(o.shippingName).includes(q) ||
+        safeStr(o.customerEmail).includes(q) ||
+        safeStr(o.returnReason).includes(q) ||
+        safeStr(o.refundReference).includes(q)
+      )
+    })
+  }, [returnsOrders, returnFilter, returnSearch])
 
   const filteredCustomers = React.useMemo(() => {
     return (customers ?? []).filter((c) => {
@@ -1215,46 +1420,70 @@ function AdminContent() {
     )
   }
 
+  const pendingReturnsBadge =
+    returnsSummary.requestedCount + returnsSummary.inPickupCount + returnsSummary.pendingPayoutCount
+  const openTicketsBadge = supportTickets.filter((t) => t.status === 'Open' || t.status === 'InReview').length
+  const actionableOrdersBadge = orders.filter((o) => {
+    const s = safeStr(o.status)
+    return s === 'pending' || s === 'paymentpending' || s === 'confirmed' || s === 'processing'
+  }).length
+
   return (
-    <div className="min-h-screen bg-background text-beige flex">
-      {/* ─── SIDEBAR NAVIGATION (SHEIN / AJIO / SHOPIFY PATTERN) ─────────────── */}
-      <aside className="w-64 border-r border-border bg-surface flex flex-col justify-between hidden md:flex sticky top-0 h-screen z-40">
-        <div>
+    <div className="min-h-screen bg-[#F7F4EE] text-beige flex">
+      {/* ─── SIDEBAR NAVIGATION (LUXURY OBSIDIAN COMMAND SHELL) ─────────────── */}
+      <aside className="w-64 border-r border-[#26231F] bg-[#111111] text-[#FAF8F5] flex-col justify-between hidden md:flex sticky top-0 h-screen z-40">
+        <div className="overflow-y-auto">
           {/* Brand header */}
-          <div className="p-6 border-b border-border flex items-center justify-between">
+          <div className="p-6 border-b border-[#26231F] flex items-center justify-between">
             <Link href="/" className="flex items-center gap-2.5">
-              <Shield className="w-5 h-5 text-gold" />
+              <Shield className="w-5 h-5 text-[#C5A059]" />
               <span className="font-serif text-lg font-bold gold-text-gradient tracking-wider">
                 NEXUS
               </span>
             </Link>
-            <Badge variant="gold" className="text-[9px] font-mono">PORTAL</Badge>
+            <span className="text-[9px] font-mono font-bold uppercase tracking-widest px-2 py-0.5 rounded bg-[#C5A059]/15 text-[#D4AF37] border border-[#C5A059]/30">
+              EXECUTIVE
+            </span>
           </div>
 
           {/* Navigation Links */}
-          <nav className="p-4 space-y-1.5 text-sm font-medium">
+          <nav className="p-3.5 space-y-1 text-xs font-medium">
             {[
-              { id: 'overview', label: 'Dashboard & KPI', icon: BarChart3 },
-              { id: 'products', label: 'Catalog & Inventory', icon: Package, count: products.length },
-              { id: 'categories', label: 'Collections / Depts', icon: FolderTree, count: categories.length },
-              { id: 'orders', label: 'Orders & Fulfillment', icon: ShoppingCart, count: orders.length },
+              { id: 'overview', label: 'Executive Overview', icon: BarChart3 },
               {
-                id: 'support',
-                label: 'Support Tickets',
-                icon: MessageSquare,
-                count: supportTickets.filter((t) => t.status === 'Open' || t.status === 'InReview').length,
+                id: 'orders',
+                label: 'Orders & Pipeline',
+                icon: ShoppingCart,
+                count: actionableOrdersBadge || orders.length,
+                highlight: actionableOrdersBadge > 0,
               },
               {
+                id: 'returns',
+                label: 'Returns & Refunds',
+                icon: RotateCcw,
+                count: pendingReturnsBadge,
+                highlight: pendingReturnsBadge > 0,
+              },
+              { id: 'products', label: 'Catalog & Inventory', icon: Package, count: products.length },
+              { id: 'categories', label: 'Collections / Depts', icon: FolderTree, count: categories.length },
+              {
+                id: 'support',
+                label: 'Support Desk',
+                icon: MessageSquare,
+                count: openTicketsBadge,
+                highlight: openTicketsBadge > 0,
+              },
+              { id: 'coupons', label: 'Promotions & Coupons', icon: Ticket, count: coupons.length },
+              { id: 'customers', label: 'Clientele CRM', icon: Users, count: customers.length },
+              {
                 id: 'security',
-                label: 'Threats & Suspicious',
+                label: 'Security & Alerts',
                 icon: ShieldAlert,
                 count: unreadAlerts,
                 isThreat: unreadAlerts > 0,
               },
-              { id: 'coupons', label: 'Promotions & Coupons', icon: Ticket, count: coupons.length },
-              { id: 'customers', label: 'Clientele CRM', icon: Users, count: customers.length },
               { id: 'settings', label: 'Store Settings', icon: Settings },
-            ].map(({ id, label, icon: Icon, count, isThreat }) => {
+            ].map(({ id, label, icon: Icon, count, isThreat, highlight }) => {
               const isActive = activeTab === id
               return (
                 <button
@@ -1262,24 +1491,28 @@ function AdminContent() {
                   onClick={() => setActiveTab(id as any)}
                   className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl transition-all ${
                     isActive
-                      ? 'bg-gold text-background font-semibold shadow-md shadow-gold/10'
+                      ? 'bg-[#C5A059] text-[#111111] font-bold shadow-md'
                       : isThreat
-                      ? 'text-rose-700 bg-rose-50 border border-rose-200 hover:bg-rose-100'
-                      : 'text-beige-muted hover:text-beige hover:bg-surface-2'
+                      ? 'text-rose-200 bg-rose-950/60 border border-rose-500/40 hover:bg-rose-900/60'
+                      : highlight
+                      ? 'text-[#FAF8F5] bg-[#1D1B18] border border-[#C5A059]/25 hover:border-[#C5A059]/60'
+                      : 'text-[#A8A29E] hover:text-[#FAF8F5] hover:bg-white/5'
                   }`}
                 >
-                  <div className="flex items-center gap-3">
-                    <Icon className={`w-4 h-4 ${isThreat && !isActive ? 'text-rose-600 animate-pulse' : ''}`} />
+                  <div className="flex items-center gap-2.5">
+                    <Icon className={`w-4 h-4 ${isThreat && !isActive ? 'text-rose-400 animate-pulse' : isActive ? 'text-[#111111]' : 'text-[#C5A059]'}`} />
                     <span>{label}</span>
                   </div>
                   {count !== undefined && count > 0 && (
                     <span
-                      className={`text-xs px-2 py-0.5 rounded-full ${
+                      className={`text-[11px] font-mono px-2 py-0.5 rounded-full ${
                         isActive
-                          ? 'bg-background/20 text-background font-bold'
+                          ? 'bg-[#111111]/15 text-[#111111] font-bold'
                           : isThreat
                           ? 'bg-rose-600 text-white font-bold'
-                          : 'bg-surface-2 text-beige-muted'
+                          : highlight
+                          ? 'bg-[#C5A059] text-[#111111] font-bold'
+                          : 'bg-white/10 text-[#D6D3D1]'
                       }`}
                     >
                       {count}
@@ -1292,21 +1525,26 @@ function AdminContent() {
         </div>
 
         {/* User footer & Storefront link */}
-        <div className="p-4 border-t border-border space-y-2">
-          <Button variant="outline" size="sm" asChild className="w-full text-xs">
+        <div className="p-4 border-t border-[#26231F] space-y-2.5 bg-[#0A0A0A]">
+          <Button
+            variant="outline"
+            size="sm"
+            asChild
+            className="w-full text-xs border-[#C5A059]/40 text-[#FAF8F5] hover:bg-[#C5A059] hover:text-[#111111]"
+          >
             <Link href="/" target="_blank" className="flex items-center justify-center gap-1.5">
               <ExternalLink className="w-3.5 h-3.5" />
-              Live Storefront
+              View Storefront
             </Link>
           </Button>
-          <div className="flex items-center justify-between pt-2 px-1 text-xs text-beige-muted">
-            <span className="truncate max-w-[120px]">{user?.email}</span>
+          <div className="flex items-center justify-between pt-1 px-1 text-[11px] text-[#A8A29E]">
+            <span className="truncate max-w-[130px]">{user?.email}</span>
             <button
               onClick={() => {
                 logout()
                 window.location.href = '/'
               }}
-              className="text-error hover:underline flex items-center gap-1"
+              className="text-rose-400 hover:text-rose-300 flex items-center gap-1 font-medium"
             >
               <LogOut className="w-3 h-3" />
               Sign Out
@@ -1318,21 +1556,51 @@ function AdminContent() {
       {/* ─── MAIN CONTENT AREA ──────────────────────────────────────────────── */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Top Control Bar (Desktop & Mobile) */}
-        <header className="border-b border-border bg-surface px-4 sm:px-8 py-3.5 flex items-center justify-between sticky top-0 z-30 shadow-md">
-          <div className="flex items-center gap-3">
+        <header className="border-b border-[#E7E5E4] bg-white/95 backdrop-blur-md px-4 sm:px-8 py-3.5 flex items-center justify-between sticky top-0 z-30 shadow-sm">
+          <div className="flex items-center gap-3 min-w-0">
             <div className="flex items-center gap-2 md:hidden">
               <Shield className="w-5 h-5 text-gold" />
-              <span className="font-serif font-bold text-beige text-sm">NEXUS ADMIN</span>
+              <span className="font-serif font-bold text-beige text-sm">NEXUS</span>
             </div>
             <div className="hidden md:flex items-center gap-2.5 text-xs text-beige-muted">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              <span className="font-mono text-beige/80">Nexus Core Engine Active</span>
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span className="font-semibold text-beige capitalize">
+                {activeTab === 'overview'
+                  ? 'Executive Overview'
+                  : activeTab === 'orders'
+                  ? 'Orders & Step Pipeline'
+                  : activeTab === 'returns'
+                  ? '7-Day Returns & Refund Settlement'
+                  : activeTab}
+              </span>
               <span className="text-border">•</span>
-              <span className="text-beige-muted">2 Maruti Chock, Rajkot</span>
+              <span className="font-mono text-[11px]">Atelier Fulfillment Desk</span>
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2.5">
+            {pendingReturnsBadge > 0 && (
+              <button
+                type="button"
+                onClick={() => setActiveTab('returns')}
+                className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 hover:bg-amber-100 text-xs font-semibold transition-colors"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>{pendingReturnsBadge} Return Action</span>
+              </button>
+            )}
+
+            {actionableOrdersBadge > 0 && (
+              <button
+                type="button"
+                onClick={() => setActiveTab('orders')}
+                className="hidden lg:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gold/10 border border-gold/30 text-beige hover:bg-gold/20 text-xs font-semibold transition-colors"
+              >
+                <ShoppingCart className="w-3.5 h-3.5 text-gold" />
+                <span>{actionableOrdersBadge} Fulfillment Queue</span>
+              </button>
+            )}
+
             {/* Quick Threat Alert Bell */}
             <button
               onClick={() => setActiveTab('security')}
@@ -1347,45 +1615,55 @@ function AdminContent() {
               {unreadAlerts > 0 ? (
                 <span className="font-bold text-rose-700 font-mono flex items-center gap-1">
                   <span>{unreadAlerts}</span>
-                  <span className="hidden sm:inline">Threats</span>
+                  <span className="hidden sm:inline">Alerts</span>
                 </span>
               ) : (
-                <span className="hidden sm:inline text-beige-muted font-mono text-[11px]">System Normal</span>
+                <span className="hidden sm:inline text-beige-muted font-mono text-[11px]">Secure</span>
               )}
               {unreadAlerts > 0 && (
                 <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping" />
               )}
             </button>
 
-            <Button variant="outline" size="sm" asChild className="text-xs">
-              <Link href="/" target="_blank" className="flex items-center gap-1.5">
-                <ExternalLink className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">Storefront</span>
-              </Link>
+            <Button variant="outline" size="sm" onClick={fetchAllData} className="text-xs px-2.5">
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
             </Button>
           </div>
         </header>
 
         {/* Mobile Navigation Tabs */}
-        <div className="md:hidden flex items-center gap-2 p-3 overflow-x-auto border-b border-border bg-surface-2 text-xs">
-          {['overview', 'products', 'categories', 'orders', 'support', 'security', 'coupons', 'customers', 'settings'].map((tab) => (
+        <div className="md:hidden flex items-center gap-2 p-3 overflow-x-auto border-b border-border bg-white text-xs">
+          {[
+            { id: 'overview', label: 'Overview' },
+            { id: 'orders', label: `Orders${actionableOrdersBadge ? ` (${actionableOrdersBadge})` : ''}` },
+            { id: 'returns', label: `Returns${pendingReturnsBadge ? ` (${pendingReturnsBadge})` : ''}` },
+            { id: 'products', label: 'Products' },
+            { id: 'categories', label: 'Categories' },
+            { id: 'support', label: `Support${openTicketsBadge ? ` (${openTicketsBadge})` : ''}` },
+            { id: 'coupons', label: 'Coupons' },
+            { id: 'customers', label: 'Clients' },
+            { id: 'security', label: unreadAlerts > 0 ? `Alerts (${unreadAlerts})` : 'Security' },
+            { id: 'settings', label: 'Settings' },
+          ].map((tab) => (
             <button
-              key={tab}
-              onClick={() => setActiveTab(tab as any)}
-              className={`px-3 py-1.5 rounded-lg capitalize whitespace-nowrap font-medium ${
-                activeTab === tab
-                  ? 'bg-gold text-background font-bold'
-                  : tab === 'security' && unreadAlerts > 0
-                  ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
-                  : 'text-beige-muted'
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id as any)}
+              className={`px-3 py-1.5 rounded-lg whitespace-nowrap font-medium transition-colors ${
+                activeTab === tab.id
+                  ? 'bg-[#111111] text-white font-semibold'
+                  : tab.id === 'returns' && pendingReturnsBadge > 0
+                  ? 'bg-amber-50 text-amber-800 border border-amber-200'
+                  : tab.id === 'security' && unreadAlerts > 0
+                  ? 'bg-rose-50 text-rose-700 border border-rose-200'
+                  : 'text-beige-muted bg-surface-2'
               }`}
             >
-              {tab === 'security' && unreadAlerts > 0 ? `Threats (${unreadAlerts})` : tab}
+              {tab.label}
             </button>
           ))}
         </div>
 
-        <main className="flex-1 p-6 sm:p-10 max-w-7xl w-full mx-auto space-y-8">
+        <main className="flex-1 p-4 sm:p-8 lg:p-10 max-w-7xl w-full mx-auto space-y-8">
           {portalError && (
             <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-rose-800">
               <div className="flex items-start gap-2.5 text-xs">
@@ -1408,130 +1686,303 @@ function AdminContent() {
             </div>
           )}
 
-          {/* ─── TAB 1: OVERVIEW ──────────────────────────────────────────────── */}
+          {/* ─── TAB 1: EXECUTIVE OVERVIEW ────────────────────────────────────── */}
           {activeTab === 'overview' && (
-            <div className="space-y-10">
-              {/* Top Banner */}
-              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div className="space-y-8">
+              {/* Top Executive Banner */}
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-[#111111] text-[#FAF8F5] rounded-2xl p-6 sm:p-7 border border-[#26231F] shadow-sm">
                 <div>
-                  <h1 className="font-serif text-3xl font-bold text-beige">Executive Overview</h1>
-                  <p className="text-sm text-beige-muted mt-1">Live metrics across sales, logistics, and inventory</p>
+                  <span className="text-[11px] font-mono uppercase tracking-widest text-[#C5A059] font-semibold">
+                    NEXUS Executive Control Center
+                  </span>
+                  <h1 className="font-serif text-2xl sm:text-3xl font-bold mt-1">
+                    Operations, Fulfillment &amp; Refund Ledger
+                  </h1>
+                  <p className="text-xs text-[#A8A29E] mt-1">
+                    Monitor step-by-step order progress, 7-day return pickups, settled refunds, and live revenue health.
+                  </p>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex flex-wrap items-center gap-2.5">
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={fetchAllData}
-                    className="flex items-center gap-1.5"
+                    onClick={() => setActiveTab('orders')}
+                    className="border-[#C5A059]/40 text-[#FAF8F5] hover:bg-[#C5A059] hover:text-[#111111] text-xs"
                   >
-                    <RefreshCw className="w-3.5 h-3.5" />
-                    Refresh
+                    Manage Orders ({actionableOrdersBadge})
                   </Button>
                   <Button
                     variant="primary"
                     size="sm"
-                    onClick={() => {
-                      setActiveTab('products')
-                      setShowAddProductModal(true)
-                    }}
-                    className="flex items-center gap-1.5"
+                    onClick={() => setActiveTab('returns')}
+                    className="bg-[#C5A059] hover:bg-[#D4AF37] text-[#111111] font-bold text-xs"
                   >
-                    <Plus className="w-4 h-4" />
-                    New Product
+                    Returns &amp; Refunds ({pendingReturnsBadge})
                   </Button>
                 </div>
               </div>
 
-              {/* KPI Cards Grid */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-                <div className="bg-surface border border-border rounded-2xl p-6 shadow-xl">
-                  <div className="flex items-center justify-between text-beige-muted mb-2">
-                    <span className="text-xs font-semibold uppercase tracking-wider">Gross Revenue</span>
-                    <DollarSign className="w-5 h-5 text-gold" />
+              {/* 4 KPI Hero Cards */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+                <div className="bg-white border border-[#E7E5E4] rounded-2xl p-5 shadow-sm space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-beige-muted">
+                      Net Settled Revenue
+                    </span>
+                    <div className="w-9 h-9 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-center text-emerald-700">
+                      <DollarSign className="w-4 h-4" />
+                    </div>
                   </div>
-                  <p className="font-serif text-3xl font-bold text-beige">
-                    {formatCurrency(stats?.totalRevenue ?? 0)}
+                  <p className="font-serif text-3xl font-bold text-[#111111]">
+                    {formatCurrency(stats?.netRevenue ?? stats?.totalRevenue ?? 0)}
                   </p>
-                  <p className="text-xs text-success mt-2 flex items-center gap-1">
-                    <TrendingUp className="w-3.5 h-3.5" /> Verified Sales
-                  </p>
+                  <div className="flex items-center justify-between text-[11px] pt-1 border-t border-border/60">
+                    <span className="text-emerald-700 font-semibold">
+                      Gross: {formatCurrency(stats?.totalRevenue ?? 0)}
+                    </span>
+                    <span className="text-rose-700 font-medium">
+                      Refunded: {formatCurrency(stats?.totalRefunded ?? returnsSummary.totalRefundedAmount ?? 0)}
+                    </span>
+                  </div>
                 </div>
 
-                <div className="bg-surface border border-border rounded-2xl p-6 shadow-xl">
-                  <div className="flex items-center justify-between text-beige-muted mb-2">
-                    <span className="text-xs font-semibold uppercase tracking-wider">Fulfillment Queue</span>
-                    <ShoppingCart className="w-5 h-5 text-gold" />
+                <div className="bg-white border border-[#E7E5E4] rounded-2xl p-5 shadow-sm space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-beige-muted">
+                      Active Order Pipeline
+                    </span>
+                    <div className="w-9 h-9 rounded-xl bg-gold/10 border border-gold/30 flex items-center justify-center text-gold">
+                      <ShoppingCart className="w-4 h-4" />
+                    </div>
                   </div>
-                  <p className="font-serif text-3xl font-bold text-beige">
-                    {stats?.pendingOrders ?? 0}
+                  <p className="font-serif text-3xl font-bold text-[#111111]">
+                    {actionableOrdersBadge}
                   </p>
-                  <p className="text-xs text-gold mt-2 flex items-center gap-1">
-                    <AlertCircle className="w-3.5 h-3.5" /> Awaiting Courier Dispatch
-                  </p>
+                  <div className="flex items-center justify-between text-[11px] pt-1 border-t border-border/60 text-beige-muted">
+                    <span>Pending: {stats?.pendingOrders ?? 0} • Conf: {stats?.confirmedOrders ?? 0}</span>
+                    <button onClick={() => setActiveTab('orders')} className="text-gold font-bold hover:underline">
+                      Open →
+                    </button>
+                  </div>
                 </div>
 
-                <div className="bg-surface border border-border rounded-2xl p-6 shadow-xl">
-                  <div className="flex items-center justify-between text-beige-muted mb-2">
-                    <span className="text-xs font-semibold uppercase tracking-wider">Active Inventory</span>
-                    <Package className="w-5 h-5 text-gold" />
+                <div className="bg-white border border-amber-200 rounded-2xl p-5 shadow-sm space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-amber-800">
+                      Returns &amp; Payout Desk
+                    </span>
+                    <div className="w-9 h-9 rounded-xl bg-amber-50 border border-amber-200 flex items-center justify-center text-amber-700">
+                      <RotateCcw className="w-4 h-4" />
+                    </div>
                   </div>
-                  <p className="font-serif text-3xl font-bold text-beige">
+                  <p className="font-serif text-3xl font-bold text-[#111111]">
+                    {pendingReturnsBadge}
+                  </p>
+                  <div className="flex items-center justify-between text-[11px] pt-1 border-t border-border/60">
+                    <span className="text-amber-800 font-semibold">
+                      Payout Due: {formatCurrency(stats?.pendingRefundsAmount ?? returnsSummary.pendingPayoutAmount ?? 0)}
+                    </span>
+                    <button onClick={() => setActiveTab('returns')} className="text-gold font-bold hover:underline">
+                      Resolve →
+                    </button>
+                  </div>
+                </div>
+
+                <div className="bg-white border border-[#E7E5E4] rounded-2xl p-5 shadow-sm space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-beige-muted">
+                      Catalog &amp; Client Base
+                    </span>
+                    <div className="w-9 h-9 rounded-xl bg-surface-2 border border-border flex items-center justify-center text-[#111111]">
+                      <Package className="w-4 h-4" />
+                    </div>
+                  </div>
+                  <p className="font-serif text-3xl font-bold text-[#111111]">
                     {stats?.totalProducts ?? products.length}
                   </p>
-                  <p className="text-xs text-beige-muted mt-2">
-                    {stats?.lowStockProducts ?? 0} low stock items
-                  </p>
-                </div>
-
-                <div className="bg-surface border border-border rounded-2xl p-6 shadow-xl">
-                  <div className="flex items-center justify-between text-beige-muted mb-2">
-                    <span className="text-xs font-semibold uppercase tracking-wider">Client Base</span>
-                    <Users className="w-5 h-5 text-gold" />
+                  <div className="flex items-center justify-between text-[11px] pt-1 border-t border-border/60 text-beige-muted">
+                    <span>{stats?.lowStockProducts ?? 0} low stock SKUs</span>
+                    <span>{stats?.totalCustomers ?? customers.length} clients</span>
                   </div>
-                  <p className="font-serif text-3xl font-bold text-beige">
-                    {stats?.totalCustomers ?? customers.length}
-                  </p>
-                  <p className="text-xs text-beige-muted mt-2">Registered clientele</p>
                 </div>
               </div>
 
-              {/* Secondary Performance Strip */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div className="bg-surface border border-border rounded-2xl p-5 flex items-center justify-between shadow-sm">
+              {/* Interactive Order Lifecycle Pipeline Strip */}
+              <div className="bg-white border border-[#E7E5E4] rounded-2xl p-6 shadow-sm space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
-                    <p className="text-xs uppercase tracking-wider font-mono text-beige-muted">Revenue Today</p>
-                    <p className="font-serif text-2xl font-bold text-beige mt-1">
-                      {formatCurrency(stats?.revenueToday ?? 0)}
+                    <h2 className="font-serif text-lg font-bold text-[#111111]">
+                      Live Order Fulfillment Pipeline
+                    </h2>
+                    <p className="text-xs text-beige-muted">
+                      Click any stage to filter and process orders step-by-step
                     </p>
                   </div>
-                  <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
-                    Live
+                  <span className="text-xs font-mono text-beige-muted">
+                    Total Lifetime Orders: <strong className="text-[#111111]">{stats?.totalOrders ?? orders.length}</strong>
                   </span>
                 </div>
-                <div className="bg-surface border border-border rounded-2xl p-5 flex items-center justify-between shadow-sm">
-                  <div>
-                    <p className="text-xs uppercase tracking-wider font-mono text-beige-muted">This Month</p>
-                    <p className="font-serif text-2xl font-bold text-gold mt-1">
-                      {formatCurrency(stats?.revenueThisMonth ?? 0)}
-                    </p>
-                  </div>
-                  <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-gold/15 text-gold-dark border border-gold/30">
-                    MTD
-                  </span>
+
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                  {[
+                    { id: 'pending', label: '1. Pending', count: stats?.pendingOrders ?? 0, tone: 'bg-amber-50 border-amber-200 text-amber-800', target: 'orders' },
+                    { id: 'confirmed', label: '2. Confirmed', count: stats?.confirmedOrders ?? 0, tone: 'bg-gold/10 border-gold/30 text-[#7A5D24]', target: 'orders' },
+                    { id: 'processing', label: '3. Packing & QC', count: stats?.processingOrders ?? 0, tone: 'bg-purple-50 border-purple-200 text-purple-800', target: 'orders' },
+                    { id: 'shipped', label: '4. Dispatched', count: stats?.shippedOrders ?? 0, tone: 'bg-sky-50 border-sky-200 text-sky-800', target: 'orders' },
+                    { id: 'delivered', label: '5. Delivered', count: stats?.deliveredOrders ?? 0, tone: 'bg-emerald-50 border-emerald-200 text-emerald-800', target: 'orders' },
+                    { id: 'returns', label: '6. Returns/Refund', count: pendingReturnsBadge, tone: 'bg-rose-50 border-rose-200 text-rose-800', target: 'returns' },
+                  ].map((stage) => (
+                    <button
+                      key={stage.id}
+                      type="button"
+                      onClick={() => {
+                        if (stage.target === 'returns') {
+                          setActiveTab('returns')
+                        } else {
+                          setOrderStatusFilter(stage.id)
+                          setActiveTab('orders')
+                        }
+                      }}
+                      className={`p-3.5 rounded-xl border text-left transition-all hover:shadow-md hover:-translate-y-0.5 ${stage.tone}`}
+                    >
+                      <span className="text-[10px] font-mono uppercase tracking-wider font-bold block opacity-80">
+                        {stage.label}
+                      </span>
+                      <p className="font-serif text-2xl font-bold mt-1">{stage.count}</p>
+                    </button>
+                  ))}
                 </div>
-                <div className="bg-surface border border-border rounded-2xl p-5 flex items-center justify-between shadow-sm">
-                  <div>
-                    <p className="text-xs uppercase tracking-wider font-mono text-beige-muted">Total Orders</p>
-                    <p className="font-serif text-2xl font-bold text-beige mt-1">
-                      {stats?.totalOrders ?? orders.length}
-                    </p>
+              </div>
+
+              {/* 7-Day Revenue Trend + Operational Priority Queue */}
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                <div className="lg:col-span-7 bg-white border border-[#E7E5E4] rounded-2xl p-6 shadow-sm space-y-5">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="font-serif text-lg font-bold text-[#111111]">7-Day Order Revenue Velocity</h3>
+                      <p className="text-xs text-beige-muted">
+                        Today: <strong className="text-[#111111]">{formatCurrency(stats?.revenueToday ?? 0)}</strong> • MTD:{' '}
+                        <strong className="text-gold">{formatCurrency(stats?.revenueThisMonth ?? 0)}</strong>
+                      </p>
+                    </div>
+                    <TrendingUp className="w-5 h-5 text-gold" />
                   </div>
-                  <button
-                    onClick={() => setActiveTab('orders')}
-                    className="text-xs font-semibold text-gold hover:underline"
-                  >
-                    Manage →
-                  </button>
+
+                  {(() => {
+                    const series = stats?.revenueSeries ?? []
+                    const maxRev = Math.max(1, ...series.map((d) => d.revenue))
+                    if (series.length === 0) {
+                      return (
+                        <div className="h-44 flex items-center justify-center text-xs text-beige-muted bg-surface-2/40 rounded-xl">
+                          No recent order data in window.
+                        </div>
+                      )
+                    }
+                    return (
+                      <div className="grid grid-cols-7 gap-2.5 items-end h-48 pt-4">
+                        {series.map((point) => {
+                          const heightPct = Math.max(8, Math.round((point.revenue / maxRev) * 100))
+                          return (
+                            <div key={point.dateLabel} className="flex flex-col items-center gap-1.5 h-full justify-end group">
+                              <span className="text-[10px] font-mono text-beige-muted opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
+                                {formatCurrency(point.revenue)}
+                              </span>
+                              <div className="w-full max-w-[38px] bg-[#F5F2EB] rounded-t-lg h-32 flex items-end overflow-hidden border border-border/60">
+                                <div
+                                  className="w-full bg-gradient-to-t from-[#111111] to-[#C5A059] rounded-t-lg transition-all duration-500"
+                                  style={{ height: `${heightPct}%` }}
+                                  title={`${point.dateLabel}: ${formatCurrency(point.revenue)} (${point.orderCount} orders)`}
+                                />
+                              </div>
+                              <div className="text-center">
+                                <span className="text-[10px] font-mono font-semibold text-beige block">
+                                  {point.dateLabel}
+                                </span>
+                                <span className="text-[9px] text-beige-muted">{point.orderCount} ord</span>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )
+                  })()}
+                </div>
+
+                {/* Operational Priority Desk */}
+                <div className="lg:col-span-5 bg-white border border-[#E7E5E4] rounded-2xl p-6 shadow-sm space-y-4">
+                  <h3 className="font-serif text-lg font-bold text-[#111111]">Immediate Action Queue</h3>
+
+                  <div className="space-y-2.5">
+                    {returnsSummary.requestedCount > 0 && (
+                      <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 flex items-center justify-between gap-3">
+                        <div className="text-xs">
+                          <p className="font-bold text-amber-900">
+                            {returnsSummary.requestedCount} New 7-Day Return Request(s)
+                          </p>
+                          <p className="text-amber-700 text-[11px]">Approve doorstep pickup or review reason</p>
+                        </div>
+                        <Button size="sm" variant="primary" onClick={() => setActiveTab('returns')} className="text-xs shrink-0">
+                          Review
+                        </Button>
+                      </div>
+                    )}
+
+                    {returnsSummary.pendingPayoutCount > 0 && (
+                      <div className="p-3.5 rounded-xl bg-purple-50 border border-purple-200 flex items-center justify-between gap-3">
+                        <div className="text-xs">
+                          <p className="font-bold text-purple-900">
+                            {returnsSummary.pendingPayoutCount} Return Refund(s) Ready ({formatCurrency(returnsSummary.pendingPayoutAmount)})
+                          </p>
+                          <p className="text-purple-700 text-[11px]">Settle refund payment &amp; restock items</p>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="primary"
+                          onClick={() => {
+                            setReturnFilter('payout')
+                            setActiveTab('returns')
+                          }}
+                          className="text-xs shrink-0"
+                        >
+                          Pay Refund
+                        </Button>
+                      </div>
+                    )}
+
+                    {actionableOrdersBadge > 0 && (
+                      <div className="p-3.5 rounded-xl bg-surface-2 border border-border flex items-center justify-between gap-3">
+                        <div className="text-xs">
+                          <p className="font-bold text-[#111111]">{actionableOrdersBadge} Orders Awaiting Dispatch Steps</p>
+                          <p className="text-beige-muted text-[11px]">Confirm, pack, and assign courier tracking</p>
+                        </div>
+                        <Button size="sm" variant="outline" onClick={() => setActiveTab('orders')} className="text-xs shrink-0">
+                          Advance
+                        </Button>
+                      </div>
+                    )}
+
+                    {openTicketsBadge > 0 && (
+                      <div className="p-3.5 rounded-xl bg-sky-50 border border-sky-200 flex items-center justify-between gap-3">
+                        <div className="text-xs">
+                          <p className="font-bold text-sky-900">{openTicketsBadge} Open Concierge Support Tickets</p>
+                          <p className="text-sky-700 text-[11px]">Customer queries awaiting reply</p>
+                        </div>
+                        <Button size="sm" variant="outline" onClick={() => setActiveTab('support')} className="text-xs shrink-0">
+                          Reply
+                        </Button>
+                      </div>
+                    )}
+
+                    {returnsSummary.requestedCount === 0 &&
+                      returnsSummary.pendingPayoutCount === 0 &&
+                      actionableOrdersBadge === 0 &&
+                      openTicketsBadge === 0 && (
+                        <div className="p-6 rounded-xl bg-emerald-50/70 border border-emerald-200 text-center text-xs text-emerald-800">
+                          <CheckCircle2 className="w-6 h-6 text-emerald-600 mx-auto mb-1.5" />
+                          All fulfillment steps, return payouts, and support queues are caught up.
+                        </div>
+                      )}
+                  </div>
                 </div>
               </div>
 
@@ -1540,7 +1991,7 @@ function AdminContent() {
                 const lowStockItems = products.filter((p) => (p.stock ?? p.stockQuantity ?? 0) <= 5)
                 if (lowStockItems.length === 0) return null
                 return (
-                  <div className="bg-surface border border-amber-200 rounded-2xl p-6 shadow-sm space-y-4">
+                  <div className="bg-white border border-amber-200 rounded-2xl p-6 shadow-sm space-y-4">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <AlertTriangle className="w-5 h-5 text-amber-600" />
@@ -1586,9 +2037,9 @@ function AdminContent() {
               })()}
 
               {/* Recent Orders Overview */}
-              <div className="bg-surface border border-border rounded-2xl p-6 sm:p-8 shadow-xl">
-                <div className="flex items-center justify-between mb-6">
-                  <h3 className="font-serif text-xl font-bold text-beige">Recent Orders Feed</h3>
+              <div className="bg-white border border-[#E7E5E4] rounded-2xl p-6 sm:p-7 shadow-sm">
+                <div className="flex items-center justify-between mb-5">
+                  <h3 className="font-serif text-xl font-bold text-[#111111]">Recent Orders Feed</h3>
                   <Button variant="ghost" size="sm" onClick={() => setActiveTab('orders')} className="text-xs text-gold">
                     View All Orders →
                   </Button>
@@ -1600,38 +2051,39 @@ function AdminContent() {
                       <tr>
                         <th className="py-3 px-4">Order #</th>
                         <th className="py-3 px-4">Customer</th>
+                        <th className="py-3 px-4">Pipeline Step</th>
                         <th className="py-3 px-4">Total</th>
                         <th className="py-3 px-4">Status</th>
                         <th className="py-3 px-4">Date</th>
-                        <th className="py-3 px-4 text-right">Inspect</th>
+                        <th className="py-3 px-4 text-right">Manage</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border">
-                      {orders.slice(0, 6).map((ord) => (
-                        <tr
-                          key={ord.id}
-                          className={`transition-colors ${
-                            ord.status?.toString().toLowerCase() === 'cancelled'
-                              ? 'bg-rose-50/70 hover:bg-rose-50'
-                              : ord.status?.toString().toLowerCase() === 'delivered'
-                              ? 'bg-emerald-50/60 hover:bg-emerald-50'
-                              : 'hover:bg-surface-2/50'
-                          }`}
-                        >
-                          <td className="py-3.5 px-4 font-mono text-gold font-bold">{ord.orderNumber}</td>
-                          <td className="py-3.5 px-4 text-beige font-medium">{ord.shippingName ?? 'Client'}</td>
-                          <td className="py-3.5 px-4 font-medium">{formatCurrency(ord.totalAmount ?? ord.total ?? 0)}</td>
-                          <td className="py-3.5 px-4">
-                            <StatusBadge status={ord.status} size="sm" />
-                          </td>
-                          <td className="py-3.5 px-4 text-beige-muted text-xs">{formatDate(ord.createdAt)}</td>
-                          <td className="py-3.5 px-4 text-right">
-                            <Button variant="ghost" size="sm" onClick={() => handleOpenInspectOrder(ord)}>
-                              <Eye className="w-4 h-4 text-gold" />
-                            </Button>
-                          </td>
-                        </tr>
-                      ))}
+                      {orders.slice(0, 6).map((ord) => {
+                        const stepMeta = getOrderStepInfo(ord.status)
+                        return (
+                          <tr key={ord.id} className="hover:bg-surface-2/40 transition-colors">
+                            <td className="py-3.5 px-4 font-mono text-gold font-bold">{ord.orderNumber}</td>
+                            <td className="py-3.5 px-4 text-beige font-medium">{ord.shippingName ?? 'Client'}</td>
+                            <td className="py-3.5 px-4 text-xs font-mono text-beige-muted">{stepMeta.label}</td>
+                            <td className="py-3.5 px-4 font-semibold">{formatCurrency(ord.totalAmount ?? ord.total ?? 0)}</td>
+                            <td className="py-3.5 px-4">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <StatusBadge status={ord.status} size="sm" />
+                                {ord.returnStatus && String(ord.returnStatus).toLowerCase() !== 'none' && (
+                                  <StatusBadge status={ord.returnStatus} size="sm" />
+                                )}
+                              </div>
+                            </td>
+                            <td className="py-3.5 px-4 text-beige-muted text-xs">{formatDate(ord.createdAt)}</td>
+                            <td className="py-3.5 px-4 text-right">
+                              <Button variant="outline" size="sm" onClick={() => handleOpenInspectOrder(ord)} className="text-xs">
+                                Steps
+                              </Button>
+                            </td>
+                          </tr>
+                        )
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -2374,34 +2826,51 @@ function AdminContent() {
           {/* ─── TAB 4: ORDERS & COURIER FULFILLMENT ─────────────────────────── */}
           {activeTab === 'orders' && (
             <div className="space-y-6">
-              <div>
-                <h1 className="font-serif text-3xl font-bold text-beige">Orders & Fulfillment</h1>
-                <p className="text-sm text-beige-muted mt-1">
-                  Assign courier tracking codes, update order states, and verify client fulfillment
-                </p>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h1 className="font-serif text-3xl font-bold text-[#111111]">Orders &amp; Fulfillment Pipeline</h1>
+                  <p className="text-sm text-beige-muted mt-1">
+                    Advance orders step-by-step (`Pending → Confirmed → Packed → Shipped → Out for Delivery → Delivered`) with courier tracking
+                  </p>
+                </div>
+                {pendingReturnsBadge > 0 && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setActiveTab('returns')}
+                    className="border-amber-300 text-amber-800 hover:bg-amber-50 text-xs self-start sm:self-center"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    View Returns Desk ({pendingReturnsBadge})
+                  </Button>
+                )}
               </div>
 
               {/* Status Pills & Search */}
-              <div className="flex flex-col sm:flex-row items-center gap-3">
-                <div className="relative flex-1 w-full">
+              <div className="flex flex-col gap-3 bg-white border border-[#E7E5E4] rounded-2xl p-4 shadow-sm">
+                <div className="relative w-full">
                   <Search className="w-4 h-4 text-beige-muted absolute left-3 top-1/2 -translate-y-1/2" />
                   <input
                     type="text"
-                    placeholder="Search by order number, recipient, contact phone..."
+                    placeholder="Search by order number, recipient, email, or phone..."
                     value={orderSearch}
                     onChange={(e) => setOrderSearch(e.target.value)}
-                    className="w-full bg-surface border border-border rounded-xl pl-9 pr-4 py-2 text-sm text-beige placeholder:text-beige-muted/50 focus:outline-none focus:border-gold"
+                    className="w-full bg-surface-2 border border-border rounded-xl pl-9 pr-4 py-2 text-sm text-beige placeholder:text-beige-muted/50 focus:outline-none focus:border-gold"
                   />
                 </div>
 
-                <div className="flex items-center gap-1.5 overflow-x-auto w-full sm:w-auto pb-1">
+                <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
                   {[
-                    { id: 'all', label: 'All Orders', dot: 'bg-gold' },
-                    { id: 'delivered', label: 'Delivered', dot: 'bg-emerald-400' },
-                    { id: 'shipped', label: 'Shipped', dot: 'bg-sky-400' },
-                    { id: 'confirmed', label: 'Confirmed', dot: 'bg-gold' },
-                    { id: 'pending', label: 'Pending', dot: 'bg-amber-400' },
-                    { id: 'cancelled', label: 'Cancelled', dot: 'bg-rose-500' },
+                    { id: 'all', label: `All (${orders.length})`, dot: 'bg-gold' },
+                    { id: 'pending', label: `Pending (${orders.filter((o) => ['pending', 'paymentpending'].includes(safeStr(o.status))).length})`, dot: 'bg-amber-500' },
+                    { id: 'confirmed', label: `Confirmed (${orders.filter((o) => safeStr(o.status) === 'confirmed').length})`, dot: 'bg-gold' },
+                    { id: 'processing', label: `Packing (${orders.filter((o) => safeStr(o.status) === 'processing').length})`, dot: 'bg-purple-500' },
+                    { id: 'shipped', label: `Shipped (${orders.filter((o) => safeStr(o.status) === 'shipped').length})`, dot: 'bg-sky-500' },
+                    { id: 'outfordelivery', label: `Out Delivery (${orders.filter((o) => safeStr(o.status) === 'outfordelivery').length})`, dot: 'bg-sky-700' },
+                    { id: 'delivered', label: `Delivered (${orders.filter((o) => safeStr(o.status) === 'delivered').length})`, dot: 'bg-emerald-500' },
+                    { id: 'returns', label: `Returns & Refunds (${returnsOrders.length})`, dot: 'bg-amber-600' },
+                    { id: 'cancelled', label: `Cancelled (${orders.filter((o) => safeStr(o.status) === 'cancelled').length})`, dot: 'bg-rose-500' },
+                    { id: 'refunded', label: `Refunded (${orders.filter((o) => safeStr(o.status) === 'refunded').length})`, dot: 'bg-emerald-700' },
                   ].map((tab) => {
                     const isSelected = orderStatusFilter === tab.id
                     return (
@@ -2410,11 +2879,11 @@ function AdminContent() {
                         onClick={() => setOrderStatusFilter(tab.id)}
                         className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap transition-all ${
                           isSelected
-                            ? 'bg-gold text-background shadow-md shadow-gold/20'
-                            : 'bg-surface border border-border text-beige-muted hover:text-beige hover:border-gold/30'
+                            ? 'bg-[#111111] text-white shadow-sm'
+                            : 'bg-surface-2 border border-border text-beige-muted hover:text-beige hover:border-gold/40'
                         }`}
                       >
-                        <span className={`w-1.5 h-1.5 rounded-full ${isSelected ? 'bg-background' : tab.dot}`} />
+                        <span className={`w-1.5 h-1.5 rounded-full ${isSelected ? 'bg-[#C5A059]' : tab.dot}`} />
                         {tab.label}
                       </button>
                     )
@@ -2423,67 +2892,553 @@ function AdminContent() {
               </div>
 
               {/* Orders Table */}
-              <div className="bg-surface border border-border rounded-2xl overflow-hidden shadow-xl">
+              <div className="bg-white border border-[#E7E5E4] rounded-2xl overflow-hidden shadow-sm">
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-sm">
-                    <thead className="text-xs text-beige-muted uppercase border-b border-border bg-surface-2/40">
+                    <thead className="text-xs text-beige-muted uppercase border-b border-border bg-surface-2/50">
                       <tr>
-                        <th className="py-3.5 px-4">Order #</th>
+                        <th className="py-3.5 px-4">Order &amp; Date</th>
                         <th className="py-3.5 px-4">Recipient</th>
-                        <th className="py-3.5 px-4">Total</th>
-                        <th className="py-3.5 px-4">Payment</th>
-                        <th className="py-3.5 px-4">Status</th>
-                        <th className="py-3.5 px-4">Date</th>
-                        <th className="py-3.5 px-4 text-right">Fulfillment</th>
+                        <th className="py-3.5 px-4">Total &amp; Payment</th>
+                        <th className="py-3.5 px-4">Fulfillment Step</th>
+                        <th className="py-3.5 px-4">Return / Courier</th>
+                        <th className="py-3.5 px-4 text-right">Actions</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border">
                       {filteredOrders.map((ord) => {
-                        const isCanc = ord.status?.toString().toLowerCase() === 'cancelled'
-                        const isDeliv = ord.status?.toString().toLowerCase() === 'delivered'
+                        const isCanc = safeStr(ord.status) === 'cancelled'
+                        const isDeliv = safeStr(ord.status) === 'delivered'
+                        const hasReturn = ord.returnStatus && safeStr(ord.returnStatus) !== 'none'
+                        const stepMeta = getOrderStepInfo(ord.status)
 
                         return (
                           <tr
                             key={ord.id}
                             className={`transition-colors ${
                               isCanc
-                                ? 'bg-rose-50/70 hover:bg-rose-50 border-l-2 border-l-rose-500'
+                                ? 'bg-rose-50/40 hover:bg-rose-50/70'
                                 : isDeliv
-                                ? 'bg-emerald-50/60 hover:bg-emerald-50 border-l-2 border-l-emerald-500'
+                                ? 'bg-emerald-50/35 hover:bg-emerald-50/60'
                                 : 'hover:bg-surface-2/40'
                             }`}
                           >
-                            <td className="py-3.5 px-4 font-mono text-gold font-bold">{ord.orderNumber}</td>
+                            <td className="py-3.5 px-4">
+                              <div className="font-mono text-gold font-bold">{ord.orderNumber}</div>
+                              <div className="text-[11px] text-beige-muted">{formatDate(ord.createdAt)}</div>
+                            </td>
                             <td className="py-3.5 px-4">
                               <div className="font-medium text-beige">{ord.shippingName}</div>
                               <div className="text-xs text-beige-muted font-mono">{ord.shippingPhone}</div>
                             </td>
-                            <td className="py-3.5 px-4 font-semibold text-beige">
-                              {formatCurrency(ord.totalAmount ?? ord.total ?? 0)}
-                            </td>
-                            <td className="py-3.5 px-4 text-xs uppercase text-beige-muted">
-                              {ord.paymentMethod} • <span className="text-gold font-semibold">{ord.paymentStatus}</span>
+                            <td className="py-3.5 px-4">
+                              <div className="font-semibold text-beige">
+                                {formatCurrency(ord.totalAmount ?? ord.total ?? 0)}
+                              </div>
+                              <div className="text-[11px] uppercase text-beige-muted">
+                                {ord.paymentMethod} • <span className="text-gold font-semibold">{ord.paymentStatus}</span>
+                              </div>
                             </td>
                             <td className="py-3.5 px-4">
-                              <StatusBadge status={ord.status} size="sm" />
+                              <div className="space-y-1">
+                                <StatusBadge status={ord.status} size="sm" />
+                                <div className="text-[10px] font-mono text-beige-muted">{stepMeta.label}</div>
+                              </div>
                             </td>
-                            <td className="py-3.5 px-4 text-xs text-beige-muted">{formatDate(ord.createdAt)}</td>
+                            <td className="py-3.5 px-4 text-xs">
+                              {hasReturn ? (
+                                <div className="space-y-1">
+                                  <StatusBadge status={ord.returnStatus!} size="sm" />
+                                  {ord.refundReference && (
+                                    <div className="text-[10px] font-mono text-emerald-700">{ord.refundReference}</div>
+                                  )}
+                                </div>
+                              ) : ord.trackingNumber ? (
+                                <div>
+                                  <div className="text-[11px] font-semibold text-beige">{ord.courierName || 'Courier'}</div>
+                                  <div className="font-mono text-[11px] text-gold">{ord.trackingNumber}</div>
+                                </div>
+                              ) : (
+                                <span className="text-[11px] text-beige-muted">—</span>
+                              )}
+                            </td>
                             <td className="py-3.5 px-4 text-right">
-                              <Button
-                                variant="primary"
-                                size="sm"
-                                onClick={() => handleOpenInspectOrder(ord)}
-                                className="text-xs font-semibold py-1 px-3"
-                              >
-                                Manage
-                              </Button>
+                              <div className="inline-flex items-center gap-2">
+                                {stepMeta.nextStatus && (
+                                  <Button
+                                    variant="primary"
+                                    size="sm"
+                                    disabled={isUpdatingOrder}
+                                    onClick={() => {
+                                      if (stepMeta.nextStatus === 'shipped') {
+                                        handleOpenInspectOrder(ord)
+                                        setOrderStatusUpdate('shipped')
+                                      } else {
+                                        applyOrderStatusUpdate(ord.id, stepMeta.nextStatus!)
+                                      }
+                                    }}
+                                    className="text-[11px] font-semibold py-1 px-2.5 bg-[#111111] hover:bg-[#C5A059] text-white hover:text-[#111111]"
+                                  >
+                                    {stepMeta.nextLabel} →
+                                  </Button>
+                                )}
+                                {hasReturn && (
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => setActiveTab('returns')}
+                                    className="text-[11px] py-1 px-2.5 border-amber-300 text-amber-800 hover:bg-amber-50"
+                                  >
+                                    Return Desk
+                                  </Button>
+                                )}
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleOpenInspectOrder(ord)}
+                                  className="text-[11px] font-semibold py-1 px-2.5"
+                                >
+                                  Manage
+                                </Button>
+                              </div>
                             </td>
                           </tr>
                         )
                       })}
+                      {filteredOrders.length === 0 && (
+                        <tr>
+                          <td colSpan={6} className="py-10 text-center text-xs text-beige-muted">
+                            No orders match this status or search filter.
+                          </td>
+                        </tr>
+                      )}
                     </tbody>
                   </table>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* ─── TAB: RETURNS & RETURN PAYMENT SETTLEMENT ────────────────────── */}
+          {activeTab === 'returns' && (
+            <div className="space-y-6">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <span className="text-[11px] font-mono font-bold uppercase tracking-widest text-gold">
+                    7-Day Return &amp; Refund Ledger
+                  </span>
+                  <h1 className="font-serif text-3xl font-bold text-[#111111]">Returns &amp; Refund Settlement</h1>
+                  <p className="text-sm text-beige-muted mt-1">
+                    Review customer return requests (`Requested → Approved → Picked Up → Warehouse QC → Refund Paid`), restock items, and settle return payments.
+                  </p>
+                </div>
+                <Button variant="outline" size="sm" onClick={fetchAllData} className="self-start sm:self-center text-xs">
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  Refresh Returns
+                </Button>
+              </div>
+
+              {/* Returns KPI Cards */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="bg-white border border-amber-200 rounded-2xl p-4 shadow-sm">
+                  <span className="text-[11px] uppercase font-mono font-bold text-amber-800">Pending Review</span>
+                  <p className="font-serif text-2xl font-bold text-amber-900 mt-1">{returnsSummary.requestedCount}</p>
+                </div>
+                <div className="bg-white border border-sky-200 rounded-2xl p-4 shadow-sm">
+                  <span className="text-[11px] uppercase font-mono font-bold text-sky-800">Pickup In Progress</span>
+                  <p className="font-serif text-2xl font-bold text-sky-900 mt-1">{returnsSummary.inPickupCount}</p>
+                </div>
+                <div className="bg-white border border-purple-200 rounded-2xl p-4 shadow-sm">
+                  <span className="text-[11px] uppercase font-mono font-bold text-purple-800">Ready For Payout</span>
+                  <p className="font-serif text-2xl font-bold text-purple-900 mt-1">
+                    {returnsSummary.pendingPayoutCount} • {formatCurrency(returnsSummary.pendingPayoutAmount)}
+                  </p>
+                </div>
+                <div className="bg-white border border-emerald-200 rounded-2xl p-4 shadow-sm">
+                  <span className="text-[11px] uppercase font-mono font-bold text-emerald-800">Settled Refunds</span>
+                  <p className="font-serif text-2xl font-bold text-emerald-900 mt-1">
+                    {formatCurrency(returnsSummary.totalRefundedAmount)}
+                  </p>
+                  <p className="text-[11px] text-emerald-700">{returnsSummary.completedCount} completed</p>
+                </div>
+              </div>
+
+              {/* Return Filter Pills & Search */}
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-white border border-[#E7E5E4] rounded-2xl p-4 shadow-sm">
+                <div className="flex flex-wrap items-center gap-2">
+                  {[
+                    { id: 'all', label: `All (${returnsOrders.length})` },
+                    { id: 'requested', label: `Requested (${returnsSummary.requestedCount})` },
+                    { id: 'pickup', label: `In Pickup (${returnsSummary.inPickupCount})` },
+                    { id: 'payout', label: `Ready for Payout (${returnsSummary.pendingPayoutCount})` },
+                    { id: 'completed', label: `Refunded (${returnsSummary.completedCount})` },
+                    { id: 'rejected', label: `Declined (${returnsSummary.rejectedCount})` },
+                  ].map((f) => (
+                    <button
+                      key={f.id}
+                      type="button"
+                      onClick={() => setReturnFilter(f.id as any)}
+                      className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${
+                        returnFilter === f.id
+                          ? 'bg-[#111111] text-white shadow-sm'
+                          : 'bg-surface-2 border border-border text-beige-muted hover:text-beige'
+                      }`}
+                    >
+                      {f.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="relative sm:w-72">
+                  <Search className="w-3.5 h-3.5 text-beige-muted absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={returnSearch}
+                    onChange={(e) => setReturnSearch(e.target.value)}
+                    placeholder="Search order #, customer, UTR..."
+                    className="w-full lg:w-64 bg-surface-2 border border-border rounded-xl pl-8 pr-3 py-2 text-xs text-beige focus:outline-none focus:border-gold"
+                  />
+                </div>
+              </div>
+
+              {/* Return Workflow Cards */}
+              <div className="space-y-5">
+                {filteredReturns.map((ord) => {
+                  const draft = getReturnDraft(ord)
+                  const updateDraft = (patch: Partial<typeof draft>) =>
+                    setReturnDrafts((prev) => ({ ...prev, [ord.id]: { ...draft, ...patch } }))
+                  const rsNorm = safeStr(ord.returnStatus || 'none')
+                  const psNorm = safeStr(ord.paymentStatus)
+                  const isCompleted = rsNorm === 'refundcompleted' || psNorm === 'refunded' || psNorm === 'partiallyrefunded'
+                  const isRejected = rsNorm === 'rejected'
+                  const isCod = safeStr(ord.paymentMethod).includes('cash')
+                  const busy = processingReturnId === ord.id
+                  const stepIdx =
+                    rsNorm === 'refundcompleted'
+                      ? 4
+                      : rsNorm === 'received' || rsNorm === 'refundinitiated' || psNorm === 'refundinitiated'
+                      ? 3
+                      : rsNorm === 'pickedup'
+                      ? 2
+                      : rsNorm === 'approved'
+                      ? 1
+                      : rsNorm === 'requested'
+                      ? 0
+                      : -1
+
+                  return (
+                    <div
+                      key={ord.id}
+                      className="bg-white border border-[#E7E5E4] rounded-2xl p-5 sm:p-6 shadow-sm space-y-5"
+                    >
+                      {/* Top row */}
+                      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-4">
+                        <div className="flex flex-wrap items-center gap-2.5">
+                          <span className="font-mono text-base font-bold text-gold">{ord.orderNumber}</span>
+                          <StatusBadge status={ord.returnStatus ?? ord.paymentStatus} size="sm" />
+                          <StatusBadge status={ord.paymentStatus} size="sm" />
+                          <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-surface-2 border border-border text-beige-muted uppercase">
+                            {isCod ? 'COD Order' : 'Razorpay Online'}
+                          </span>
+                        </div>
+                        <div className="text-right text-xs text-beige-muted">
+                          Requested:{' '}
+                          <strong className="text-beige">
+                            {formatDate(ord.returnRequestedAt ?? ord.updatedAt ?? ord.createdAt)}
+                          </strong>
+                        </div>
+                      </div>
+
+                      {/* 5-step Return Progress Strip */}
+                      {stepIdx >= 0 && (
+                        <div className="grid grid-cols-5 gap-2 text-center">
+                          {[
+                            { label: '1. Requested', idx: 0 },
+                            { label: '2. Approved', idx: 1 },
+                            { label: '3. Picked Up', idx: 2 },
+                            { label: '4. QC Passed', idx: 3 },
+                            { label: '5. Refund Settled', idx: 4 },
+                          ].map((st) => (
+                            <div key={st.label} className="space-y-1">
+                              <div className={`h-2 rounded-full ${stepIdx >= st.idx ? 'bg-[#C5A059]' : 'bg-surface-2 border border-border'}`} />
+                              <span className={`block text-[10px] font-semibold ${stepIdx >= st.idx ? 'text-[#111111]' : 'text-beige-muted'}`}>
+                                {st.label}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Grid: Details vs Payout / Action Desk */}
+                      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+                        <div className="lg:col-span-6 space-y-3 text-xs">
+                          <div className="p-3.5 rounded-xl bg-surface-2/60 border border-border space-y-1">
+                            <p className="font-bold text-beige">
+                              Customer: {ord.customerName ?? ord.shippingName} ({ord.customerEmail ?? ord.shippingPhone})
+                            </p>
+                            <p className="text-beige-muted">
+                              <strong className="text-beige">Reason:</strong> {ord.returnReason || 'Return / Cancellation Refund'}
+                            </p>
+                            {ord.returnCustomerNotes && (
+                              <p className="text-beige-muted">
+                                <strong className="text-beige">Customer Note:</strong> {ord.returnCustomerNotes}
+                              </p>
+                            )}
+                            {ord.customerRefundAccount && (
+                              <p className="text-emerald-800 font-mono font-semibold pt-1">
+                                Customer Payout Account: {ord.customerRefundAccount}
+                              </p>
+                            )}
+                          </div>
+
+                          <div className="space-y-1.5">
+                            <span className="text-[11px] font-semibold uppercase text-beige-muted">
+                              Items in Order ({ord.items?.length ?? 0})
+                            </span>
+                            {ord.items?.map((item) => (
+                              <div
+                                key={item.id}
+                                className="flex items-center justify-between gap-2 p-2.5 rounded-xl border border-border bg-white"
+                              >
+                                <div className="min-w-0">
+                                  <p className="font-semibold text-beige truncate">{item.productName}</p>
+                                  <p className="text-[11px] text-beige-muted">
+                                    Qty {item.quantity} {item.variantName ? `• ${item.variantName}` : ''}
+                                  </p>
+                                </div>
+                                <span className="font-mono font-bold text-beige shrink-0">
+                                  {formatCurrency(item.totalPrice)}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Admin Step & Refund Settlement Box */}
+                        <div className="lg:col-span-6 bg-[#FAF8F5] border border-[#E7E5E4] rounded-xl p-4 sm:p-5 space-y-3.5 text-xs">
+                          {isCompleted ? (
+                            <div className="space-y-2.5">
+                              <div className="flex items-center gap-2 text-emerald-800 font-bold text-sm">
+                                <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+                                Refund Payment Settled ({formatCurrency(ord.refundAmount ?? ord.totalAmount ?? 0)})
+                              </div>
+                              <div className="grid grid-cols-2 gap-2 text-[11px] bg-white p-3 rounded-xl border border-emerald-200">
+                                <div>
+                                  <span className="text-beige-muted block">Method</span>
+                                  <strong className="text-beige">{ord.refundMethod ?? 'Settled'}</strong>
+                                </div>
+                                <div>
+                                  <span className="text-beige-muted block">UTR / Reference ID</span>
+                                  <strong className="font-mono text-emerald-700">{ord.refundReference ?? 'Recorded'}</strong>
+                                </div>
+                                <div>
+                                  <span className="text-beige-muted block">Settled On</span>
+                                  <strong className="text-beige">{ord.refundedAt ? formatDate(ord.refundedAt) : 'Completed'}</strong>
+                                </div>
+                                <div>
+                                  <span className="text-beige-muted block">Inventory Restocked</span>
+                                  <strong className="text-beige">{ord.returnInventoryRestocked ? 'Yes' : 'Pre-ship / No'}</strong>
+                                </div>
+                              </div>
+                              {ord.returnAdminNotes && (
+                                <p className="text-[11px] text-beige-muted">Note: {ord.returnAdminNotes}</p>
+                              )}
+                            </div>
+                          ) : isRejected ? (
+                            <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 space-y-1">
+                              <p className="font-bold">Return Request Declined</p>
+                              <p className="text-[11px]">Reason: {ord.returnAdminNotes}</p>
+                            </div>
+                          ) : (
+                            <>
+                              <div className="flex items-center justify-between">
+                                <span className="font-bold uppercase tracking-wider text-gold">
+                                  Concierge Return &amp; Refund Actions
+                                </span>
+                                <span className="font-mono font-bold text-beige">
+                                  Order Total: {formatCurrency(ord.totalAmount ?? ord.total ?? 0)}
+                                </span>
+                              </div>
+
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                                <div>
+                                  <label className="text-[10px] font-semibold uppercase text-beige-muted block mb-1">
+                                    Pickup Tracking ID
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={draft.pickupTracking}
+                                    onChange={(e) => updateDraft({ pickupTracking: e.target.value })}
+                                    placeholder="e.g. REV-PKP-4821"
+                                    className="w-full bg-white border border-border rounded-lg px-2.5 py-1.5 font-mono text-beige focus:outline-none focus:border-gold"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="text-[10px] font-semibold uppercase text-beige-muted block mb-1">
+                                    Admin Note / QC Decision
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={draft.adminNotes}
+                                    onChange={(e) => updateDraft({ adminNotes: e.target.value })}
+                                    placeholder="Pickup scheduled / QC intact / reason..."
+                                    className="w-full bg-white border border-border rounded-lg px-2.5 py-1.5 text-beige focus:outline-none focus:border-gold"
+                                  />
+                                </div>
+                              </div>
+
+                              {/* Step transition buttons */}
+                              <div className="flex flex-wrap gap-2">
+                                {rsNorm === 'requested' && (
+                                  <>
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      variant="primary"
+                                      disabled={busy}
+                                      onClick={() => handleReturnStepAction(ord, 'Approve')}
+                                      className="text-xs bg-[#111111] hover:bg-[#C5A059] text-white hover:text-[#111111]"
+                                    >
+                                      1. Approve Pickup
+                                    </Button>
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      variant="outline"
+                                      disabled={busy}
+                                      onClick={() => handleReturnStepAction(ord, 'Reject')}
+                                      className="text-xs border-rose-300 text-rose-700 hover:bg-rose-50"
+                                    >
+                                      Decline Return
+                                    </Button>
+                                  </>
+                                )}
+                                {rsNorm === 'approved' && (
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="primary"
+                                    disabled={busy}
+                                    onClick={() => handleReturnStepAction(ord, 'MarkPickedUp')}
+                                    className="text-xs"
+                                  >
+                                    2. Confirm Picked Up
+                                  </Button>
+                                )}
+                                {(rsNorm === 'approved' || rsNorm === 'pickedup') && (
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    disabled={busy}
+                                    onClick={() => handleReturnStepAction(ord, 'MarkReceived')}
+                                    className="text-xs border-purple-300 text-purple-800 hover:bg-purple-50"
+                                  >
+                                    3. Pass Warehouse QC &amp; Receive
+                                  </Button>
+                                )}
+                              </div>
+
+                              {/* Refund Payment Panel */}
+                              {(rsNorm === 'approved' ||
+                                rsNorm === 'pickedup' ||
+                                rsNorm === 'received' ||
+                                rsNorm === 'refundinitiated' ||
+                                psNorm === 'refundinitiated') && (
+                                <div className="border-t border-border pt-3 space-y-2.5">
+                                  <span className="text-[11px] font-bold text-emerald-800 uppercase flex items-center gap-1.5">
+                                    <Wallet className="w-3.5 h-3.5 text-emerald-600" />
+                                    Settle Return Refund Payment
+                                  </span>
+                                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                                    <div>
+                                      <label className="text-[10px] font-semibold uppercase text-beige-muted block mb-1">
+                                        Refund Amount (₹)
+                                      </label>
+                                      <input
+                                        type="number"
+                                        step="0.01"
+                                        min="1"
+                                        max={ord.totalAmount ?? ord.total ?? 999999}
+                                        value={draft.refundAmount}
+                                        onChange={(e) => updateDraft({ refundAmount: e.target.value })}
+                                        className="w-full bg-white border border-border rounded-lg px-2.5 py-1.5 font-mono text-beige focus:outline-none focus:border-gold"
+                                      />
+                                    </div>
+                                    <div>
+                                      <label className="text-[10px] font-semibold uppercase text-beige-muted block mb-1">
+                                        Settlement Method
+                                      </label>
+                                      <select
+                                        value={draft.refundMethod}
+                                        onChange={(e) => updateDraft({ refundMethod: e.target.value })}
+                                        className="w-full bg-white border border-border rounded-lg px-2 py-1.5 text-beige focus:outline-none focus:border-gold"
+                                      >
+                                        <option value="RazorpayOriginalSource">Razorpay Original Source</option>
+                                        <option value="UpiTransfer">UPI Instant Transfer</option>
+                                        <option value="BankTransfer">Bank NEFT / IMPS</option>
+                                        <option value="StoreCredit">Store Credit</option>
+                                      </select>
+                                    </div>
+                                    <div>
+                                      <label className="text-[10px] font-semibold uppercase text-beige-muted block mb-1">
+                                        UTR / Txn Ref (Optional)
+                                      </label>
+                                      <input
+                                        type="text"
+                                        value={draft.refundReference}
+                                        onChange={(e) => updateDraft({ refundReference: e.target.value })}
+                                        placeholder="Auto-generated if blank"
+                                        className="w-full bg-white border border-border rounded-lg px-2.5 py-1.5 font-mono text-beige focus:outline-none focus:border-gold"
+                                      />
+                                    </div>
+                                  </div>
+
+                                  <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                                    <label className="inline-flex items-center gap-2 text-[11px] text-beige cursor-pointer">
+                                      <input
+                                        type="checkbox"
+                                        checked={draft.restockInventory}
+                                        disabled={ord.returnInventoryRestocked || safeStr(ord.status) === 'cancelled'}
+                                        onChange={(e) => updateDraft({ restockInventory: e.target.checked })}
+                                        className="rounded border-border text-gold focus:ring-gold"
+                                      />
+                                      <span>
+                                        {ord.returnInventoryRestocked || safeStr(ord.status) === 'cancelled'
+                                          ? 'Inventory already restocked'
+                                          : 'Restock returned items back to catalog'}
+                                      </span>
+                                    </label>
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      variant="primary"
+                                      disabled={busy}
+                                      onClick={() => handleProcessReturnRefund(ord)}
+                                      className="text-xs font-bold bg-emerald-700 hover:bg-emerald-800 text-white"
+                                    >
+                                      <CreditCard className="w-3.5 h-3.5" />
+                                      {busy ? 'Processing...' : `Complete Refund (₹${draft.refundAmount || '0'})`}
+                                    </Button>
+                                  </div>
+                                </div>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+
+                {filteredReturns.length === 0 && (
+                  <div className="text-center py-12 bg-white border border-[#E7E5E4] rounded-2xl">
+                    <RotateCcw className="w-12 h-12 text-gold/40 mx-auto mb-3" />
+                    <h3 className="font-serif text-lg font-bold text-beige">No Return Requests Found</h3>
+                    <p className="text-xs text-beige-muted mt-1">
+                      7-day customer return requests and prepaid cancellation refunds will appear here for step-by-step approval and settlement.
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -3034,9 +3989,21 @@ function AdminContent() {
                                 <strong className="text-beige">Customer:</strong> {tkt.customerName} ({tkt.customerEmail})
                               </span>
                               {tkt.orderNumber && (
-                                <span className="font-mono text-gold font-semibold">
-                                  Order: {tkt.orderNumber}
-                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const linked = orders.find((o) => o.orderNumber === tkt.orderNumber)
+                                    if (linked) {
+                                      handleOpenInspectOrder(linked)
+                                    } else {
+                                      setOrderSearch(tkt.orderNumber!)
+                                      setActiveTab('orders')
+                                    }
+                                  }}
+                                  className="font-mono text-gold font-semibold hover:underline inline-flex items-center gap-1"
+                                >
+                                  Order: {tkt.orderNumber} <ExternalLink className="w-3 h-3" />
+                                </button>
                               )}
                             </div>
 
@@ -4573,62 +5540,190 @@ Nexus Linen Shirt | 3499 | 4999 | 15 | NX-M-02 | https://images.unsplash.com/...
               </div>
             )}
 
-            {/* Status Updater Section */}
-            <div className="bg-surface-2 p-4 rounded-xl border border-border space-y-3">
-              <h4 className="text-xs font-semibold uppercase text-gold tracking-wider">
-                Logistics & Fulfillment
-              </h4>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[11px] text-beige-muted mb-1 uppercase">Fulfillment Status</label>
-                  <select
-                    value={orderStatusUpdate}
-                    onChange={(e) => setOrderStatusUpdate(e.target.value)}
-                    className="w-full bg-surface border border-border text-beige text-xs rounded-lg px-3 py-2 focus:outline-none focus:border-gold cursor-pointer"
-                  >
-                    <option value="pending">Pending</option>
-                    <option value="confirmed">Confirmed</option>
-                    <option value="processing">Processing</option>
-                    <option value="shipped">Shipped</option>
-                    <option value="delivered">Delivered</option>
-                    <option value="cancelled">Cancelled</option>
-                    <option value="refunded">Refunded</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-[11px] text-beige-muted mb-1 uppercase">Courier Tracking ID</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. BLUEDART-84920"
-                    value={orderTrackingUpdate}
-                    onChange={(e) => setOrderTrackingUpdate(e.target.value)}
-                    className="w-full bg-surface border border-border text-beige text-xs rounded-lg px-3 py-2 focus:outline-none focus:border-gold font-mono"
-                  />
-                </div>
-              </div>
+            {/* Visual Order Pipeline Stepper */}
+            {(() => {
+              const curStep = getOrderStepInfo(inspectOrder.status)
+              const validTargets = getValidNextStatuses(inspectOrder.status)
+              const isTerminal = ['cancelled', 'refunded', 'delivered'].includes(safeStr(inspectOrder.status))
+              const steps = [
+                { id: 'pending', label: 'Placed', time: inspectOrder.createdAt },
+                { id: 'confirmed', label: 'Confirmed', time: inspectOrder.confirmedAt },
+                { id: 'processing', label: 'Packed', time: inspectOrder.processingAt },
+                { id: 'shipped', label: 'Shipped', time: inspectOrder.shippedAt },
+                { id: 'outfordelivery', label: 'Out Delivery', time: inspectOrder.outForDeliveryAt },
+                { id: 'delivered', label: 'Delivered', time: inspectOrder.deliveredAt },
+              ]
+              return (
+                <>
+                  {curStep.step >= 0 ? (
+                    <div className="bg-surface-2/60 border border-border rounded-xl p-4 overflow-x-auto">
+                      <div className="grid grid-cols-6 gap-2 min-w-[460px]">
+                        {steps.map((st, idx) => {
+                          const done = idx <= curStep.step
+                          const isCurrent = idx === curStep.step
+                          return (
+                            <div key={st.id} className="space-y-1.5 text-center">
+                              <div className={`h-2 rounded-full transition-all ${done ? 'bg-[#C5A059]' : 'bg-border'}`} />
+                              <span
+                                className={`block text-[10px] uppercase font-bold ${
+                                  isCurrent ? 'text-[#111111]' : done ? 'text-gold' : 'text-beige-muted'
+                                }`}
+                              >
+                                {st.label}
+                              </span>
+                              {st.time && (
+                                <span className="block text-[9px] font-mono text-beige-muted">
+                                  {new Date(st.time).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
+                                </span>
+                              )}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  ) : null}
 
-              <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setShowInvoiceModal(true)}
-                  className="text-xs font-semibold flex items-center gap-1.5 border-gold/40 text-gold hover:bg-gold/10"
-                >
-                  <Printer className="w-3.5 h-3.5" />
-                  Print Official Tax Invoice
-                </Button>
-                <Button
-                  variant="primary"
-                  size="sm"
-                  onClick={handleSaveOrderStatus}
-                  isLoading={isUpdatingOrder}
-                  className="text-xs font-semibold"
-                >
-                  Save Status & Tracking
-                </Button>
-              </div>
-            </div>
+                  {/* Guided Step-by-Step Updater */}
+                  <div className="bg-surface-2 p-4 rounded-xl border border-border space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <h4 className="text-xs font-semibold uppercase text-gold tracking-wider">
+                        Guided Step Progression &amp; Courier Dispatch
+                      </h4>
+                      {curStep.nextStatus && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="primary"
+                          disabled={isUpdatingOrder}
+                          onClick={() => {
+                            setOrderStatusUpdate(curStep.nextStatus!)
+                            applyOrderStatusUpdate(inspectOrder.id, curStep.nextStatus!, {
+                              courierName: orderCourierUpdate,
+                              trackingNumber: orderTrackingUpdate,
+                            })
+                          }}
+                          className="text-xs bg-[#111111] hover:bg-[#C5A059] text-white hover:text-[#111111]"
+                        >
+                          Quick Advance: {curStep.nextLabel} →
+                        </Button>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div>
+                        <label className="block text-[11px] text-beige-muted mb-1 uppercase">Target Step</label>
+                        <select
+                          value={orderStatusUpdate}
+                          disabled={isTerminal}
+                          onChange={(e) => setOrderStatusUpdate(e.target.value)}
+                          className="w-full bg-surface border border-border text-beige text-xs rounded-lg px-3 py-2 focus:outline-none focus:border-gold cursor-pointer disabled:opacity-60"
+                        >
+                          {validTargets.map((st) => (
+                            <option key={st} value={st}>
+                              {st === 'pending'
+                                ? 'Pending'
+                                : st === 'paymentpending'
+                                ? 'Payment Pending'
+                                : st === 'confirmed'
+                                ? 'Confirmed'
+                                : st === 'processing'
+                                ? 'Packed & Processing'
+                                : st === 'shipped'
+                                ? 'Shipped / Dispatched'
+                                : st === 'outfordelivery'
+                                ? 'Out for Delivery'
+                                : st === 'delivered'
+                                ? 'Delivered'
+                                : st === 'cancelled'
+                                ? 'Cancelled (Pre-Ship Only)'
+                                : 'Refunded'}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[11px] text-beige-muted mb-1 uppercase">Courier Partner</label>
+                        <select
+                          value={orderCourierUpdate}
+                          onChange={(e) => setOrderCourierUpdate(e.target.value)}
+                          className="w-full bg-surface border border-border text-beige text-xs rounded-lg px-3 py-2 focus:outline-none focus:border-gold"
+                        >
+                          <option value="NEXUS White-Glove">NEXUS White-Glove</option>
+                          <option value="BlueDart Express">BlueDart Express</option>
+                          <option value="Delhivery Air">Delhivery Air</option>
+                          <option value="DTDC Premium">DTDC Premium</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[11px] text-beige-muted mb-1 uppercase">Tracking ID</label>
+                        <input
+                          type="text"
+                          placeholder="e.g. BLUEDART-84920"
+                          value={orderTrackingUpdate}
+                          onChange={(e) => setOrderTrackingUpdate(e.target.value)}
+                          className="w-full bg-surface border border-border text-beige text-xs rounded-lg px-3 py-2 focus:outline-none focus:border-gold font-mono"
+                        />
+                      </div>
+                    </div>
+
+                    {orderStatusUpdate === 'cancelled' && (
+                      <div>
+                        <label className="block text-[11px] text-beige-muted mb-1 uppercase">Cancellation Reason</label>
+                        <input
+                          type="text"
+                          placeholder="Reason for pre-shipment cancellation..."
+                          value={orderCancelReason}
+                          onChange={(e) => setOrderCancelReason(e.target.value)}
+                          className="w-full bg-surface border border-border text-beige text-xs rounded-lg px-3 py-2 focus:outline-none focus:border-gold"
+                        />
+                      </div>
+                    )}
+
+                    {inspectOrder.returnStatus && safeStr(inspectOrder.returnStatus) !== 'none' && (
+                      <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 flex items-center justify-between gap-2 text-xs text-amber-900">
+                        <span>
+                          Return Workflow Active: <strong>{inspectOrder.returnStatus}</strong>
+                          {inspectOrder.refundReference ? ` • Ref ${inspectOrder.refundReference}` : ''}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setInspectOrder(null)
+                            setActiveTab('returns')
+                          }}
+                          className="font-bold text-gold hover:underline shrink-0"
+                        >
+                          Open Returns Desk →
+                        </button>
+                      </div>
+                    )}
+
+                    <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setShowInvoiceModal(true)}
+                        className="text-xs font-semibold flex items-center gap-1.5 border-gold/40 text-gold hover:bg-gold/10"
+                      >
+                        <Printer className="w-3.5 h-3.5" />
+                        Print Official Tax Invoice
+                      </Button>
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        onClick={handleSaveOrderStatus}
+                        isLoading={isUpdatingOrder}
+                        disabled={isTerminal && orderTrackingUpdate === (inspectOrder.trackingNumber ?? '')}
+                        className="text-xs font-semibold"
+                      >
+                        Save Step &amp; Tracking
+                      </Button>
+                    </div>
+                  </div>
+                </>
+              )
+            })()}
 
             {/* Recipient & Shipping info */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">

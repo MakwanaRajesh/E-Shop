@@ -30,6 +30,9 @@ import {
   Search,
   ExternalLink,
   X,
+  RotateCcw,
+  CreditCard,
+  ShieldCheck,
 } from 'lucide-react'
 import { useAuthStore } from '@/store/auth'
 import { useCartStore } from '@/store/cart'
@@ -58,8 +61,18 @@ function AccountContent() {
   const [myReviewsByProduct, setMyReviewsByProduct] = React.useState<Record<string, MyReview>>({})
   const [loadingOrders, setLoadingOrders] = React.useState(true)
   const [expandedOrderId, setExpandedOrderId] = React.useState<string | null>(null)
-  const [orderStatusFilter, setOrderStatusFilter] = React.useState<'all' | 'delivered' | 'active' | 'cancelled'>('all')
+  const [orderStatusFilter, setOrderStatusFilter] = React.useState<'all' | 'delivered' | 'active' | 'returns' | 'cancelled'>('all')
   const [orderSearch, setOrderSearch] = React.useState('')
+
+  // 7-Day Return & Refund request modal state
+  const [returnOrderTarget, setReturnOrderTarget] = React.useState<Order | null>(null)
+  const [returnForm, setReturnForm] = React.useState({
+    reason: 'Size / Fit Issue',
+    notes: '',
+    refundMethodPreference: 'RazorpayOriginalSource',
+    refundAccountDetails: '',
+  })
+  const [submittingReturn, setSubmittingReturn] = React.useState(false)
 
   // Delivered item rating & review composer state
   const [activeReviewKey, setActiveReviewKey] = React.useState<string | null>(null)
@@ -208,6 +221,12 @@ function AccountContent() {
   }, [isAuthenticated, activeTab])
 
   const deliveredOrdersCount = orders.filter((o) => String(o.status).toLowerCase() === 'delivered').length
+  const returnsOrdersCount = orders.filter(
+    (o) =>
+      (o.returnStatus && String(o.returnStatus).toLowerCase() !== 'none') ||
+      String(o.status).toLowerCase() === 'refunded' ||
+      String(o.paymentStatus).toLowerCase().includes('refund'),
+  ).length
   const cancelledOrdersCount = orders.filter((o) => {
     const s = String(o.status).toLowerCase()
     return s === 'cancelled' || s === 'refunded'
@@ -218,7 +237,10 @@ function AccountContent() {
     const q = orderSearch.trim().toLowerCase()
     return orders.filter((order) => {
       const s = String(order.status).toLowerCase()
+      const rs = String(order.returnStatus ?? 'None').toLowerCase()
+      const ps = String(order.paymentStatus ?? '').toLowerCase()
       if (orderStatusFilter === 'delivered' && s !== 'delivered') return false
+      if (orderStatusFilter === 'returns' && rs === 'none' && s !== 'refunded' && !ps.includes('refund')) return false
       if (orderStatusFilter === 'cancelled' && s !== 'cancelled' && s !== 'refunded') return false
       if (orderStatusFilter === 'active' && (s === 'delivered' || s === 'cancelled' || s === 'refunded')) return false
       if (!q) return true
@@ -283,11 +305,45 @@ function AccountContent() {
   const handleCancelOrder = async (orderId: string) => {
     if (!confirm('Are you sure you wish to cancel this order?')) return
     try {
-      await api.post(`/api/orders/${orderId}/cancel`)
-      toast.success('Order cancelled successfully.')
+      const res = await api.post<{ message?: string }>(`/api/orders/${orderId}/cancel`, {})
+      toast.success(res.data?.message ?? 'Order cancelled successfully.')
       await fetchOrdersAndReviews()
     } catch (err: unknown) {
       toast.error((err as { message?: string })?.message ?? 'Failed to cancel order')
+    }
+  }
+
+  const handleOpenReturnModal = (order: Order) => {
+    const isCod =
+      order.paymentMethod === (1 as any) ||
+      String(order.paymentMethod).toLowerCase().includes('cash')
+    setReturnOrderTarget(order)
+    setReturnForm({
+      reason: 'Size / Fit Issue',
+      notes: '',
+      refundMethodPreference: isCod ? 'UpiTransfer' : 'RazorpayOriginalSource',
+      refundAccountDetails: '',
+    })
+  }
+
+  const handleSubmitReturnRequest = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!returnOrderTarget) return
+    setSubmittingReturn(true)
+    try {
+      await api.post(`/api/orders/${returnOrderTarget.id}/return`, {
+        reason: returnForm.reason,
+        notes: returnForm.notes.trim() || null,
+        refundMethodPreference: returnForm.refundMethodPreference,
+        refundAccountDetails: returnForm.refundAccountDetails.trim() || null,
+      })
+      toast.success('7-day doorstep return requested! Our concierge team will approve pickup shortly.')
+      setReturnOrderTarget(null)
+      await fetchOrdersAndReviews()
+    } catch (err: unknown) {
+      toast.error((err as { message?: string })?.message ?? 'Failed to submit return request')
+    } finally {
+      setSubmittingReturn(false)
     }
   }
 
@@ -493,10 +549,23 @@ function AccountContent() {
   const getFulfillmentStep = (status: string) => {
     const s = (status ?? '').toLowerCase()
     if (s === 'cancelled' || s === 'refunded') return -1
-    if (s === 'delivered') return 3
-    if (s === 'shipped' || s === 'outfordelivery' || s === 'out_for_delivery') return 2
-    if (s === 'confirmed' || s === 'processing') return 1
+    if (s === 'delivered') return 5
+    if (s === 'outfordelivery' || s === 'out_for_delivery') return 4
+    if (s === 'shipped') return 3
+    if (s === 'processing') return 2
+    if (s === 'confirmed') return 1
     return 0 // pending / payment pending
+  }
+
+  const getReturnStep = (returnStatus?: string) => {
+    const rs = (returnStatus ?? 'None').toLowerCase()
+    if (rs === 'rejected') return -2
+    if (rs === 'refundcompleted') return 4
+    if (rs === 'refundinitiated' || rs === 'received') return 3
+    if (rs === 'pickedup') return 2
+    if (rs === 'approved') return 1
+    if (rs === 'requested') return 0
+    return -1
   }
 
   const isAdmin = (user?.role ?? '').toString().toLowerCase() === 'admin'
@@ -504,15 +573,15 @@ function AccountContent() {
   const FAQ_ITEMS = [
     {
       q: 'How do I track my luxury delivery?',
-      a: 'All orders qualify for real-time tracking. Once your order is dispatched, our concierge assigns a dedicated courier tracking ID (e.g., BlueDart or FedEx) visible under the My Orders tab. You will also receive SMS and WhatsApp dispatch notifications.',
+      a: 'All orders qualify for real-time step-by-step tracking (Placed -> Confirmed -> Packed -> Shipped -> Out for Delivery -> Delivered). Once your order is dispatched, our concierge assigns a dedicated courier tracking ID visible under My Orders.',
     },
     {
       q: 'Can I cancel an order after placing it?',
-      a: 'Yes, pending and confirmed orders can be cancelled directly with 1 click from your "My Orders" tab before they are dispatched. If already shipped, you can refuse delivery or request an immediate doorstep return.',
+      a: 'Yes, pending, confirmed, and packing orders can be cancelled directly with 1 click from your "My Orders" tab before dispatch. Prepaid orders automatically trigger a tracked refund in our Returns & Refunds pipeline.',
     },
     {
       q: 'What is your doorstep return and exchange policy?',
-      a: 'NEXUS provides a 30-day complimentary doorstep return policy. Our delivery associate picks up the package directly from your address and ensures an immediate replacement or full refund to your original payment method.',
+      a: 'NEXUS provides a 7-day complimentary doorstep return policy from delivery. Our delivery associate collects the package from your doorstep and, once verified, settles your full refund to your original payment source, UPI ID, bank account, or store credit.',
     },
     {
       q: 'Are all products authentic and covered by warranty?',
@@ -641,6 +710,7 @@ function AccountContent() {
                   { id: 'all', label: `All (${orders.length})` },
                   { id: 'delivered', label: `Delivered (${deliveredOrdersCount})` },
                   { id: 'active', label: `In Progress (${activeOrdersCount})` },
+                  { id: 'returns', label: `Returns & Refunds (${returnsOrdersCount})` },
                   { id: 'cancelled', label: `Cancelled (${cancelledOrdersCount})` },
                 ].map((f) => (
                   <button
@@ -707,12 +777,23 @@ function AccountContent() {
               {filteredOrders.map((order) => {
                 const isExpanded = expandedOrderId === order.id
                 const step = getFulfillmentStep(order.status as unknown as string)
-                const isCancelled = order.status.toString().toLowerCase() === 'cancelled'
+                const returnStep = getReturnStep(order.returnStatus)
+                const orderStatusNorm = order.status.toString().toLowerCase()
+                const returnStatusNorm = (order.returnStatus ?? 'None').toString().toLowerCase()
+                const paymentStatusNorm = (order.paymentStatus ?? '').toString().toLowerCase()
+                const isCancelled = orderStatusNorm === 'cancelled'
+                const isRefunded = orderStatusNorm === 'refunded' || returnStatusNorm === 'refundcompleted' || paymentStatusNorm === 'refunded'
                 const canCancel =
-                  order.status.toString().toLowerCase() === 'pending' ||
-                  order.status.toString().toLowerCase() === 'confirmed'
-                const isDelivered = order.status.toString().toLowerCase() === 'delivered'
-                const isShipped = order.status.toString().toLowerCase() === 'shipped' || order.status.toString().toLowerCase().includes('outfor')
+                  orderStatusNorm === 'pending' ||
+                  orderStatusNorm === 'paymentpending' ||
+                  orderStatusNorm === 'confirmed' ||
+                  orderStatusNorm === 'processing'
+                const isDelivered = orderStatusNorm === 'delivered'
+                const deliveredAnchor = order.deliveredAt ?? order.updatedAt
+                const returnWindowDeadline = deliveredAnchor ? new Date(new Date(deliveredAnchor).getTime() + 7 * 24 * 60 * 60 * 1000) : null
+                const isWithinReturnWindow = isDelivered && !!returnWindowDeadline && returnWindowDeadline >= new Date()
+                const canRequestReturn = isWithinReturnWindow && returnStatusNorm === 'none'
+                const isShipped = orderStatusNorm === 'shipped' || orderStatusNorm.includes('outfor')
                 const totalUnits = order.items?.reduce((sum, i) => sum + (i.quantity || 1), 0) ?? 0
                 const ratingLabels = ['', 'Poor', 'Fair', 'Good', 'Very Good', 'Exceptional']
 
@@ -722,6 +803,8 @@ function AccountContent() {
                     className={`bg-surface border rounded-2xl overflow-hidden transition-all duration-300 shadow-md ${
                       isCancelled
                         ? 'border-rose-500/30 bg-rose-950/5'
+                        : isRefunded || returnStatusNorm !== 'none'
+                        ? 'border-amber-500/40 bg-amber-950/5'
                         : isDelivered
                         ? 'border-emerald-500/35 bg-emerald-950/5 hover:border-emerald-500/50'
                         : isShipped
@@ -737,7 +820,10 @@ function AccountContent() {
                             {order.orderNumber}
                           </span>
                           <StatusBadge status={order.status} size="md" />
-                          {isDelivered && (
+                          {returnStatusNorm !== 'none' && (
+                            <StatusBadge status={order.returnStatus!} size="sm" />
+                          )}
+                          {isDelivered && returnStatusNorm === 'none' && (
                             <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
                               <CheckCircle2 className="w-3 h-3" />
                               Delivered {formatDate(order.deliveredAt ?? order.createdAt)}
@@ -747,20 +833,35 @@ function AccountContent() {
                         <p className="text-[11px] text-beige-muted">
                           Placed on {formatDate(order.createdAt)} • {totalUnits} {totalUnits === 1 ? 'item' : 'items'} • Payment:{' '}
                           <span className="uppercase text-beige font-semibold">
-                            {order.paymentMethod === (1 as any) || (order.paymentMethod as any) === 'CashOnDelivery'
+                            {order.paymentMethod === (1 as any) || String(order.paymentMethod).toLowerCase().includes('cash')
                               ? 'Cash on Delivery'
                               : 'Razorpay'}
                           </span>
+                          {order.paymentStatus && (
+                            <>
+                              {' '}• <span className="text-gold font-semibold uppercase">{order.paymentStatus}</span>
+                            </>
+                          )}
                         </p>
                       </div>
 
-                      <div className="flex items-center gap-3 self-end sm:self-center">
-                        <div className="text-right">
+                      <div className="flex flex-wrap items-center gap-2.5 self-end sm:self-center">
+                        <div className="text-right mr-1">
                           <span className="text-[11px] text-beige-muted block">Total Paid</span>
                           <span className="text-base font-serif font-bold text-beige">
                             {formatCurrency(order.totalAmount ?? 0)}
                           </span>
                         </div>
+                        {canRequestReturn && (
+                          <button
+                            type="button"
+                            onClick={() => handleOpenReturnModal(order)}
+                            className="h-8 px-3 rounded-lg bg-[#111111] hover:bg-[#C5A059] text-white hover:text-[#111111] flex items-center gap-1.5 text-[11px] font-semibold transition-colors shadow-sm"
+                          >
+                            <RotateCcw className="w-3.5 h-3.5" />
+                            <span>Request 7-Day Return</span>
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={() => setExpandedOrderId(isExpanded ? null : order.id)}
@@ -773,34 +874,36 @@ function AccountContent() {
                       </div>
                     </div>
 
-                    {/* Visual Progress Bar (SHEIN / AJIO style) */}
-                    {!isCancelled ? (
-                      <div className="px-6 py-5 bg-surface border-b border-border">
-                        <div className="relative flex items-center justify-between max-w-2xl mx-auto">
+                    {/* 6-Step Visual Fulfillment Progress Bar */}
+                    {step >= 0 ? (
+                      <div className="px-4 sm:px-6 py-5 bg-surface border-b border-border overflow-x-auto">
+                        <div className="relative flex items-center justify-between min-w-[460px] max-w-3xl mx-auto">
                           <div className="absolute top-4 left-6 right-6 h-0.5 bg-border -z-0">
                             <div
                               className={`h-full transition-all duration-500 ${
-                                step === 3
+                                step === 5
                                   ? 'bg-gradient-to-r from-gold via-sky-400 to-emerald-400'
                                   : 'bg-gold'
                               }`}
-                              style={{ width: `${(step / 3) * 100}%` }}
+                              style={{ width: `${(step / 5) * 100}%` }}
                             />
                           </div>
 
                           {[
-                            { label: 'Order Placed', icon: Clock },
-                            { label: 'Confirmed', icon: CheckCircle2 },
-                            { label: 'Dispatched', icon: Truck },
-                            { label: 'Delivered', icon: Check },
+                            { label: 'Placed', icon: Clock, time: order.createdAt },
+                            { label: 'Confirmed', icon: ShieldCheck, time: order.confirmedAt },
+                            { label: 'Packed', icon: Package, time: order.processingAt },
+                            { label: 'Shipped', icon: Truck, time: order.shippedAt },
+                            { label: 'Out Delivery', icon: MapPin, time: order.outForDeliveryAt },
+                            { label: 'Delivered', icon: Check, time: order.deliveredAt },
                           ].map((s, idx) => {
                             const isDone = idx <= step
                             const isCurrent = idx === step
-                            const isCompletedDelivered = isDone && idx === 3
-                            const isTransitStep = isDone && idx === 2
+                            const isCompletedDelivered = isDone && idx === 5
+                            const isTransitStep = isDone && (idx === 3 || idx === 4)
 
                             return (
-                              <div key={s.label} className="flex flex-col items-center gap-2 z-10">
+                              <div key={s.label} className="flex flex-col items-center gap-1.5 z-10 min-w-[66px]">
                                 <div
                                   className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 text-xs font-bold ${
                                     isCompletedDelivered
@@ -816,7 +919,7 @@ function AccountContent() {
                                 </div>
                                 <span
                                   className={`text-[10px] tracking-wider uppercase font-semibold text-center ${
-                                    isCurrent && step === 3
+                                    isCurrent && step === 5
                                       ? 'text-emerald-600 font-bold'
                                       : isCurrent
                                       ? 'text-gold'
@@ -827,15 +930,110 @@ function AccountContent() {
                                 >
                                   {s.label}
                                 </span>
+                                {s.time && (
+                                  <span className="text-[9px] text-beige-muted/80 font-mono">
+                                    {new Date(s.time).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
+                                  </span>
+                                )}
                               </div>
                             )
                           })}
                         </div>
                       </div>
                     ) : (
-                      <div className="p-4 bg-rose-500/10 border-b border-rose-500/25 flex items-center gap-2.5 text-xs text-rose-700">
-                        <AlertCircle className="w-4 h-4 text-rose-500 flex-shrink-0" />
-                        <span>This order was cancelled. Any pre-payments are automatically refunded within 24–48 hours.</span>
+                      <div className={`p-4 border-b flex items-start gap-2.5 text-xs ${
+                        isRefunded
+                          ? 'bg-emerald-50/70 border-emerald-200 text-emerald-900'
+                          : 'bg-rose-500/10 border-rose-500/25 text-rose-800'
+                      }`}>
+                        <AlertCircle className={`w-4 h-4 flex-shrink-0 mt-0.5 ${isRefunded ? 'text-emerald-600' : 'text-rose-500'}`} />
+                        <div>
+                          <p className="font-semibold">
+                            {isRefunded
+                              ? `Order Refunded (${formatCurrency(order.refundAmount ?? order.totalAmount ?? 0)})`
+                              : 'Order Cancelled'}
+                          </p>
+                          <p className="text-[11px] mt-0.5 opacity-90">
+                            {isRefunded
+                              ? `Refund settled via ${order.refundMethod ?? 'Concierge Payout'}${order.refundReference ? ` • Ref: ${order.refundReference}` : ''}.`
+                              : paymentStatusNorm === 'refundinitiated'
+                              ? 'Prepaid cancellation refund has been queued for concierge settlement.'
+                              : order.cancellationReason || 'This order was cancelled prior to dispatch.'}
+                          </p>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 7-Day Return & Refund Live Status Banner */}
+                    {(returnStatusNorm !== 'none' || paymentStatusNorm.includes('refund')) && (
+                      <div className="px-5 py-4 bg-amber-50/50 border-b border-amber-200/80 space-y-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <RotateCcw className="w-4 h-4 text-gold" />
+                            <span className="text-xs font-bold uppercase tracking-wider text-beige">
+                              Return &amp; Refund Workflow
+                            </span>
+                            <StatusBadge status={order.returnStatus ?? order.paymentStatus} size="sm" />
+                          </div>
+                          {order.refundAmount && (
+                            <span className="text-xs font-mono font-bold text-beige">
+                              Refund Value: {formatCurrency(order.refundAmount)}
+                            </span>
+                          )}
+                        </div>
+
+                        {returnStep >= 0 && (
+                          <div className="grid grid-cols-5 gap-1.5 text-center pt-1">
+                            {[
+                              { label: 'Requested', min: 0 },
+                              { label: 'Approved', min: 1 },
+                              { label: 'Picked Up', min: 2 },
+                              { label: 'QC Verified', min: 3 },
+                              { label: 'Refund Paid', min: 4 },
+                            ].map((rsItem) => {
+                              const done = returnStep >= rsItem.min
+                              return (
+                                <div key={rsItem.label} className="space-y-1">
+                                  <div className={`h-1.5 rounded-full ${done ? 'bg-emerald-500' : 'bg-border'}`} />
+                                  <span className={`block text-[10px] font-semibold ${done ? 'text-emerald-700' : 'text-beige-muted'}`}>
+                                    {rsItem.label}
+                                  </span>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        )}
+
+                        <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-beige-muted">
+                          <div>
+                            {order.returnReason && (
+                              <span>
+                                <strong>Reason:</strong> {order.returnReason}
+                              </span>
+                            )}
+                            {order.returnPickupTracking && (
+                              <span className="ml-3 font-mono text-gold font-semibold">
+                                Pickup ID: {order.returnPickupTracking}
+                              </span>
+                            )}
+                            {order.customerRefundAccount && (
+                              <span className="ml-3">
+                                Payout To: <strong className="text-beige font-mono">{order.customerRefundAccount}</strong>
+                              </span>
+                            )}
+                          </div>
+                          {order.refundReference && (
+                            <span className="font-mono font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded">
+                              Ref: {order.refundReference}
+                            </span>
+                          )}
+                        </div>
+
+                        {order.returnAdminNotes && (
+                          <p className="text-[11px] text-beige bg-surface border border-border rounded-lg px-3 py-2">
+                            <strong className="text-gold">Concierge Note:</strong> {order.returnAdminNotes}
+                          </p>
+                        )}
                       </div>
                     )}
 
@@ -1903,6 +2101,131 @@ function AccountContent() {
               })}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* ── 7-Day Doorstep Return & Refund Modal ── */}
+      {returnOrderTarget && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+          <form
+            onSubmit={handleSubmitReturnRequest}
+            className="bg-surface border border-gold/40 rounded-2xl max-w-lg w-full p-6 sm:p-7 space-y-5 shadow-2xl animate-slide-up my-8"
+          >
+            <div className="flex items-start justify-between border-b border-border pb-3 gap-3">
+              <div>
+                <span className="text-[11px] font-mono uppercase tracking-wider text-gold font-bold">
+                  7-Day Concierge Return Guarantee
+                </span>
+                <h3 className="font-serif text-xl font-bold text-beige mt-0.5">
+                  Return Order <span className="font-mono text-gold">{returnOrderTarget.orderNumber}</span>
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setReturnOrderTarget(null)}
+                className="w-8 h-8 rounded-full bg-surface-2 flex items-center justify-center text-beige-muted hover:text-beige"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="bg-surface-2/70 border border-border rounded-xl p-3.5 text-xs space-y-1">
+              <div className="flex justify-between">
+                <span className="text-beige-muted">Refundable Order Value</span>
+                <span className="font-bold text-beige">{formatCurrency(returnOrderTarget.totalAmount ?? 0)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-beige-muted">Original Payment</span>
+                <span className="font-semibold text-gold uppercase">
+                  {returnOrderTarget.paymentMethod === (1 as any) ||
+                  String(returnOrderTarget.paymentMethod).toLowerCase().includes('cash')
+                    ? 'Cash on Delivery'
+                    : 'Razorpay Online'}
+                </span>
+              </div>
+            </div>
+
+            <div className="space-y-3.5 text-xs">
+              <div>
+                <label className="font-semibold text-beige block mb-1">Return Reason</label>
+                <select
+                  value={returnForm.reason}
+                  onChange={(e) => setReturnForm({ ...returnForm, reason: e.target.value })}
+                  className="w-full bg-surface-2 border border-border rounded-xl px-3 py-2.5 text-beige focus:outline-none focus:border-gold"
+                >
+                  <option value="Size / Fit Issue">Size or Fit Not Right</option>
+                  <option value="Damaged or Defective Product">Damaged or Defective Product Received</option>
+                  <option value="Wrong Item Delivered">Wrong Product / Variant Delivered</option>
+                  <option value="Quality Not As Expected">Quality / Material Not As Expected</option>
+                  <option value="Missing Accessories or Parts">Missing Accessories or Packaging Parts</option>
+                  <option value="No Longer Needed (Within 7 Days)">No Longer Needed (Within 7-Day Window)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="font-semibold text-beige block mb-1">Refund Settlement Method</label>
+                <select
+                  value={returnForm.refundMethodPreference}
+                  onChange={(e) => setReturnForm({ ...returnForm, refundMethodPreference: e.target.value })}
+                  className="w-full bg-surface-2 border border-border rounded-xl px-3 py-2.5 text-beige focus:outline-none focus:border-gold"
+                >
+                  {!(
+                    returnOrderTarget.paymentMethod === (1 as any) ||
+                    String(returnOrderTarget.paymentMethod).toLowerCase().includes('cash')
+                  ) && <option value="RazorpayOriginalSource">Original Razorpay Payment Source (Card / UPI)</option>}
+                  <option value="UpiTransfer">Instant UPI Transfer</option>
+                  <option value="BankTransfer">Bank NEFT / IMPS Transfer</option>
+                  <option value="StoreCredit">NEXUS Concierge Store Credit</option>
+                </select>
+              </div>
+
+              {returnForm.refundMethodPreference !== 'RazorpayOriginalSource' &&
+                returnForm.refundMethodPreference !== 'StoreCredit' && (
+                  <div>
+                    <label className="font-semibold text-beige block mb-1">
+                      {returnForm.refundMethodPreference === 'UpiTransfer'
+                        ? 'Your UPI ID (for Refund Transfer)'
+                        : 'Bank Account / IFSC Details'}
+                    </label>
+                    <input
+                      type="text"
+                      required={
+                        returnOrderTarget.paymentMethod === (1 as any) ||
+                        String(returnOrderTarget.paymentMethod).toLowerCase().includes('cash')
+                      }
+                      value={returnForm.refundAccountDetails}
+                      onChange={(e) => setReturnForm({ ...returnForm, refundAccountDetails: e.target.value })}
+                      placeholder={
+                        returnForm.refundMethodPreference === 'UpiTransfer'
+                          ? 'e.g. yourname@okicici'
+                          : 'A/C No, IFSC & Account Holder Name'
+                      }
+                      className="w-full bg-surface-2 border border-border rounded-xl px-3 py-2.5 text-beige font-mono focus:outline-none focus:border-gold"
+                    />
+                  </div>
+                )}
+
+              <div>
+                <label className="font-semibold text-beige block mb-1">Additional Pickup / Condition Notes (Optional)</label>
+                <textarea
+                  rows={3}
+                  value={returnForm.notes}
+                  onChange={(e) => setReturnForm({ ...returnForm, notes: e.target.value })}
+                  placeholder="Share condition details or preferred doorstep pickup slot..."
+                  className="w-full bg-surface-2 border border-border rounded-xl px-3 py-2 text-beige focus:outline-none focus:border-gold resize-none"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-border">
+              <Button type="button" variant="outline" size="sm" onClick={() => setReturnOrderTarget(null)}>
+                Cancel
+              </Button>
+              <Button type="submit" variant="primary" size="sm" isLoading={submittingReturn}>
+                Submit 7-Day Return Request
+              </Button>
+            </div>
+          </form>
         </div>
       )}
     </div>

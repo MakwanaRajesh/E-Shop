@@ -103,9 +103,12 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(o => o.Discount).HasPrecision(18, 2);
             e.Property(o => o.Tax).HasPrecision(18, 2);
             e.Property(o => o.TotalAmount).HasPrecision(18, 2);
+            e.Property(o => o.RefundAmount).HasPrecision(18, 2);
             e.Property(o => o.Status).HasConversion<string>();
             e.Property(o => o.PaymentStatus).HasConversion<string>();
             e.Property(o => o.PaymentMethod).HasConversion<string>();
+            e.Property(o => o.ReturnStatus).HasConversion<string>().HasDefaultValue(ReturnStatus.None);
+            e.HasIndex(o => o.ReturnStatus);
             e.HasOne(o => o.User)
              .WithMany(u => u.Orders)
              .HasForeignKey(o => o.UserId)

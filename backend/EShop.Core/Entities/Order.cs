@@ -33,9 +33,32 @@ public class Order : BaseEntity
     public string ShippingCountry { get; set; } = "India";
 
     public string? Notes { get; set; }
+    public string? CourierName { get; set; }
+    public DateTime? ConfirmedAt { get; set; }
+    public DateTime? ProcessingAt { get; set; }
     public DateTime? PaidAt { get; set; }
     public DateTime? ShippedAt { get; set; }
+    public DateTime? OutForDeliveryAt { get; set; }
     public DateTime? DeliveredAt { get; set; }
+    public DateTime? CancelledAt { get; set; }
+    public string? CancellationReason { get; set; }
+
+    // Return & Refund Workflow (7-Day Concierge Window)
+    public ReturnStatus ReturnStatus { get; set; } = ReturnStatus.None;
+    public string? ReturnReason { get; set; }
+    public string? ReturnCustomerNotes { get; set; }
+    public string? ReturnAdminNotes { get; set; }
+    public string? ReturnPickupTracking { get; set; }
+    public DateTime? ReturnRequestedAt { get; set; }
+    public DateTime? ReturnApprovedAt { get; set; }
+    public DateTime? ReturnPickedUpAt { get; set; }
+    public DateTime? ReturnReceivedAt { get; set; }
+    public bool ReturnInventoryRestocked { get; set; }
+    public decimal? RefundAmount { get; set; }
+    public string? RefundMethod { get; set; }
+    public string? CustomerRefundAccount { get; set; }
+    public string? RefundReference { get; set; }
+    public DateTime? RefundedAt { get; set; }
 
     // Navigation
     public User User { get; set; } = null!;

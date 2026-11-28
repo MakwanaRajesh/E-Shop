@@ -72,8 +72,8 @@ export function StatusBadge({
       else if (norm === 'active') displayLabel = 'Active'
     }
   }
-  // 2. Cancelled / Failed / Out of Stock / Inactive -> Rich Velvet Ruby Red
-  else if (['cancelled', 'failed', 'outofstock', 'inactive'].includes(norm)) {
+  // 2. Cancelled / Failed / Out of Stock / Inactive / Rejected -> Rich Velvet Ruby Red
+  else if (['cancelled', 'failed', 'outofstock', 'inactive', 'rejected'].includes(norm)) {
     badgeStyle = 'bg-rose-50 text-rose-700 border-rose-200 shadow-sm hover:border-rose-400'
     dotStyle = 'bg-rose-500'
     IconComponent = XCircle
@@ -81,25 +81,28 @@ export function StatusBadge({
       if (norm === 'outofstock') displayLabel = 'Out of Stock'
       else if (norm === 'cancelled') displayLabel = 'Cancelled'
       else if (norm === 'failed') displayLabel = 'Payment Failed'
+      else if (norm === 'rejected') displayLabel = 'Return Declined'
       else if (norm === 'inactive') displayLabel = 'Inactive'
     }
   }
-  // 3. Shipped / Out for Delivery / In Transit -> Sapphire Azure Blue
-  else if (['shipped', 'outfordelivery', 'dispatched', 'intransit'].includes(norm)) {
+  // 3. Shipped / Out for Delivery / In Transit / Picked Up -> Sapphire Azure Blue
+  else if (['shipped', 'outfordelivery', 'dispatched', 'intransit', 'pickedup', 'approved'].includes(norm)) {
     badgeStyle = 'bg-sky-50 text-sky-700 border-sky-200 shadow-sm hover:border-sky-400'
     dotStyle = 'bg-sky-500 animate-pulse'
     IconComponent = Truck
     if (!label) {
       if (norm.includes('outfordelivery')) displayLabel = 'Out for Delivery'
+      else if (norm === 'pickedup') displayLabel = 'Picked Up'
+      else if (norm === 'approved') displayLabel = 'Pickup Approved'
       else displayLabel = 'Dispatched'
     }
   }
-  // 4. Processing / Preparing -> Royal Amethyst Purple
-  else if (['processing', 'inproduction', 'preparing'].includes(norm)) {
+  // 4. Processing / Preparing / Received QC -> Royal Amethyst Purple
+  else if (['processing', 'inproduction', 'preparing', 'received'].includes(norm)) {
     badgeStyle = 'bg-purple-50 text-purple-700 border-purple-200 shadow-sm hover:border-purple-400'
     dotStyle = 'bg-purple-500 animate-ping'
     IconComponent = Sparkles
-    if (!label) displayLabel = 'Processing'
+    if (!label) displayLabel = norm === 'received' ? 'QC Passed' : 'Processing'
   }
   // 5. Confirmed -> Imperial Gold
   else if (['confirmed'].includes(norm)) {
@@ -108,23 +111,29 @@ export function StatusBadge({
     IconComponent = ShieldCheck
     if (!label) displayLabel = 'Confirmed'
   }
-  // 6. Pending / Payment Pending / Low Stock -> Radiant Topaz Amber
-  else if (['pending', 'paymentpending', 'lowstock', 'awaitingpayment'].includes(norm)) {
+  // 6. Pending / Payment Pending / Low Stock / Return Requested -> Radiant Topaz Amber
+  else if (['pending', 'paymentpending', 'lowstock', 'awaitingpayment', 'requested', 'refundinitiated'].includes(norm)) {
     badgeStyle = 'bg-amber-50 text-amber-700 border-amber-200 shadow-sm hover:border-amber-400'
     dotStyle = 'bg-amber-500 animate-pulse'
     IconComponent = norm === 'lowstock' ? AlertTriangle : Clock
     if (!label) {
       if (norm === 'lowstock') displayLabel = 'Low Stock'
+      else if (norm === 'requested') displayLabel = 'Return Requested'
+      else if (norm === 'refundinitiated') displayLabel = 'Refund Initiated'
       else if (norm.includes('payment')) displayLabel = 'Payment Pending'
       else displayLabel = 'Pending'
     }
   }
-  // 7. Refunded -> Plum Slate
-  else if (['refunded', 'returned'].includes(norm)) {
-    badgeStyle = 'bg-slate-100 text-slate-700 border-slate-300 shadow-sm'
-    dotStyle = 'bg-slate-500'
+  // 7. Refunded / Partially Refunded / Refund Completed -> Plum Slate
+  else if (['refunded', 'returned', 'refundcompleted', 'partiallyrefunded'].includes(norm)) {
+    badgeStyle = 'bg-emerald-50 text-emerald-800 border-emerald-200 shadow-sm'
+    dotStyle = 'bg-emerald-600'
     IconComponent = RotateCcw
-    if (!label) displayLabel = 'Refunded'
+    if (!label) {
+      if (norm === 'partiallyrefunded') displayLabel = 'Partially Refunded'
+      else if (norm === 'refundcompleted') displayLabel = 'Refund Settled'
+      else displayLabel = 'Refunded'
+    }
   }
 
   const sizeClasses = {

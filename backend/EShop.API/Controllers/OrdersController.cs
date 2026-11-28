@@ -38,6 +38,7 @@ public class OrdersController(
     private const decimal FreeDeliveryThreshold = 999m;
     private const decimal StandardDeliveryFee = 99m;
     private const decimal PlatformFeeAmount = 9m;
+    private const int     ReturnWindowDays = 7;
 
     // ── GET /api/orders/pricing-preview ───────────────────────────────────────
     [AllowAnonymous]
@@ -340,6 +341,7 @@ public class OrdersController(
                 Status               = isCod ? OrderStatus.Confirmed : OrderStatus.PaymentPending,
                 PaymentStatus        = PaymentStatus.Pending, // Online orders stay Pending until verified via HMAC
                 PaymentMethod        = req.PaymentMethod,
+                ConfirmedAt          = isCod ? DateTime.UtcNow : null,
                 SubTotal             = subTotal,
                 Discount             = discount,
                 ShippingCost         = shippingCost,
@@ -374,7 +376,9 @@ public class OrdersController(
 
     // ── POST /api/orders/{id}/cancel ──────────────────────────────────────────
     [HttpPost("{id:guid}/cancel")]
-    public async Task<IActionResult> CancelOrder(Guid id)
+    public async Task<IActionResult> CancelOrder(
+        Guid id,
+        [FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] CancelOrderRequest? req = null)
     {
         var userId = User.GetUserId();
         if (userId == Guid.Empty) return Unauthorized();
@@ -383,11 +387,28 @@ public class OrdersController(
             .FirstOrDefaultAsync(o => o.Id == id && o.UserId == userId);
         if (order is null) return NotFound(new { message = "Order not found." });
 
-        if (order.Status != OrderStatus.Pending && order.Status != OrderStatus.Confirmed && order.Status != OrderStatus.PaymentPending)
-            return BadRequest(new { message = "Orders that have already been dispatched or delivered cannot be cancelled online. Please contact Customer Care." });
+        if (order.Status != OrderStatus.Pending &&
+            order.Status != OrderStatus.Confirmed &&
+            order.Status != OrderStatus.Processing &&
+            order.Status != OrderStatus.PaymentPending)
+            return BadRequest(new { message = "Orders that have already been dispatched or delivered cannot be cancelled online. Please request a 7-day doorstep return instead." });
 
-        order.Status = OrderStatus.Cancelled;
-        order.UpdatedAt = DateTime.UtcNow;
+        order.Status             = OrderStatus.Cancelled;
+        order.CancelledAt        = DateTime.UtcNow;
+        order.CancellationReason = string.IsNullOrWhiteSpace(req?.Reason)
+            ? "Cancelled by customer prior to dispatch"
+            : req!.Reason!.Trim();
+        order.UpdatedAt          = DateTime.UtcNow;
+
+        if (order.PaymentStatus == PaymentStatus.Completed)
+        {
+            order.PaymentStatus     = PaymentStatus.RefundInitiated;
+            order.ReturnStatus      = ReturnStatus.RefundInitiated;
+            order.RefundAmount      = order.TotalAmount;
+            order.RefundMethod      = order.PaymentMethod == PaymentMethod.Razorpay ? "RazorpayOriginalSource" : "UpiTransfer";
+            order.ReturnRequestedAt = DateTime.UtcNow;
+            order.ReturnReason      = "Prepaid order cancelled before dispatch";
+        }
 
         foreach (var item in order.Items)
         {
@@ -422,7 +443,85 @@ public class OrdersController(
 
         _catalogCache.InvalidateProducts();
 
-        return Ok(new { message = "Order cancelled successfully.", status = "Cancelled" });
+        return Ok(new
+        {
+            message       = order.PaymentStatus == PaymentStatus.RefundInitiated
+                ? "Order cancelled and prepaid refund initiated for concierge settlement."
+                : "Order cancelled successfully.",
+            status        = order.Status.ToString(),
+            paymentStatus = order.PaymentStatus.ToString(),
+            returnStatus  = order.ReturnStatus.ToString()
+        });
+    }
+
+    // ── POST /api/orders/{id}/return ──────────────────────────────────────────
+    [HttpPost("{id:guid}/return")]
+    public async Task<IActionResult> RequestReturn(Guid id, [FromBody] RequestReturnDto req)
+    {
+        var userId = User.GetUserId();
+        if (userId == Guid.Empty) return Unauthorized();
+
+        var order = await _db.Orders
+            .Include(o => o.Items)
+                .ThenInclude(i => i.Product)
+            .FirstOrDefaultAsync(o => o.Id == id && o.UserId == userId);
+
+        if (order is null) return NotFound(new { message = "Order not found." });
+
+        if (order.Status != OrderStatus.Delivered)
+            return BadRequest(new { message = "Returns can only be requested after an order is delivered." });
+
+        if (order.ReturnStatus != ReturnStatus.None)
+            return BadRequest(new { message = $"A return workflow is already in status '{order.ReturnStatus}' for this order." });
+
+        var deliveredAnchor = order.DeliveredAt ?? order.UpdatedAt;
+        if (deliveredAnchor.AddDays(ReturnWindowDays) < DateTime.UtcNow)
+            return BadRequest(new { message = $"Our {ReturnWindowDays}-day return window for this order closed on {deliveredAnchor.AddDays(ReturnWindowDays):dd MMM yyyy}." });
+
+        var reason = (req.Reason ?? string.Empty).Trim();
+        if (reason.Length < 3 || reason.Length > 180)
+            return BadRequest(new { message = "Please select or provide a clear reason for returning your order." });
+
+        var preferredMethod = (req.RefundMethodPreference ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(preferredMethod))
+        {
+            preferredMethod = order.PaymentMethod == PaymentMethod.Razorpay
+                ? "RazorpayOriginalSource"
+                : "UpiTransfer";
+        }
+
+        var normalizedMethod = preferredMethod switch
+        {
+            "OriginalPaymentMethod" or "RazorpayOriginalSource" => order.PaymentMethod == PaymentMethod.Razorpay ? "RazorpayOriginalSource" : "UpiTransfer",
+            "UpiTransfer"                                       => "UpiTransfer",
+            "BankTransfer"                                      => "BankTransfer",
+            "StoreCredit"                                       => "StoreCredit",
+            _                                                   => order.PaymentMethod == PaymentMethod.Razorpay ? "RazorpayOriginalSource" : "UpiTransfer"
+        };
+
+        var payoutAccount = string.IsNullOrWhiteSpace(req.RefundAccountDetails) ? null : req.RefundAccountDetails.Trim();
+        if (order.PaymentMethod == PaymentMethod.CashOnDelivery &&
+            normalizedMethod is "UpiTransfer" or "BankTransfer" &&
+            string.IsNullOrWhiteSpace(payoutAccount))
+        {
+            return BadRequest(new { message = "For Cash on Delivery returns, please provide your UPI ID or bank account details so we can transfer your refund." });
+        }
+
+        if (payoutAccount is { Length: > 200 })
+            payoutAccount = payoutAccount[..200];
+
+        order.ReturnStatus          = ReturnStatus.Requested;
+        order.ReturnReason          = reason;
+        order.ReturnCustomerNotes   = string.IsNullOrWhiteSpace(req.Notes) ? null : req.Notes.Trim()[..Math.Min(1000, req.Notes.Trim().Length)];
+        order.ReturnRequestedAt     = DateTime.UtcNow;
+        order.RefundAmount          = order.TotalAmount;
+        order.RefundMethod          = normalizedMethod;
+        order.CustomerRefundAccount = payoutAccount;
+
+        _db.Orders.Update(order);
+        await _uow.SaveChangesAsync();
+
+        return Ok(MapOrderDto(order));
     }
 
     // ── GET /api/orders ───────────────────────────────────────────────────────
@@ -592,6 +691,7 @@ public class OrdersController(
         order.PaymentId     = req.RazorpayPaymentId;
         order.PaymentStatus = PaymentStatus.Completed;
         order.Status        = OrderStatus.Confirmed;
+        order.ConfirmedAt   ??= DateTime.UtcNow;
         order.PaidAt        = DateTime.UtcNow;
         _db.Orders.Update(order);
         await _uow.SaveChangesAsync();
@@ -610,31 +710,31 @@ public class OrdersController(
     }
 
     private static OrderDto MapOrderDto(Order o) => new(
-        Id:                   o.Id,
-        OrderNumber:          o.OrderNumber,
-        Status:               o.Status,
-        PaymentStatus:        o.PaymentStatus,
-        PaymentMethod:        o.PaymentMethod,
-        SubTotal:             o.SubTotal,
-        ShippingCost:         o.ShippingCost,
-        PlatformFee:          o.PlatformFee,
-        Discount:             o.Discount,
-        Tax:                  o.Tax,
-        TotalAmount:          o.TotalAmount,
-        CouponCode:           o.CouponCode,
-        TrackingNumber:       o.TrackingNumber,
-        ShippingName:         o.ShippingName,
-        ShippingPhone:        o.ShippingPhone,
-        ShippingAddressLine1: o.ShippingAddressLine1,
-        ShippingAddressLine2: o.ShippingAddressLine2,
-        ShippingCity:         o.ShippingCity,
-        ShippingState:        o.ShippingState,
-        ShippingPinCode:      o.ShippingPinCode,
-        CreatedAt:            o.CreatedAt,
-        PaidAt:               o.PaidAt,
-        ShippedAt:            o.ShippedAt,
-        DeliveredAt:          o.DeliveredAt,
-        Items:                o.Items.Select(i => new OrderItemDto(
+        Id:                      o.Id,
+        OrderNumber:             o.OrderNumber,
+        Status:                  o.Status,
+        PaymentStatus:           o.PaymentStatus,
+        PaymentMethod:           o.PaymentMethod,
+        SubTotal:                o.SubTotal,
+        ShippingCost:            o.ShippingCost,
+        PlatformFee:             o.PlatformFee,
+        Discount:                o.Discount,
+        Tax:                     o.Tax,
+        TotalAmount:             o.TotalAmount,
+        CouponCode:              o.CouponCode,
+        TrackingNumber:          o.TrackingNumber,
+        ShippingName:            o.ShippingName,
+        ShippingPhone:           o.ShippingPhone,
+        ShippingAddressLine1:    o.ShippingAddressLine1,
+        ShippingAddressLine2:    o.ShippingAddressLine2,
+        ShippingCity:            o.ShippingCity,
+        ShippingState:           o.ShippingState,
+        ShippingPinCode:         o.ShippingPinCode,
+        CreatedAt:               o.CreatedAt,
+        PaidAt:                  o.PaidAt,
+        ShippedAt:               o.ShippedAt,
+        DeliveredAt:             o.DeliveredAt,
+        Items:                   o.Items.Select(i => new OrderItemDto(
             Id:              i.Id,
             ProductId:       i.ProductId,
             ProductName:     i.ProductName,
@@ -644,6 +744,27 @@ public class OrdersController(
             UnitPrice:       i.UnitPrice,
             TotalPrice:      i.TotalPrice,
             ProductSlug:     i.Product?.Slug
-        )).ToList()
+        )).ToList(),
+        CourierName:             o.CourierName,
+        ConfirmedAt:             o.ConfirmedAt,
+        ProcessingAt:            o.ProcessingAt,
+        OutForDeliveryAt:        o.OutForDeliveryAt,
+        CancelledAt:             o.CancelledAt,
+        CancellationReason:      o.CancellationReason,
+        ReturnStatus:            o.ReturnStatus,
+        ReturnReason:            o.ReturnReason,
+        ReturnCustomerNotes:     o.ReturnCustomerNotes,
+        ReturnAdminNotes:        o.ReturnAdminNotes,
+        ReturnPickupTracking:    o.ReturnPickupTracking,
+        ReturnRequestedAt:       o.ReturnRequestedAt,
+        ReturnApprovedAt:        o.ReturnApprovedAt,
+        ReturnPickedUpAt:        o.ReturnPickedUpAt,
+        ReturnReceivedAt:        o.ReturnReceivedAt,
+        ReturnInventoryRestocked: o.ReturnInventoryRestocked,
+        RefundAmount:            o.RefundAmount,
+        RefundMethod:            o.RefundMethod,
+        CustomerRefundAccount:   o.CustomerRefundAccount,
+        RefundReference:         o.RefundReference,
+        RefundedAt:              o.RefundedAt
     );
 }
