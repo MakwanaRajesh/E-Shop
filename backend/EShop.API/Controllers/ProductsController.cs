@@ -322,7 +322,13 @@ public class ProductsController(AppDbContext db, IUnitOfWork uow, CatalogCacheSe
                         .FirstOrDefault(),
                 p.Category.Name,
                 p.Reviews.Average(r => (double?)r.Rating) ?? 0.0,
-                p.Reviews.Count()))
+                p.Reviews.Count(),
+                p.Images
+                    .OrderByDescending(i => i.IsPrimary)
+                    .ThenBy(i => i.SortOrder)
+                    .Select(i => i.Url)
+                    .Take(5)
+                    .ToList()))
             .ToListAsync();
 
         int totalCount;
@@ -492,7 +498,13 @@ public class ProductsController(AppDbContext db, IUnitOfWork uow, CatalogCacheSe
                         .FirstOrDefault(),
                 p.Category.Name,
                 p.Reviews.Average(r => (double?)r.Rating) ?? 0.0,
-                p.Reviews.Count()))
+                p.Reviews.Count(),
+                p.Images
+                    .OrderByDescending(i => i.IsPrimary)
+                    .ThenBy(i => i.SortOrder)
+                    .Select(i => i.Url)
+                    .Take(5)
+                    .ToList()))
             .ToListAsync();
 
         return rows.Select(MapRowToListResponse).ToList();
@@ -839,7 +851,8 @@ public class ProductsController(AppDbContext db, IUnitOfWork uow, CatalogCacheSe
         string? PrimaryImageUrl,
         string CategoryName,
         double AverageRating,
-        int ReviewCount);
+        int ReviewCount,
+        List<string> ImageUrls);
 
     private static ProductListResponse MapRowToListResponse(ProductListRow r) => new(
         Id:               r.Id,
@@ -853,7 +866,8 @@ public class ProductsController(AppDbContext db, IUnitOfWork uow, CatalogCacheSe
         PrimaryImageUrl:  r.PrimaryImageUrl,
         CategoryName:     r.CategoryName,
         AverageRating:    Math.Round(r.AverageRating, 1),
-        ReviewCount:      r.ReviewCount
+        ReviewCount:      r.ReviewCount,
+        ImageUrls:        r.ImageUrls
     );
 }
 

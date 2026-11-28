@@ -237,7 +237,37 @@ export default function ProductDetailPage({ params }: Props) {
   const [fallbackProducts, setFallbackProducts] = React.useState<ProductListItem[]>([])
   const [reloadNonce, setReloadNonce] = React.useState(0)
   const [selectedImageIdx, setSelectedImageIdx] = React.useState(0)
+  const galleryRef = React.useRef<HTMLDivElement | null>(null)
   const [selectedVariantId, setSelectedVariantId] = React.useState<string | undefined>()
+
+  React.useEffect(() => {
+    setSelectedImageIdx(0)
+    if (galleryRef.current) {
+      galleryRef.current.scrollLeft = 0
+    }
+  }, [slug])
+
+  const scrollToImage = React.useCallback(
+    (targetIdx: number) => {
+      if (!product || product.images.length === 0) return
+      const wrapped = ((targetIdx % product.images.length) + product.images.length) % product.images.length
+      const container = galleryRef.current
+      if (container && container.clientWidth > 0) {
+        container.scrollTo({ left: wrapped * container.clientWidth, behavior: 'smooth' })
+      }
+      setSelectedImageIdx(wrapped)
+    },
+    [product],
+  )
+
+  const handleGalleryScroll = React.useCallback(() => {
+    const container = galleryRef.current
+    if (!container || container.clientWidth === 0 || !product || product.images.length <= 1) return
+    const idx = Math.round(container.scrollLeft / container.clientWidth)
+    if (idx >= 0 && idx < product.images.length) {
+      setSelectedImageIdx(idx)
+    }
+  }, [product])
   const [quantity, setQuantity] = React.useState(1)
   const [isAddingToCart, setIsAddingToCart] = React.useState(false)
   const [pincode, setPincode] = React.useState('')
@@ -745,76 +775,99 @@ export default function ProductDetailPage({ params }: Props) {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 mb-16">
         {/* ── Image Gallery ── */}
         <div className="space-y-4">
-          {/* Primary image */}
+          {/* Smooth horizontal scrollable gallery */}
           <div className="relative aspect-square rounded-2xl overflow-hidden bg-surface-2 border border-border group">
-            {currentImage ? (
-              <Image
-                src={optimizeImageUrl(currentImage.url, 900, 75)}
-                alt={currentImage.altText ?? product.name}
-                fill
-                className="object-cover transition-opacity duration-300"
-                priority
-                sizes="(max-width: 1024px) 100vw, 50vw"
-              />
+            {product.images.length > 0 ? (
+              <div
+                ref={galleryRef}
+                onScroll={handleGalleryScroll}
+                className="flex w-full h-full overflow-x-auto snap-x snap-mandatory scroll-smooth touch-pan-x [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
+              >
+                {product.images.map((img, idx) => (
+                  <div key={img.id ?? idx} className="relative w-full h-full flex-shrink-0 snap-center">
+                    <Image
+                      src={optimizeImageUrl(img.url, 900, 80)}
+                      alt={img.altText ?? `${product.name} - view ${idx + 1}`}
+                      fill
+                      className="object-cover"
+                      priority={idx === 0}
+                      sizes="(max-width: 1024px) 100vw, 50vw"
+                    />
+                  </div>
+                ))}
+              </div>
             ) : (
               <div className="absolute inset-0 flex items-center justify-center text-beige-muted/20">
                 <ShoppingCart className="w-24 h-24" />
               </div>
             )}
             {discount > 0 && (
-              <div className="absolute top-4 left-4 z-10">
+              <div className="absolute top-4 left-4 z-10 pointer-events-none">
                 <span className="bg-[#FEF2F2] text-[#991B1B] border border-[#FECACA] font-mono font-bold text-xs uppercase px-3 py-1 rounded-full shadow-sm tracking-wider">
                   -{discount}% OFF
                 </span>
               </div>
             )}
-            {/* Nav arrows */}
             {product.images.length > 1 && (
               <>
+                <div className="absolute top-4 right-4 z-10 pointer-events-none bg-black/60 text-white text-xs font-mono font-semibold px-2.5 py-1 rounded-full backdrop-blur-sm">
+                  {selectedImageIdx + 1} / {product.images.length}
+                </div>
                 <button
-                  onClick={() =>
-                    setSelectedImageIdx((prev) =>
-                      prev === 0 ? product.images.length - 1 : prev - 1,
-                    )
-                  }
-                  className="absolute left-3 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-background/70 backdrop-blur-sm border border-border flex items-center justify-center text-beige-muted hover:text-beige opacity-0 group-hover:opacity-100 transition-all"
+                  type="button"
+                  onClick={() => scrollToImage(selectedImageIdx - 1)}
+                  aria-label="Previous product image"
+                  className="absolute left-3 top-1/2 -translate-y-1/2 z-10 w-10 h-10 rounded-full bg-white/90 hover:bg-white border border-[#E7E5E4] hover:border-[#C5A059] shadow-md flex items-center justify-center text-[#111111] transition-all"
                 >
-                  <ChevronLeft className="w-4 h-4" />
+                  <ChevronLeft className="w-5 h-5" />
                 </button>
                 <button
-                  onClick={() =>
-                    setSelectedImageIdx((prev) =>
-                      prev === product.images.length - 1 ? 0 : prev + 1,
-                    )
-                  }
-                  className="absolute right-3 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-background/70 backdrop-blur-sm border border-border flex items-center justify-center text-beige-muted hover:text-beige opacity-0 group-hover:opacity-100 transition-all"
+                  type="button"
+                  onClick={() => scrollToImage(selectedImageIdx + 1)}
+                  aria-label="Next product image"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 z-10 w-10 h-10 rounded-full bg-white/90 hover:bg-white border border-[#E7E5E4] hover:border-[#C5A059] shadow-md flex items-center justify-center text-[#111111] transition-all"
                 >
-                  <ChevronRight className="w-4 h-4" />
+                  <ChevronRight className="w-5 h-5" />
                 </button>
+                <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 flex items-center gap-1.5 bg-black/45 backdrop-blur-sm px-2.5 py-1.5 rounded-full">
+                  {product.images.map((_, i) => (
+                    <button
+                      key={`gallery-dot-${i}`}
+                      type="button"
+                      onClick={() => scrollToImage(i)}
+                      aria-label={`View image ${i + 1}`}
+                      className={cn(
+                        'h-2 rounded-full transition-all',
+                        i === selectedImageIdx ? 'w-5 bg-[#C5A059]' : 'w-2 bg-white/75 hover:bg-white',
+                      )}
+                    />
+                  ))}
+                </div>
               </>
             )}
           </div>
 
-          {/* Thumbnails */}
+          {/* Scrollable Thumbnails */}
           {product.images.length > 1 && (
-            <div className="grid grid-cols-4 gap-2">
+            <div className="flex gap-2.5 overflow-x-auto pb-1 snap-x [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
               {product.images.map((img, i) => (
                 <button
-                  key={img.id}
-                  onClick={() => setSelectedImageIdx(i)}
+                  type="button"
+                  key={img.id ?? i}
+                  onClick={() => scrollToImage(i)}
                   className={cn(
-                    'relative aspect-square rounded-lg overflow-hidden border-2 transition-all duration-200',
+                    'relative w-20 h-20 flex-shrink-0 snap-start rounded-xl overflow-hidden border-2 transition-all duration-200',
                     i === selectedImageIdx
-                      ? 'border-gold shadow-md shadow-gold/20'
-                      : 'border-border hover:border-beige-muted/40',
+                      ? 'border-[#C5A059] shadow-md ring-2 ring-[#C5A059]/25'
+                      : 'border-[#E7E5E4] hover:border-[#C5A059]/60 opacity-80 hover:opacity-100',
                   )}
                 >
                   <Image
-                    src={optimizeImageUrl(img.url, 160, 60)}
+                    src={optimizeImageUrl(img.url, 160, 65)}
                     alt={img.altText ?? `Image ${i + 1}`}
                     fill
                     className="object-cover"
-                    sizes="120px"
+                    sizes="80px"
                   />
                 </button>
               ))}
@@ -1030,32 +1083,35 @@ export default function ProductDetailPage({ params }: Props) {
           {/* CTAs */}
           <div className="flex flex-col sm:flex-row gap-3">
             <Button
-              variant="outline"
+              type="button"
+              variant="primary"
               size="lg"
-              className="flex-1 border-gold/50 text-gold hover:bg-gold hover:text-background"
+              className="w-full sm:flex-1 h-12 min-h-[48px] shrink-0 rounded-xl bg-[#111111] hover:bg-[#1C1917] text-white font-semibold shadow-sm"
               onClick={() => handleAddToCart(false)}
               isLoading={isAddingToCart}
               disabled={effectiveStock === 0}
             >
               <ShoppingCart className="w-5 h-5" />
-              {effectiveStock === 0 ? 'Out of Stock' : 'Add to Cart'}
+              <span>{effectiveStock === 0 ? 'Out of Stock' : 'Add to Cart'}</span>
             </Button>
             <Button
+              type="button"
               variant="primary"
               size="lg"
-              className="flex-1 font-semibold"
+              className="w-full sm:flex-1 h-12 min-h-[48px] shrink-0 rounded-xl bg-[#C5A059] hover:bg-[#B08D46] text-[#111111] font-bold shadow-sm"
               onClick={() => handleAddToCart(true)}
               isLoading={isAddingToCart}
               disabled={effectiveStock === 0}
             >
-              Buy Now
+              <span>Buy Now</span>
             </Button>
             <Button
+              type="button"
               variant="secondary"
               size="lg"
               onClick={handleWishlist}
               aria-label={inWishlist ? 'Remove from wishlist' : 'Add to wishlist'}
-              className="px-4"
+              className="w-full sm:w-auto h-12 min-h-[48px] shrink-0 px-4 rounded-xl border border-[#E7E5E4] bg-white hover:border-[#C5A059]"
             >
               <Heart
                 className={cn('w-5 h-5 transition-colors', inWishlist ? 'fill-error text-error' : 'text-beige-muted hover:text-error')}

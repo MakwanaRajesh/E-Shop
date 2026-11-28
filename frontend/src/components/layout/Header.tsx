@@ -908,9 +908,9 @@ export function Header() {
             </div>
             <button
               type="submit"
-              className="ml-2 bg-gold active:scale-95 text-background px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-1 shadow-sm transition-transform flex-shrink-0"
+              className="ml-2 bg-[#111111] hover:bg-[#C5A059] active:scale-95 text-white hover:text-[#111111] px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow-sm transition-colors flex-shrink-0"
             >
-              <Search className="w-3.5 h-3.5 text-background" />
+              <Search className="w-3.5 h-3.5 text-current" />
               <span>Search</span>
             </button>
           </form>

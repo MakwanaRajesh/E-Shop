@@ -113,6 +113,7 @@ export interface ProductListItem {
   compareAtPrice?: number
   primaryImage?: string
   primaryImageUrl?: string
+  imageUrls?: string[]
   categoryId?: string
   categorySlug?: string
   category?: Pick<Category, 'id' | 'name' | 'slug'>

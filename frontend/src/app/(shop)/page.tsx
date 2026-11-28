@@ -320,8 +320,9 @@ export default function HomePage() {
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
           {FEATURED_COLLECTIONS.map((cat) => (
-            <div
+            <Link
               key={cat.slug}
+              href={`/products?category=${cat.slug}`}
               className="group relative overflow-hidden rounded-2xl border border-[#E7E5E4] bg-white h-96 shadow-sm hover:shadow-xl hover:border-[#C5A059] transition-all duration-300 flex flex-col justify-end"
             >
               <div
@@ -349,16 +350,13 @@ export default function HomePage() {
                 </div>
 
                 <div className="pt-2">
-                  <Link
-                    href={`/products?category=${cat.slug}`}
-                    className="inline-flex items-center gap-1 text-[#C5A059] text-xs font-bold uppercase tracking-wider hover:text-[#D4AF37]"
-                  >
+                  <span className="inline-flex items-center gap-1 text-[#C5A059] text-xs font-bold uppercase tracking-wider group-hover:text-[#D4AF37]">
                     <span>Explore Department</span>
                     <ArrowRight className="w-3.5 h-3.5 transition-transform group-hover:translate-x-1" />
-                  </Link>
+                  </span>
                 </div>
               </div>
-            </div>
+            </Link>
           ))}
         </div>
       </section>

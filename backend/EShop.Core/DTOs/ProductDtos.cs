@@ -12,7 +12,8 @@ public record ProductListResponse(
     string? PrimaryImageUrl,
     string CategoryName,
     double AverageRating,
-    int ReviewCount
+    int ReviewCount,
+    List<string>? ImageUrls = null
 );
 
 public record ProductDetailResponse(

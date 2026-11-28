@@ -14,7 +14,7 @@ export default function ShopLayout({
   return (
     <>
       <Header />
-      <main className="min-h-screen pt-28 lg:pt-36">{children}</main>
+      <main className="min-h-screen overflow-x-hidden pt-[118px] sm:pt-[144px] md:pt-[98px] lg:pt-[144px]">{children}</main>
       <Footer />
       <CartDrawer />
       <AuthModal />
